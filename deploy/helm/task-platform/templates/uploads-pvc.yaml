@@ -1,0 +1,19 @@
+{{- if and .Values.uploads.persistence.enabled (not .Values.uploads.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "task-platform.uploads.pvc" . }}
+  labels:
+    {{- include "task-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  accessModes:
+    {{- toYaml .Values.uploads.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.uploads.persistence.size }}
+  {{- with .Values.uploads.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
+

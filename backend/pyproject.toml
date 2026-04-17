@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "task-platform-backend"
+version = "0.1.0"
+description = "FastAPI backend scaffold for the task platform MVP."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "alembic>=1.15.2",
+  "asyncpg>=0.30.0",
+  "bcrypt<5",
+  "email-validator>=2.2.0",
+  "fastapi>=0.115.0",
+  "httpx>=0.28.1",
+  "langchain-ollama>=0.3.0",
+  "langchain-openai>=0.3.0",
+  "langchain-qdrant>=0.2.0",
+  "langchain>=0.3.0",
+  "langgraph>=0.2.0",
+  "passlib[bcrypt]>=1.7.4",
+  "psycopg[binary]>=3.2.0",
+  "pydantic-settings>=2.8.1",
+  "pydantic>=2.10.0",
+  "python-jose[cryptography]>=3.3.0",
+  "python-multipart>=0.0.20",
+  "qdrant-client>=1.14.0",
+  "sqlalchemy[asyncio]>=2.0.39",
+  "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15.0",
+  "pre-commit>=4.2.0",
+  "pytest-asyncio>=0.26.0",
+  "pytest>=8.3.5",
+  "ruff>=0.11.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "requires_db: marks tests that need a live PostgreSQL database",
+]
+
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+exclude = ["alembic/versions/"]
+
+[[tool.mypy.overrides]]
+module = [
+  "passlib.*",
+  "jose.*",
+  "asyncpg.*",
+  "langchain.*",
+  "langgraph.*",
+  "qdrant_client.*",
+  "alembic.*",
+]
+ignore_missing_imports = true

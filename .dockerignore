@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/node_modules
+**/dist
+**/coverage
+**/.env
+*.log
+

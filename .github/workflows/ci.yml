@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app_user
+          POSTGRES_PASSWORD: app_pass
+          POSTGRES_DB: taskplatform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_user -d taskplatform_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://app_user:app_pass@localhost:5432/taskplatform_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Mypy
+        run: mypy .
+      - name: Pytest
+        run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install frontend dependencies
+        run: npm install
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm run test -- --run
+      - name: Build
+        run: npm run build
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Helm lint
+        run: helm lint deploy/helm/task-platform
+      - name: Helm template
+        run: |
+          helm template task-platform deploy/helm/task-platform \
+            --set backend.secretEnv.databaseUrl=postgresql+asyncpg://app_user:app_pass@postgres:5432/taskplatform \
+            --set backend.secretEnv.jwtSecretKey=test-secret-value-123456789 \
+            --set ingress.enabled=true \
+            --set ingress.hosts[0].host=task-platform.example.com
+      - name: Build backend image
+        run: docker build -t task-platform-backend:ci backend
+      - name: Build frontend image
+        run: docker build -t task-platform-frontend:ci frontend

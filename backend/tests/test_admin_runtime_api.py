@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from httpx import AsyncClient
+import pytest
+from sqlalchemy import text
+
+from app.core.database import engine
+from app.services.llm_runtime_service import LLMInvocationResult
+
+pytestmark = pytest.mark.requires_db
+
+
+async def register_and_login(
+    client: AsyncClient,
+    *,
+    email: str,
+    full_name: str,
+) -> str:
+    register_response = await client.post(
+        "/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass1",
+            "full_name": full_name,
+        },
+    )
+    assert register_response.status_code == 201
+
+    login_response = await client.post(
+        "/auth/login",
+        json={"email": email, "password": "StrongPass1"},
+    )
+    assert login_response.status_code == 200
+    return str(login_response.json()["access_token"])
+
+
+@pytest.mark.asyncio
+async def test_admin_provider_list_bootstraps_runtime(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+
+    response = await client.get(
+        "/admin/llm/providers",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) >= 1
+    assert sum(1 for item in payload if item["is_default"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoints_require_admin_role(client: AsyncClient) -> None:
+    await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+    user_token = await register_and_login(
+        client,
+        email="developer@example.com",
+        full_name="Developer User",
+    )
+
+    response = await client.get(
+        "/admin/llm/providers",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_can_create_test_and_override_provider(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+
+    async def fake_test_provider(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text="Connectivity OK",
+            provider_config_id="provider-1",
+            provider_kind="openrouter",
+            model="openai/gpt-4o-mini",
+            latency_ms=42,
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr("app.services.admin_llm_service.LLMRuntimeService.test_provider", fake_test_provider)
+
+    create_response = await client.post(
+        "/admin/llm/providers",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "name": "OpenRouter experiment",
+            "provider_kind": "openrouter",
+            "base_url": "",
+            "model": "openai/gpt-4o-mini",
+            "temperature": 0.1,
+            "enabled": False,
+            "secret": "router-secret",
+        },
+    )
+    assert create_response.status_code == 201
+    provider_id = create_response.json()["id"]
+
+    test_response = await client.post(
+        f"/admin/llm/providers/{provider_id}/test",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert test_response.status_code == 200
+    assert test_response.json()["ok"] is True
+
+    default_response = await client.post(
+        "/admin/llm/runtime/default-provider",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"provider_config_id": provider_id},
+    )
+    assert default_response.status_code == 200
+    assert default_response.json()["is_default"] is True
+
+    override_response = await client.put(
+        "/admin/llm/overrides/qa",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"provider_config_id": provider_id, "enabled": True},
+    )
+    assert override_response.status_code == 200
+    assert override_response.json()["agent_key"] == "qa"
+    assert override_response.json()["provider_config_id"] == provider_id
+
+
+@pytest.mark.asyncio
+async def test_monitoring_endpoints_return_admin_metrics(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+
+    summary_response = await client.get(
+        "/admin/monitoring/summary",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"range": "7d"},
+    )
+    assert summary_response.status_code == 200
+    assert summary_response.json()["all_time"]["users_total"] == 1
+
+    audit_response = await client.get(
+        "/admin/audit",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"range": "7d", "page": 1},
+    )
+    assert audit_response.status_code == 200
+    assert audit_response.json()["total"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_monitoring_llm_endpoint_returns_grouped_usage(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO llm_request_logs (
+                    id,
+                    request_kind,
+                    actor_user_id,
+                    task_id,
+                    project_id,
+                    agent_key,
+                    provider_config_id,
+                    provider_kind,
+                    model,
+                    status,
+                    latency_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    error_message,
+                    created_at
+                ) VALUES (
+                    :id,
+                    :request_kind,
+                    NULL,
+                    NULL,
+                    NULL,
+                    :agent_key,
+                    NULL,
+                    :provider_kind,
+                    :model,
+                    :status,
+                    :latency_ms,
+                    :prompt_tokens,
+                    :completion_tokens,
+                    :total_tokens,
+                    :estimated_cost_usd,
+                    NULL,
+                    :created_at
+                )
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "request_kind": "chat",
+                "agent_key": "qa",
+                "provider_kind": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "status": "success",
+                "latency_ms": 42,
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "estimated_cost_usd": 0.001,
+                "created_at": datetime.now(timezone.utc),
+            },
+        )
+
+    response = await client.get(
+        "/admin/monitoring/llm",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"range": "7d"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requests_total"] == 1
+    assert payload["success_total"] == 1
+    assert payload["error_total"] == 0
+    assert payload["provider_breakdown"] == [{"provider_kind": "openrouter", "request_count": 1}]
+    assert len(payload["daily"]) == 1
+    assert payload["daily"][0]["total"] == 1
+    assert payload["daily"][0]["providers"] == {"openrouter": 1}

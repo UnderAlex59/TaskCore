@@ -1,0 +1,37 @@
+backend:
+  image:
+    repository: ghcr.io/your-org/task-platform-backend
+    tag: "0.1.0"
+  env:
+    allowedOrigins:
+      - https://app.example.com
+    cookieSecure: true
+    cookieDomain: app.example.com
+    qdrantUrl: http://qdrant.qdrant.svc.cluster.local:6333
+  secretEnv:
+    databaseUrl: postgresql+asyncpg://app_user:strong_password@postgres.example.com:5432/taskplatform
+    jwtSecretKey: replace-me-with-a-long-random-secret
+    openaiApiKey: ""
+    qdrantApiKey: ""
+
+frontend:
+  image:
+    repository: ghcr.io/your-org/task-platform-frontend
+    tag: "0.1.0"
+
+uploads:
+  persistence:
+    enabled: true
+    existingClaim: task-platform-uploads
+    accessModes:
+      - ReadWriteMany
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: app.example.com
+  tls:
+    - secretName: task-platform-tls
+      hosts:
+        - app.example.com

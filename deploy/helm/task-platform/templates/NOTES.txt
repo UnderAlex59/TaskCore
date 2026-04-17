@@ -1,0 +1,14 @@
+{{- if .Values.ingress.enabled }}
+Task Platform is exposed through ingress:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+Ingress is disabled.
+Port-forward the frontend service to access the UI:
+  kubectl port-forward svc/{{ include "task-platform.frontend.fullname" . }} 8080:{{ .Values.frontend.service.port }}
+{{- end }}
+
+Backend readiness endpoint:
+  kubectl port-forward svc/{{ include "task-platform.backend.fullname" . }} 8000:{{ .Values.backend.service.port }}
+  curl http://127.0.0.1:8000/readyz

@@ -1,0 +1,145 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #0f172a;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(37, 99, 235, 0.14),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(148, 163, 184, 0.14),
+      transparent 28%
+    ),
+    #f8fafc;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 500;
+  --radius-panel: 12px;
+  --radius-control: 10px;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01" on;
+  }
+}
+
+@layer components {
+  .skip-link {
+    @apply sr-only left-4 top-4 z-[60] rounded-[10px] bg-ink px-4 py-2 text-sm font-semibold text-white focus:not-sr-only focus:fixed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/20;
+  }
+
+  .ui-field {
+    @apply w-full rounded-[10px] border border-black/10 bg-white/90 px-4 py-3 text-base text-ink placeholder:text-slate/50 transition-[border-color,box-shadow,background-color,color] focus-visible:border-ember focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/10 disabled:cursor-not-allowed disabled:bg-black/5 disabled:text-ink/50 sm:text-sm;
+  }
+
+  .ui-button-primary {
+    @apply inline-flex items-center justify-center rounded-[10px] bg-ember px-4 py-2.5 text-sm font-semibold text-white touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-ember/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-secondary {
+    @apply inline-flex items-center justify-center rounded-[10px] border border-black/10 bg-white/90 px-4 py-2.5 text-sm font-semibold text-ink touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ink/10 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-ghost {
+    @apply inline-flex items-center justify-center rounded-[10px] border border-black/10 bg-transparent px-4 py-2.5 text-sm font-semibold text-ink touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ink/10 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-danger {
+    @apply inline-flex items-center justify-center rounded-[10px] border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-red-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .section-eyebrow {
+    @apply text-xs font-bold uppercase tracking-[0.2em] text-ember;
+  }
+
+  .subtle-divider {
+    @apply border-black/10;
+  }
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  color: #0f172a;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(37, 99, 235, 0.08),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(148, 163, 184, 0.14),
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(248, 250, 252, 0.98),
+      rgba(226, 232, 240, 0.84)
+    ),
+    #f8fafc;
+  padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom)
+    var(--safe-area-left);
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100svh;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.08), transparent 18%),
+    linear-gradient(
+      180deg,
+      rgba(248, 250, 252, 0.96),
+      rgba(226, 232, 240, 0.78)
+    );
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-panel);
+  backdrop-filter: blur(14px);
+}
+
+.mesh-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.mesh-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -15% -65% 35%;
+  height: 180px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.18), transparent 68%);
+  pointer-events: none;
+}

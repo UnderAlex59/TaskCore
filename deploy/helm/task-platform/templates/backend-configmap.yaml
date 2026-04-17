@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "task-platform.backend.configmap" . }}
+  labels:
+    {{- include "task-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+data:
+  JWT_ALGORITHM: {{ .Values.backend.env.jwtAlgorithm | quote }}
+  ACCESS_TOKEN_EXPIRE_MINUTES: {{ .Values.backend.env.accessTokenExpireMinutes | quote }}
+  REFRESH_TOKEN_EXPIRE_DAYS: {{ .Values.backend.env.refreshTokenExpireDays | quote }}
+  COOKIE_SECURE: {{ .Values.backend.env.cookieSecure | quote }}
+  COOKIE_SAMESITE: {{ .Values.backend.env.cookieSameSite | quote }}
+  COOKIE_DOMAIN: {{ .Values.backend.env.cookieDomain | quote }}
+  ALLOWED_ORIGINS: {{ .Values.backend.env.allowedOrigins | toJson | quote }}
+  QDRANT_URL: {{ .Values.backend.env.qdrantUrl | quote }}
+  OLLAMA_BASE_URL: {{ .Values.backend.env.ollamaBaseUrl | quote }}
+  LLM_PROVIDER: {{ .Values.backend.env.llmProvider | quote }}
+  LLM_MODEL: {{ .Values.backend.env.llmModel | quote }}
+  EMBEDDING_MODEL: {{ .Values.backend.env.embeddingModel | quote }}
+  UPLOAD_DIR: {{ .Values.backend.env.uploadDir | quote }}
+  DB_POOL_SIZE: {{ .Values.backend.env.dbPoolSize | quote }}
+  DB_MAX_OVERFLOW: {{ .Values.backend.env.dbMaxOverflow | quote }}
+  DB_POOL_TIMEOUT: {{ .Values.backend.env.dbPoolTimeout | quote }}
+  DB_POOL_RECYCLE: {{ .Values.backend.env.dbPoolRecycle | quote }}
+  UVICORN_WORKERS: {{ .Values.backend.env.uvicornWorkers | quote }}
+
