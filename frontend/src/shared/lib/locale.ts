@@ -53,6 +53,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   "admin.llm_provider.default_set": "Изменён провайдер по умолчанию",
   "admin.llm_provider.tested": "Проверено подключение к провайдеру",
   "admin.llm_provider.updated": "Обновлён профиль провайдера",
+  "admin.validation_question.deleted": "Удалён вопрос из очереди валидации",
   "auth.login.success": "Успешный вход",
   "auth.logout": "Выход из системы",
   "auth.refresh.success": "Продление сессии",
@@ -91,6 +92,7 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   task: "задача",
   task_attachment: "вложение задачи",
   user: "пользователь",
+  validation_question: "вопрос валидации",
 };
 
 const RANGE_LABELS: Record<MonitoringRange, string> = {

@@ -24,12 +24,25 @@ from app.schemas.task import (
     ValidationResult,
 )
 from app.services.audit_service import AuditService
+from app.services.chat_realtime import chat_connection_manager, serialize_message
 from app.services.project_service import ProjectService
 from app.services.rag_service import RagService
+from app.services.task_tag_service import TaskTagService
+from app.services.validation_question_service import ValidationQuestionService
 
 
 class TaskService:
-    editable_statuses = {TaskStatus.DRAFT, TaskStatus.NEEDS_REWORK}
+    pre_approval_editable_statuses = {
+        TaskStatus.DRAFT,
+        TaskStatus.NEEDS_REWORK,
+        TaskStatus.AWAITING_APPROVAL,
+    }
+    post_approval_editable_statuses = {
+        TaskStatus.READY_FOR_DEV,
+        TaskStatus.IN_PROGRESS,
+        TaskStatus.DONE,
+    }
+    editable_statuses = pre_approval_editable_statuses | post_approval_editable_statuses
     approval_roles = {UserRole.ADMIN, UserRole.ANALYST}
     team_chat_statuses = {TaskStatus.READY_FOR_DEV, TaskStatus.IN_PROGRESS, TaskStatus.DONE}
 
@@ -113,6 +126,14 @@ class TaskService:
         return user.full_name
 
     @staticmethod
+    def _has_stale_embeddings(task: Task) -> bool:
+        if task.indexed_at is None:
+            return True
+        if task.updated_at is None:
+            return False
+        return task.updated_at > task.indexed_at
+
+    @staticmethod
     def _serialize_task(task: Task, attachments: list[TaskAttachment]) -> TaskRead:
         return TaskRead(
             id=task.id,
@@ -127,6 +148,8 @@ class TaskService:
             tester_id=task.tester_id,
             validation_result=task.validation_result,
             attachments=[TaskAttachmentRead.model_validate(item) for item in attachments],
+            indexed_at=task.indexed_at,
+            embeddings_stale=TaskService._has_stale_embeddings(task),
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
@@ -198,7 +221,7 @@ class TaskService:
             project_id=project_id,
             title=payload.title,
             content=payload.content,
-            tags=payload.tags,
+            tags=await TaskTagService.validate_reference_tags(payload.tags, db),
             created_by=current_user.id,
             analyst_id=current_user.id,
         )
@@ -243,15 +266,41 @@ class TaskService:
         if task.status not in TaskService.editable_statuses:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Задачу можно редактировать только в статусе черновика или доработки",
+                detail="Задачу нельзя редактировать во время автоматической проверки",
             )
 
-        for field_name, value in payload.model_dump(exclude_unset=True).items():
+        updates = payload.model_dump(exclude_unset=True)
+        if not updates:
+            attachments = await TaskService._get_attachments(task.id, db)
+            return TaskService._serialize_task(task, attachments)
+
+        if "tags" in updates:
+            updates["tags"] = await TaskTagService.validate_reference_tags(
+                list(updates["tags"] or []),
+                db,
+            )
+
+        status_before_update = task.status
+        for field_name, value in updates.items():
             setattr(task, field_name, value)
 
-        task.validation_result = None
+        update_timestamp = datetime.now(timezone.utc)
+        task.updated_at = update_timestamp
         attachments = await TaskService._get_attachments(task.id, db)
-        await RagService.index_task_context(task, attachments, validation_result=None)
+        audit_metadata: dict[str, bool | str] = {}
+
+        if status_before_update in TaskService.pre_approval_editable_statuses:
+            task.validation_result = None
+            if status_before_update == TaskStatus.AWAITING_APPROVAL:
+                task.status = TaskStatus.NEEDS_REWORK
+            await ValidationQuestionService.clear_for_task(task.id, db)
+            await RagService.index_task_context(task, attachments, validation_result=None)
+            task.indexed_at = update_timestamp
+            audit_metadata["embeddings_reindexed"] = True
+        else:
+            audit_metadata["embeddings_reindexed"] = False
+            audit_metadata["commit_required"] = True
+
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -260,6 +309,52 @@ class TaskService:
             entity_id=task.id,
             project_id=project_id,
             task_id=task.id,
+            metadata=audit_metadata,
+        )
+        await db.commit()
+        await db.refresh(task)
+        return TaskService._serialize_task(task, attachments)
+
+    @staticmethod
+    async def commit_task_changes(
+        project_id: str,
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        await ProjectService.ensure_project_access(project_id, current_user, db)
+        if current_user.role not in TaskService.approval_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только аналитики и администраторы могут коммитить изменения задачи",
+            )
+
+        task = await TaskService.get_task_or_404(project_id, task_id, db)
+        if task.status not in TaskService.editable_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Нельзя коммитить изменения задачи во время автоматической проверки",
+            )
+
+        attachments = await TaskService._get_attachments(task.id, db)
+        stale_before_commit = TaskService._has_stale_embeddings(task)
+        await RagService.index_task_context(
+            task,
+            attachments,
+            validation_result=task.validation_result,
+        )
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
+        task.indexed_at = current_timestamp
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.changes_committed",
+            entity_type="task",
+            entity_id=task.id,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={"embeddings_were_stale": stale_before_commit},
         )
         await db.commit()
         await db.refresh(task)
@@ -292,9 +387,12 @@ class TaskService:
         await TaskService._get_project_member_or_422(task.project_id, payload.developer_id, UserRole.DEVELOPER, db)
         await TaskService._get_project_member_or_422(task.project_id, payload.tester_id, UserRole.TESTER, db)
 
+        current_timestamp = datetime.now(timezone.utc)
         task.developer_id = payload.developer_id
         task.tester_id = payload.tester_id
         task.status = TaskStatus.READY_FOR_DEV
+        task.updated_at = current_timestamp
+        task.indexed_at = current_timestamp
 
         developer_name = await TaskService._get_user_name(payload.developer_id, db)
         tester_name = await TaskService._get_user_name(payload.tester_id, db)
@@ -334,6 +432,33 @@ class TaskService:
         attachments = await TaskService._get_attachments(task.id, db)
         await db.commit()
         await db.refresh(task)
+        approval_message = (
+            (
+                await db.execute(
+                    select(Message)
+                    .where(
+                        Message.task_id == task.id,
+                        Message.author_id.is_(None),
+                        Message.agent_name == "ManagerAgent",
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if approval_message is not None:
+            await chat_connection_manager.broadcast_messages(
+                task.id,
+                [
+                    serialize_message(
+                        approval_message,
+                        author_name=None,
+                        author_avatar_url=None,
+                    )
+                ],
+            )
         return TaskService._serialize_task(task, attachments)
 
     @staticmethod
@@ -396,6 +521,9 @@ class TaskService:
             attachments,
             validation_result=task.validation_result,
         )
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
+        task.indexed_at = current_timestamp
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -418,7 +546,7 @@ class TaskService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут запускать проверку задач",
             )
-        if task.status not in TaskService.editable_statuses:
+        if task.status not in {TaskStatus.DRAFT, TaskStatus.NEEDS_REWORK}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Перед проверкой задача должна быть в статусе черновика или доработки",
@@ -427,6 +555,7 @@ class TaskService:
         task.status = TaskStatus.VALIDATING
         await db.flush()
 
+        project = await ProjectService.get_project_or_404(task.project_id, db)
         rules = await ProjectService.get_active_rules(task.project_id, task.tags, db)
         attachments = await TaskService._get_attachments(task.id, db)
         related_tasks = await RagService.search_related_tasks(
@@ -451,6 +580,7 @@ class TaskService:
             ],
             related_tasks=related_tasks,
             attachment_names=[item.filename for item in attachments],
+            validation_node_settings=project.validation_node_settings,
         )
         validation_result = ValidationResult(
             verdict=str(validation_state["verdict"]),
@@ -468,12 +598,16 @@ class TaskService:
             if validation_result.verdict == "approved"
             else TaskStatus.NEEDS_REWORK
         )
+        await ValidationQuestionService.sync_for_task(task, db)
 
         chunk_ids = await RagService.index_task_context(
             task,
             attachments,
             validation_result=task.validation_result,
         )
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
+        task.indexed_at = current_timestamp
         db.add(
             Message(
                 task_id=task.id,
@@ -502,6 +636,33 @@ class TaskService:
             metadata={"verdict": validation_result.verdict},
         )
         await db.commit()
+        validation_message = (
+            (
+                await db.execute(
+                    select(Message)
+                    .where(
+                        Message.task_id == task.id,
+                        Message.author_id.is_(None),
+                        Message.agent_name == "QAAgent",
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if validation_message is not None:
+            await chat_connection_manager.broadcast_messages(
+                task.id,
+                [
+                    serialize_message(
+                        validation_message,
+                        author_name=None,
+                        author_avatar_url=None,
+                    )
+                ],
+            )
         return validation_result
 
     @staticmethod

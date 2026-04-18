@@ -5,7 +5,7 @@ import base64
 import hashlib
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
 from typing import Any
@@ -103,38 +103,44 @@ class LLMRuntimeService:
 
     @classmethod
     async def ensure_bootstrap(cls) -> None:
-        async with cls._bootstrap_lock:
-            async with AsyncSessionLocal() as db:
-                provider_count = await db.scalar(select(func.count()).select_from(LLMProviderConfig))
+        async with cls._bootstrap_lock, AsyncSessionLocal() as db:
+            provider_count = await db.scalar(
+                select(func.count()).select_from(LLMProviderConfig)
+            )
+            runtime_settings = await db.get(LLMRuntimeSettings, 1)
+            if provider_count and runtime_settings is not None:
+                return
+
+            if not provider_count:
+                await cls._bootstrap_provider_data(db)
+                provider_count = await db.scalar(
+                    select(func.count()).select_from(LLMProviderConfig)
+                )
                 runtime_settings = await db.get(LLMRuntimeSettings, 1)
-                if provider_count and runtime_settings is not None:
-                    return
 
-                if not provider_count:
-                    await cls._bootstrap_provider_data(db)
-                    provider_count = await db.scalar(select(func.count()).select_from(LLMProviderConfig))
-                    runtime_settings = await db.get(LLMRuntimeSettings, 1)
-
-                if runtime_settings is None:
-                    default_provider_id = await db.scalar(
-                        select(LLMProviderConfig.id)
-                        .where(LLMProviderConfig.enabled.is_(True))
-                        .order_by(LLMProviderConfig.created_at.asc())
-                        .limit(1)
+            if runtime_settings is None:
+                default_provider_id = await db.scalar(
+                    select(LLMProviderConfig.id)
+                    .where(LLMProviderConfig.enabled.is_(True))
+                    .order_by(LLMProviderConfig.created_at.asc())
+                    .limit(1)
+                )
+                db.add(
+                    LLMRuntimeSettings(
+                        id=1,
+                        default_provider_config_id=default_provider_id,
+                        prompt_log_mode="metadata_only",
                     )
-                    db.add(
-                        LLMRuntimeSettings(
-                            id=1,
-                            default_provider_config_id=default_provider_id,
-                            prompt_log_mode="metadata_only",
-                        )
-                    )
+                )
 
-                await db.commit()
+            await db.commit()
 
     @classmethod
     async def _bootstrap_provider_data(cls, db: AsyncSession) -> None:
-        from app.agents.chat_agents.registry import get_chat_agents, reset_chat_agent_registry
+        from app.agents.subgraph_registry import (
+            get_agent_subgraphs,
+            reset_agent_subgraph_registry,
+        )
 
         settings = get_settings()
         default_profile = get_default_llm_profile()
@@ -157,17 +163,20 @@ class LLMRuntimeService:
             )
         )
 
-        reset_chat_agent_registry()
+        reset_agent_subgraph_registry()
         default_signature = cls._profile_signature(default_profile)
-        for agent in get_chat_agents():
-            if agent.llm_profile is None:
+        for spec in get_agent_subgraphs():
+            if spec.llm_profile is None:
                 continue
-            effective_profile = resolve_agent_llm_profile(agent.metadata.key, agent.llm_profile)
+            effective_profile = resolve_agent_llm_profile(
+                spec.metadata.key,
+                spec.llm_profile,
+            )
             if cls._profile_signature(effective_profile) == default_signature:
                 continue
             provider = await cls._create_provider_config(
                 db,
-                name=f"Автоматически созданный профиль для агента {agent.metadata.key}",
+                name=f"Автоматически созданный профиль для агента {spec.metadata.key}",
                 provider_kind=effective_profile.provider,
                 base_url=effective_profile.base_url,
                 model=effective_profile.model,
@@ -178,7 +187,7 @@ class LLMRuntimeService:
             )
             db.add(
                 LLMAgentOverride(
-                    agent_key=agent.metadata.key,
+                    agent_key=spec.metadata.key,
                     provider_config_id=provider.id,
                     enabled=True,
                 )
@@ -255,14 +264,22 @@ class LLMRuntimeService:
         )
 
     @classmethod
-    async def resolve_provider(cls, db: AsyncSession, *, agent_key: str | None) -> ResolvedLLMProvider:
+    async def resolve_provider(
+        cls,
+        db: AsyncSession,
+        *,
+        agent_key: str | None,
+    ) -> ResolvedLLMProvider:
         await cls.ensure_bootstrap()
 
         selected: LLMProviderConfig | None = None
         if agent_key:
             override_stmt = (
                 select(LLMAgentOverride, LLMProviderConfig)
-                .join(LLMProviderConfig, LLMProviderConfig.id == LLMAgentOverride.provider_config_id)
+                .join(
+                    LLMProviderConfig,
+                    LLMProviderConfig.id == LLMAgentOverride.provider_config_id,
+                )
                 .where(
                     LLMAgentOverride.agent_key == agent_key,
                     LLMAgentOverride.enabled.is_(True),
@@ -275,8 +292,14 @@ class LLMRuntimeService:
 
         if selected is None:
             runtime_settings = await db.get(LLMRuntimeSettings, 1)
-            if runtime_settings is not None and runtime_settings.default_provider_config_id is not None:
-                selected = await db.get(LLMProviderConfig, runtime_settings.default_provider_config_id)
+            if (
+                runtime_settings is not None
+                and runtime_settings.default_provider_config_id is not None
+            ):
+                selected = await db.get(
+                    LLMProviderConfig,
+                    runtime_settings.default_provider_config_id,
+                )
                 if selected is not None and not selected.enabled:
                     selected = None
 
@@ -318,7 +341,7 @@ class LLMRuntimeService:
 
     @classmethod
     async def _get_gigachat_access_token(cls, cache_key: str, authorization_key: str) -> str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(datetime.UTC)
         cached = cls._gigachat_token_cache.get(cache_key)
         if cached is not None and cached[1] > now + timedelta(minutes=2):
             return cached[0]
@@ -499,7 +522,11 @@ class LLMRuntimeService:
             )
 
         response_metadata = getattr(response, "response_metadata", None)
-        token_usage = response_metadata.get("token_usage") if isinstance(response_metadata, dict) else None
+        token_usage = (
+            response_metadata.get("token_usage")
+            if isinstance(response_metadata, dict)
+            else None
+        )
         if isinstance(token_usage, dict):
             prompt_tokens = token_usage.get("prompt_tokens")
             completion_tokens = token_usage.get("completion_tokens")
@@ -526,9 +553,13 @@ class LLMRuntimeService:
 
         cost = Decimal("0")
         if prompt_tokens is not None and config.input_cost_per_1k_tokens is not None:
-            cost += (Decimal(prompt_tokens) / Decimal("1000")) * Decimal(config.input_cost_per_1k_tokens)
+            cost += (
+                Decimal(prompt_tokens) / Decimal("1000")
+            ) * Decimal(config.input_cost_per_1k_tokens)
         if completion_tokens is not None and config.output_cost_per_1k_tokens is not None:
-            cost += (Decimal(completion_tokens) / Decimal("1000")) * Decimal(config.output_cost_per_1k_tokens)
+            cost += (
+                Decimal(completion_tokens) / Decimal("1000")
+            ) * Decimal(config.output_cost_per_1k_tokens)
         return cost
 
     @staticmethod

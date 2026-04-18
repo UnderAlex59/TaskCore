@@ -7,6 +7,7 @@ import MessageList from "@/features/chat/MessageList";
 interface Props {
   actions?: ReactNode;
   className?: string;
+  currentUserId?: string;
   description?: string;
   disabled?: boolean;
   eyebrow?: string;
@@ -20,7 +21,8 @@ interface Props {
 export default function ChatWindow({
   actions,
   className = "",
-  description = "Задавайте вопросы по требованию, предлагайте изменения или вызывайте конкретного агента через @agent.",
+  currentUserId,
+  description = "Задавайте вопросы по требованию, предлагайте изменения или вызывайте конкретного агента через /qaagent, /qa или @agent.",
   disabled = true,
   eyebrow = "Чат задачи",
   inputPlaceholder,
@@ -52,7 +54,7 @@ export default function ChatWindow({
       </div>
 
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-        <MessageList messages={messages} />
+        <MessageList currentUserId={currentUserId} messages={messages} />
       </div>
 
       <div className="mt-4 border-t border-black/8 pt-4">

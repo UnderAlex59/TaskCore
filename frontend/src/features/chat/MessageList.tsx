@@ -4,10 +4,11 @@ import type { MessageRead } from "@/api/chatApi";
 import MessageBubble from "@/features/chat/MessageBubble";
 
 interface Props {
+  currentUserId?: string;
   messages: MessageRead[];
 }
 
-export default function MessageList({ messages }: Props) {
+export default function MessageList({ currentUserId, messages }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const lastMessageId = messages.at(-1)?.id;
 
@@ -44,7 +45,11 @@ export default function MessageList({ messages }: Props) {
       role="log"
     >
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble
+          currentUserId={currentUserId}
+          key={message.id}
+          message={message}
+        />
       ))}
       <div ref={bottomRef} />
     </div>

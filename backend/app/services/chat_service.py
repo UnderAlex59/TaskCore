@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
@@ -8,12 +9,29 @@ from sqlalchemy.orm import aliased
 
 from app.agents.chat_agents.registry import parse_requested_agent
 from app.agents.chat_graph import run_chat_graph
+from app.core.database import AsyncSessionLocal
 from app.models.message import Message, MessageType
+from app.models.task import Task
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageRead
 from app.services.audit_service import AuditService
-from app.services.rag_service import RagService
+from app.services.chat_realtime import chat_connection_manager, serialize_message
 from app.services.task_service import TaskService
+
+
+@dataclass(slots=True)
+class PendingChatResponse:
+    actor_user_id: str
+    message_type: MessageType
+    raw_message_content: str
+    requested_agent: str | None
+    routed_content: str
+    task_content: str
+    task_id: str
+    task_status: str
+    task_title: str
+    user_message_id: str
+    validation_result: dict | None
 
 
 class ChatService:
@@ -35,25 +53,6 @@ class ChatService:
         ):
             return MessageType.QUESTION
         return MessageType.GENERAL
-
-    @staticmethod
-    def _serialize(
-        message: Message,
-        author_name: str | None,
-        author_avatar_url: str | None,
-    ) -> MessageRead:
-        return MessageRead(
-            id=message.id,
-            task_id=message.task_id,
-            author_id=message.author_id,
-            author_name=author_name,
-            author_avatar_url=author_avatar_url,
-            agent_name=message.agent_name,
-            message_type=message.message_type.value,
-            content=message.content,
-            source_ref=message.source_ref,
-            created_at=message.created_at,
-        )
 
     @staticmethod
     async def list_messages(
@@ -79,7 +78,11 @@ class ChatService:
         rows = list((await db.execute(stmt)).all())
         rows.reverse()
         return [
-            ChatService._serialize(message, nickname or full_name, avatar_url)
+            serialize_message(
+                message,
+                author_name=nickname or full_name,
+                author_avatar_url=avatar_url,
+            )
             for message, nickname, full_name, avatar_url in rows
         ]
 
@@ -89,17 +92,18 @@ class ChatService:
         payload: MessageCreate,
         current_user: User,
         db: AsyncSession,
-    ) -> list[MessageRead]:
+    ) -> tuple[list[MessageRead], PendingChatResponse]:
         task = await TaskService.get_task_with_chat_access(task_id, current_user, db)
         requested_agent, routed_content = parse_requested_agent(payload.content)
         message_type = ChatService._detect_message_type(routed_content)
+        stripped_content = payload.content.strip()
 
         user_message = Message(
             task_id=task.id,
             author_id=current_user.id,
             agent_name=None,
             message_type=message_type,
-            content=payload.content.strip(),
+            content=stripped_content,
             source_ref=None,
         )
         db.add(user_message)
@@ -114,83 +118,79 @@ class ChatService:
             task_id=task.id,
             metadata={"message_type": message_type.value},
         )
-
-        messages = [
-            ChatService._serialize(
-                user_message,
-                current_user.nickname or current_user.full_name,
-                current_user.avatar_url,
-            )
-        ]
-        if message_type == MessageType.GENERAL and requested_agent is None:
-            await db.commit()
-            return messages
-
-        related_tasks = await RagService.search_related_tasks(
-            db,
-            project_id=task.project_id,
-            query_text=f"{task.title}\n{routed_content}",
-            exclude_task_id=task.id,
-            limit=3,
-        )
-        related_tasks_for_agents: list[dict[str, object]] = [
-            {key: value for key, value in item.items()} for item in related_tasks
-        ]
-        graph_state = await run_chat_graph(
-            db=db,
-            task_id=task.id,
-            project_id=task.project_id,
-            actor_user_id=current_user.id,
-            task_title=task.title,
-            task_status=task.status.value,
-            task_content=task.content,
-            message_type=message_type.value,
-            message_content=routed_content,
-            validation_result=task.validation_result,
-            related_tasks=related_tasks_for_agents,
-            requested_agent=requested_agent,
-            raw_message_content=payload.content,
-        )
-        agent_message_type = MessageType(
-            str(graph_state.get("message_type", MessageType.AGENT_ANSWER.value))
-        )
-
-        has_proposal = graph_state.get("proposal_text") is not None
-        if has_proposal or agent_message_type == MessageType.AGENT_PROPOSAL:
-            from app.services.proposal_service import ProposalService
-
-            proposal = await ProposalService.create_from_message(
-                task.id,
-                source_message_id=user_message.id,
-                proposed_by=current_user.id,
-                proposal_text=str(graph_state.get("proposal_text", routed_content)),
-                db=db,
-            )
-            AuditService.record(
-                db,
-                actor_user_id=current_user.id,
-                event_type="chat.proposal_requested",
-                entity_type="change_proposal",
-                entity_id=proposal.id,
-                project_id=task.project_id,
-                task_id=task.id,
-                metadata={"source_message_id": user_message.id},
-            )
-            source_ref = dict(graph_state.get("source_ref", {}))
-            source_ref["proposal_id"] = proposal.id
-        else:
-            source_ref = dict(graph_state.get("source_ref", {}))
-
-        agent_message = Message(
-            task_id=task.id,
-            author_id=None,
-            agent_name=str(graph_state.get("agent_name")),
-            message_type=agent_message_type,
-            content=str(graph_state.get("response")),
-            source_ref=source_ref,
-        )
-        db.add(agent_message)
         await db.commit()
-        await db.refresh(agent_message)
-        messages.append(ChatService._serialize(agent_message, None, None))
-        return messages
+
+        return (
+            [
+                serialize_message(
+                    user_message,
+                    author_name=current_user.nickname or current_user.full_name,
+                    author_avatar_url=current_user.avatar_url,
+                )
+            ],
+            PendingChatResponse(
+                actor_user_id=current_user.id,
+                message_type=message_type,
+                raw_message_content=stripped_content,
+                requested_agent=requested_agent,
+                routed_content=routed_content,
+                task_content=task.content,
+                task_id=task.id,
+                task_status=task.status.value,
+                task_title=task.title,
+                user_message_id=user_message.id,
+                validation_result=task.validation_result,
+            ),
+        )
+
+    @staticmethod
+    async def process_pending_response(pending: PendingChatResponse) -> None:
+        async with AsyncSessionLocal() as db:
+            task = await db.get(Task, pending.task_id)
+            if task is None:
+                return
+
+            graph_state = await run_chat_graph(
+                db=db,
+                task_id=pending.task_id,
+                project_id=task.project_id,
+                actor_user_id=pending.actor_user_id,
+                task_title=pending.task_title,
+                task_status=pending.task_status,
+                task_content=pending.task_content,
+                message_type=pending.message_type.value,
+                message_content=pending.routed_content,
+                validation_result=task.validation_result,
+                requested_agent=pending.requested_agent,
+                raw_message_content=pending.raw_message_content,
+                source_message_id=pending.user_message_id,
+            )
+            if not graph_state.get("ai_response_required"):
+                return
+
+            agent_message_type = MessageType(
+                str(graph_state.get("message_type", MessageType.AGENT_ANSWER.value))
+            )
+            source_ref = dict(graph_state.get("source_ref", {}))
+
+            agent_message = Message(
+                task_id=pending.task_id,
+                author_id=None,
+                agent_name=str(graph_state.get("agent_name")),
+                message_type=agent_message_type,
+                content=str(graph_state.get("response")),
+                source_ref=source_ref,
+            )
+            db.add(agent_message)
+            await db.commit()
+            await db.refresh(agent_message)
+            await chat_connection_manager.broadcast_messages(
+                pending.task_id,
+                [
+                    serialize_message(
+                        agent_message,
+                        author_name=None,
+                        author_avatar_url=None,
+                    )
+                ],
+            )

@@ -85,3 +85,46 @@ async def test_project_manager_can_add_member(client: AsyncClient) -> None:
         "email": "developer@example.com",
         "global_role": "DEVELOPER",
     }
+
+
+async def test_admin_can_update_project_validation_nodes(client: AsyncClient) -> None:
+    await register_user(
+        client,
+        email="admin@example.com",
+        full_name="Ada Admin",
+    )
+
+    access_token = await login_user(client, email="admin@example.com")
+    auth_headers = {"Authorization": f"Bearer {access_token}"}
+
+    project_response = await client.post(
+        "/projects",
+        headers=auth_headers,
+        json={"name": "Validation config", "description": "Project settings"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+    assert project_response.json()["validation_node_settings"] == {
+        "core_rules": True,
+        "custom_rules": True,
+        "context_questions": True,
+    }
+
+    update_response = await client.patch(
+        f"/projects/{project_id}",
+        headers=auth_headers,
+        json={
+            "validation_node_settings": {
+                "core_rules": False,
+                "custom_rules": True,
+                "context_questions": False,
+            }
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["validation_node_settings"] == {
+        "core_rules": False,
+        "custom_rules": True,
+        "context_questions": False,
+    }

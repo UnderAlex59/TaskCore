@@ -62,6 +62,8 @@ class TaskRead(BaseModel):
     tester_id: str | None
     validation_result: dict | None
     attachments: list[TaskAttachmentRead] = Field(default_factory=list)
+    indexed_at: datetime | None = None
+    embeddings_stale: bool
     created_at: datetime
     updated_at: datetime
 

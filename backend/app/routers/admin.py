@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.core.dependencies import DBSession, require_role
+from app.models.task import TaskStatus
 from app.models.user import User, UserRole
 from app.schemas.admin_llm import (
     AgentOverrideRead,
@@ -22,8 +23,12 @@ from app.schemas.admin_monitoring import (
     MonitoringRange,
     MonitoringSummaryRead,
 )
+from app.schemas.admin_validation import ValidationQuestionPageRead
+from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
 from app.services.monitoring_service import MonitoringService
+from app.services.task_tag_service import TaskTagService
+from app.services.validation_question_service import ValidationQuestionService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
@@ -127,3 +132,74 @@ async def audit_feed(
     page: int = Query(default=1, ge=1),
 ) -> AuditPageRead:
     return await MonitoringService.get_audit_page(db, range_value=range_value, page=page)
+
+
+@router.get("/validation/questions", response_model=ValidationQuestionPageRead)
+async def list_validation_questions(
+    _: AdminUser,
+    db: DBSession,
+    project_id: str | None = Query(default=None),
+    task_status: TaskStatus | None = Query(default=None),
+    verdict: Literal["approved", "needs_rework"] | None = Query(default=None),
+    tag: str | None = Query(default=None, min_length=1),
+    search: str | None = Query(default=None, min_length=1),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> ValidationQuestionPageRead:
+    return await ValidationQuestionService.list_questions(
+        db,
+        project_id=project_id,
+        task_status=task_status,
+        verdict=verdict,
+        tag=tag,
+        search=search,
+        page=page,
+        size=size,
+    )
+
+
+@router.delete("/validation/questions/{question_id}", status_code=204)
+async def delete_validation_question(
+    question_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await ValidationQuestionService.delete_question(question_id, current_user, db)
+    return Response(status_code=204)
+
+
+@router.get("/task-tags", response_model=list[AdminTaskTagRead])
+async def list_task_tags(
+    _: AdminUser,
+    db: DBSession,
+) -> list[AdminTaskTagRead]:
+    return await TaskTagService.list_admin_task_tags(db)
+
+
+@router.post("/task-tags", response_model=AdminTaskTagRead, status_code=status.HTTP_201_CREATED)
+async def create_task_tag(
+    payload: TaskTagCreate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AdminTaskTagRead:
+    return await TaskTagService.create_task_tag(payload, current_user, db)
+
+
+@router.patch("/task-tags/{tag_id}", response_model=AdminTaskTagRead)
+async def update_task_tag(
+    tag_id: str,
+    payload: TaskTagUpdate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AdminTaskTagRead:
+    return await TaskTagService.update_task_tag(tag_id, payload, current_user, db)
+
+
+@router.delete("/task-tags/{tag_id}", status_code=204)
+async def delete_task_tag(
+    tag_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await TaskTagService.delete_task_tag(tag_id, current_user, db)
+    return Response(status_code=204)

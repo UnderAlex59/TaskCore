@@ -252,3 +252,92 @@ async def test_monitoring_llm_endpoint_returns_grouped_usage(client: AsyncClient
     assert len(payload["daily"]) == 1
     assert payload["daily"][0]["total"] == 1
     assert payload["daily"][0]["providers"] == {"openrouter": 1}
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_and_delete_validation_questions(client: AsyncClient) -> None:
+    admin_token = await register_and_login(
+        client,
+        email="admin-validation@example.com",
+        full_name="Admin User",
+    )
+    analyst_token = await register_and_login(
+        client,
+        email="analyst-validation@example.com",
+        full_name="Analyst User",
+    )
+
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    analyst_id = next(
+        user["id"]
+        for user in users_response.json()
+        if user["email"] == "analyst-validation@example.com"
+    )
+
+    role_response = await client.patch(
+        f"/users/{analyst_id}",
+        headers=admin_headers,
+        json={"role": "ANALYST"},
+    )
+    assert role_response.status_code == 200
+
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Validation backlog", "description": "Questions registry"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    task_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "UI",
+            "content": "Коротко.",
+            "tags": [],
+        },
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+
+    validate_response = await client.post(
+        f"/tasks/{task_id}/validate",
+        headers=analyst_headers,
+    )
+    assert validate_response.status_code == 200
+    created_questions = validate_response.json()["questions"]
+    assert created_questions
+
+    list_response = await client.get(
+        "/admin/validation/questions",
+        headers=admin_headers,
+        params={"task_status": "needs_rework"},
+    )
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert payload["total"] >= 1
+
+    created_item = next(item for item in payload["items"] if item["task_id"] == task_id)
+    assert created_item["question_text"] in created_questions
+    assert created_item["project_id"] == project_id
+
+    delete_response = await client.delete(
+        f"/admin/validation/questions/{created_item['id']}",
+        headers=admin_headers,
+    )
+    assert delete_response.status_code == 204
+
+    task_after_delete_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=analyst_headers,
+    )
+    assert task_after_delete_response.status_code == 200
+    assert (
+        created_item["question_text"]
+        not in task_after_delete_response.json()["validation_result"]["questions"]
+    )

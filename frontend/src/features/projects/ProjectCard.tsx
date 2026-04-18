@@ -44,7 +44,7 @@ export default function ProjectCard({
             className="ui-button-secondary"
             to={`/admin/projects/${project.id}/rules`}
           >
-            Правила
+            Правила и узлы
           </Link>
         ) : null}
         {canDelete && onDelete ? (

@@ -24,6 +24,8 @@ export interface TaskRead {
   tester_id: string | null;
   validation_result: ValidationResult | null;
   attachments: TaskAttachmentRead[];
+  indexed_at: string | null;
+  embeddings_stale: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +82,8 @@ export const tasksApi = {
     (await apiClient.get<TaskRead>(`/projects/${projectId}/tasks/${taskId}`)).data,
   update: async (projectId: string, taskId: string, payload: Partial<TaskCreate>) =>
     (await apiClient.patch<TaskRead>(`/projects/${projectId}/tasks/${taskId}`, payload)).data,
+  commitChanges: async (projectId: string, taskId: string) =>
+    (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/commit`)).data,
   approve: async (projectId: string, taskId: string, payload: TaskApprove) =>
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/approve`, payload)).data,
   remove: async (projectId: string, taskId: string) => {

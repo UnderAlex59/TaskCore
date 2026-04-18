@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.chat_agents.registry import list_chat_agents
+from app.agents.provider_test_graph import run_provider_test_graph
 from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_runtime_settings import LLMRuntimeSettings
@@ -116,7 +117,10 @@ class AdminLLMService:
             setattr(provider, field_name, value)
 
         if secret is not None:
-            provider.encrypted_secret, provider.masked_secret = LLMRuntimeService.encrypt_secret(secret)
+            (
+                provider.encrypted_secret,
+                provider.masked_secret,
+            ) = LLMRuntimeService.encrypt_secret(secret)
 
         provider.updated_by = actor.id
         AuditService.record(
@@ -145,33 +149,34 @@ class AdminLLMService:
         actor: User,
         db: AsyncSession,
     ) -> ProviderTestResult:
-        provider = await db.get(LLMProviderConfig, provider_id)
-        if provider is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Профиль провайдера не найден",
-            )
-
-        result = await LLMRuntimeService.test_provider(db, config=provider, actor_user_id=actor.id)
+        result = await run_provider_test_graph(
+            db=db,
+            provider_id=provider_id,
+            actor_user_id=actor.id,
+        )
         AuditService.record(
             db,
             actor_user_id=actor.id,
             event_type="admin.llm_provider.tested",
             entity_type="llm_provider",
-            entity_id=provider.id,
-            metadata={"ok": result.ok, "provider_kind": provider.provider_kind},
+            entity_id=provider_id,
+            metadata={"ok": result["ok"], "provider_kind": result["provider_kind"]},
         )
         await db.commit()
         return ProviderTestResult(
-            ok=result.ok,
-            provider_kind=provider.provider_kind,  # type: ignore[arg-type]
-            model=provider.model,
-            latency_ms=result.latency_ms,
-            message=result.text or result.error_message or "Пустой ответ от провайдера",
+            ok=bool(result["ok"]),
+            provider_kind=result["provider_kind"],  # type: ignore[arg-type]
+            model=result["model"],
+            latency_ms=result["latency_ms"],
+            message=result["message"],
         )
 
     @staticmethod
-    async def set_default_provider(provider_id: str, actor: User, db: AsyncSession) -> ProviderConfigRead:
+    async def set_default_provider(
+        provider_id: str,
+        actor: User,
+        db: AsyncSession,
+    ) -> ProviderConfigRead:
         provider = await db.get(LLMProviderConfig, provider_id)
         if provider is None:
             raise HTTPException(
@@ -319,7 +324,10 @@ class AdminLLMService:
                 output_cost_per_1k_tokens=provider.output_cost_per_1k_tokens,
                 secret_configured=provider.encrypted_secret is not None,
                 masked_secret=provider.masked_secret,
-                is_default=runtime is not None and runtime.default_provider_config_id == provider.id,
+                is_default=(
+                    runtime is not None
+                    and runtime.default_provider_config_id == provider.id
+                ),
                 used_by_agents=sorted(used_by.get(provider.id, [])),
                 created_at=provider.created_at,
                 updated_at=provider.updated_at,

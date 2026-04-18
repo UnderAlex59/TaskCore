@@ -16,7 +16,9 @@ from app.models import (  # noqa: F401
     RefreshToken,
     Task,
     TaskAttachment,
+    TaskTag,
     User,
+    ValidationQuestion,
 )
 
 config = context.config

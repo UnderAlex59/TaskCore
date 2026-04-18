@@ -6,6 +6,7 @@ from functools import lru_cache
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ValidationState
+from app.core.validation_settings import normalize_validation_node_settings
 
 
 class ValidationGraphState(ValidationState, total=False):
@@ -22,6 +23,7 @@ class ValidationGraphState(ValidationState, total=False):
     core_questions: list[str]
     custom_rule_issues: list[dict[str, str]]
     context_questions: list[str]
+    validation_node_settings: dict[str, bool]
 
 
 def _contains_acceptance_language(text: str) -> bool:
@@ -49,10 +51,16 @@ def _normalize_validation_input(state: ValidationGraphState) -> ValidationGraphS
         "normalized_title": normalized_title,
         "normalized_content": normalized_content,
         "lower_text": f"{normalized_title}\n{normalized_content}".lower(),
+        "validation_node_settings": normalize_validation_node_settings(
+            state.get("validation_node_settings")
+        ),
     }
 
 
 def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphState:
+    if not state.get("validation_node_settings", {}).get("core_rules", True):
+        return {"core_issues": [], "core_questions": []}
+
     normalized_title = str(state.get("normalized_title", ""))
     normalized_content = str(state.get("normalized_content", ""))
     lower_text = str(state.get("lower_text", ""))
@@ -74,7 +82,10 @@ def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphState:
             {
                 "code": "content_too_short",
                 "severity": "high",
-                "message": "Описание слишком короткое: не хватает деталей для разработки и тестирования.",
+                "message": (
+                    "Описание слишком короткое: не хватает деталей для разработки "
+                    "и тестирования."
+                ),
             }
         )
 
@@ -107,6 +118,9 @@ def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphState:
 
 
 def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraphState:
+    if not state.get("validation_node_settings", {}).get("custom_rules", True):
+        return {"custom_rule_issues": []}
+
     lower_text = str(state.get("lower_text", ""))
     issues: list[dict[str, str]] = []
 
@@ -119,7 +133,10 @@ def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraphState:
                 {
                     "code": f"custom_rule_{title_value.lower().replace(' ', '_')}",
                     "severity": "medium",
-                    "message": f"Требование не отражает правило «{title_value}»: {description_value}",
+                    "message": (
+                        f"Требование не отражает правило «{title_value}»: "
+                        f"{description_value}"
+                    ),
                 }
             )
 
@@ -127,6 +144,9 @@ def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraphState:
 
 
 def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
+    if not state.get("validation_node_settings", {}).get("context_questions", True):
+        return {"context_questions": list(state.get("core_questions", []))}
+
     lower_text = str(state.get("lower_text", ""))
     questions = list(state.get("core_questions", []))
 
@@ -140,14 +160,18 @@ def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
         for token in ("макет", "diagram", "ui", "экран", "schema")
     ):
         questions.append(
-            "В тексте упомянут визуальный или структурный артефакт. Можно ли приложить изображение, макет или схему?"
+            "В тексте упомянут визуальный или структурный артефакт. "
+            "Можно ли приложить изображение, макет или схему?"
         )
 
     related_tasks = state.get("related_tasks", [])
     if related_tasks:
-        related_titles = ", ".join(str(item["title"]) for item in related_tasks[:2] if "title" in item)
+        related_titles = ", ".join(
+            str(item["title"]) for item in related_tasks[:2] if "title" in item
+        )
         questions.append(
-            "Найдены похожие задачи. Проверьте, не дублирует ли текущее требование уже существующую работу: "
+            "Найдены похожие задачи. Проверьте, не дублирует ли текущее "
+            "требование уже существующую работу: "
             + related_titles
         )
 
@@ -167,6 +191,33 @@ def _finalize_validation_result(state: ValidationGraphState) -> ValidationGraphS
     }
 
 
+def _route_after_normalization(state: ValidationGraphState) -> str:
+    settings = state.get("validation_node_settings", {})
+    if settings.get("core_rules", True):
+        return "evaluate_core_rules"
+    if settings.get("custom_rules", True):
+        return "evaluate_custom_rules"
+    if settings.get("context_questions", True):
+        return "inspect_context"
+    return "finalize_validation_result"
+
+
+def _route_after_core_rules(state: ValidationGraphState) -> str:
+    settings = state.get("validation_node_settings", {})
+    if settings.get("custom_rules", True):
+        return "evaluate_custom_rules"
+    if settings.get("context_questions", True):
+        return "inspect_context"
+    return "finalize_validation_result"
+
+
+def _route_after_custom_rules(state: ValidationGraphState) -> str:
+    settings = state.get("validation_node_settings", {})
+    if settings.get("context_questions", True):
+        return "inspect_context"
+    return "finalize_validation_result"
+
+
 @lru_cache
 def get_validation_graph():
     graph = StateGraph(ValidationGraphState)
@@ -176,9 +227,18 @@ def get_validation_graph():
     graph.add_node("inspect_context", _inspect_context)
     graph.add_node("finalize_validation_result", _finalize_validation_result)
     graph.add_edge(START, "normalize_validation_input")
-    graph.add_edge("normalize_validation_input", "evaluate_core_rules")
-    graph.add_edge("evaluate_core_rules", "evaluate_custom_rules")
-    graph.add_edge("evaluate_custom_rules", "inspect_context")
+    graph.add_conditional_edges(
+        "normalize_validation_input",
+        _route_after_normalization,
+    )
+    graph.add_conditional_edges(
+        "evaluate_core_rules",
+        _route_after_core_rules,
+    )
+    graph.add_conditional_edges(
+        "evaluate_custom_rules",
+        _route_after_custom_rules,
+    )
     graph.add_edge("inspect_context", "finalize_validation_result")
     graph.add_edge("finalize_validation_result", END)
     return graph.compile()
@@ -192,6 +252,7 @@ async def run_validation_graph(
     custom_rules: list[dict[str, object]],
     related_tasks: list[dict[str, object]],
     attachment_names: list[str],
+    validation_node_settings: dict[str, bool] | None = None,
 ) -> ValidationState:
     state = await get_validation_graph().ainvoke(
         {
@@ -201,6 +262,7 @@ async def run_validation_graph(
             "custom_rules": custom_rules,
             "related_tasks": related_tasks,
             "attachment_names": attachment_names,
+            "validation_node_settings": validation_node_settings,
         }
     )
     return {

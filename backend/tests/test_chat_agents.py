@@ -1,23 +1,32 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from app.agents.chat_agents.base import ChatAgentContext
+from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
 from app.agents.chat_agents.change_tracker_agent import ChangeTrackerAgent
 from app.agents.chat_agents.llm import ChatAgentLLMProfile, build_chat_model
 from app.agents.chat_agents.question_agent import QuestionAgent
-from app.agents.chat_agents.registry import (
-    list_chat_agents,
-    parse_requested_agent,
-    reset_chat_agent_registry,
-)
+from app.agents.chat_agents.registry import parse_requested_agent
 from app.agents.chat_graph import run_chat_graph
+from app.agents.state import ChatState
+from app.agents.subgraph_registry import (
+    AgentSubgraphSpec,
+    list_agent_subgraph_metadata,
+    register_agent_subgraph,
+    reset_agent_subgraph_registry,
+)
 from app.services.llm_runtime_service import LLMInvocationResult
 
 
-def test_builtin_chat_agents_are_discoverable() -> None:
-    reset_chat_agent_registry()
-    agent_keys = {item.key for item in list_chat_agents()}
+@pytest.fixture(autouse=True)
+def reset_subgraph_registry_fixture() -> None:
+    reset_agent_subgraph_registry()
+
+
+def test_builtin_agent_subgraphs_are_discoverable() -> None:
+    agent_keys = {item.key for item in list_agent_subgraph_metadata()}
 
     assert {"qa", "change-tracker", "manager"} <= agent_keys
 
@@ -27,6 +36,15 @@ def test_parse_requested_agent_prefix() -> None:
 
     assert requested_agent == "change"
     assert routed_content == "Update the API contract"
+
+
+def test_parse_requested_agent_supports_slash_prefix() -> None:
+    requested_agent, routed_content = parse_requested_agent(
+        "/qaagent Какие статусы считаются терминальными?",
+    )
+
+    assert requested_agent == "qaagent"
+    assert routed_content == "Какие статусы считаются терминальными?"
 
 
 def test_build_chat_model_supports_local_provider() -> None:
@@ -75,7 +93,10 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
             estimated_cost_usd=None,
         )
 
-    monkeypatch.setattr("app.services.llm_runtime_service.LLMRuntimeService.invoke_chat", fake_invoke_chat)
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
     result = await QuestionAgent().handle(
         ChatAgentContext(
             db=object(),  # type: ignore[arg-type]
@@ -94,6 +115,57 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
 
     assert result.response == "Live answer from the provider"
     assert result.source_ref["provider_kind"] == "openrouter"
+    assert result.source_ref["answer_confidence"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_marks_low_confidence_answers_for_validation_backlog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"answer":"В задаче не указано, какие статусы считаются итоговыми.",'
+                '"confidence":"low",'
+                '"canonical_question":"Какие статусы синхронизируются между системами?"}'
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=80,
+            prompt_tokens=12,
+            completion_tokens=18,
+            total_tokens=30,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="ready_for_dev",
+            task_content="Backend and frontend should keep status changes in sync.",
+            message_type="question",
+            message_content="Как должны синхронизироваться статусы?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert result.source_ref["answer_confidence"] == "low"
+    assert (
+        result.source_ref["validation_backlog_question"]
+        == "Какие статусы синхронизируются между системами?"
+    )
+    assert "Вопрос сохранён в базе вопросов" in result.response
 
 
 @pytest.mark.asyncio
@@ -114,7 +186,10 @@ async def test_change_tracker_falls_back_to_raw_message_on_bad_llm_payload(
             estimated_cost_usd=None,
         )
 
-    monkeypatch.setattr("app.services.llm_runtime_service.LLMRuntimeService.invoke_chat", fake_invoke_chat)
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
     result = await ChangeTrackerAgent().handle(
         ChatAgentContext(
             db=object(),  # type: ignore[arg-type]
@@ -137,7 +212,6 @@ async def test_change_tracker_falls_back_to_raw_message_on_bad_llm_payload(
 
 @pytest.mark.asyncio
 async def test_forced_change_agent_can_handle_general_message() -> None:
-    reset_chat_agent_registry()
     requested_agent, routed_content = parse_requested_agent("@change Update the API contract")
 
     state = await run_chat_graph(
@@ -164,8 +238,35 @@ async def test_forced_change_agent_can_handle_general_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forced_qaagent_command_routes_to_qa_subgraph() -> None:
+    requested_agent, routed_content = parse_requested_agent(
+        "/qaagent Какие статусы считаются терминальными?",
+    )
+
+    state = await run_chat_graph(
+        db=None,
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="Status sync",
+        task_status="ready_for_dev",
+        task_content="Backend and frontend should keep statuses in sync.",
+        message_type="general",
+        message_content=routed_content,
+        validation_result={"verdict": "approved", "questions": []},
+        related_tasks=[],
+        requested_agent=requested_agent,
+        raw_message_content="/qaagent Какие статусы считаются терминальными?",
+    )
+
+    assert state["agent_name"] == "QAAgent"
+    assert state["message_type"] == "agent_answer"
+    assert state["source_ref"]["agent_key"] == "qa"
+    assert state["source_ref"]["routing_mode"] == "forced"
+
+
+@pytest.mark.asyncio
 async def test_unknown_forced_agent_returns_directory_message() -> None:
-    reset_chat_agent_registry()
     requested_agent, routed_content = parse_requested_agent("@risk Check the integration path")
 
     state = await run_chat_graph(
@@ -189,3 +290,259 @@ async def test_unknown_forced_agent_returns_directory_message() -> None:
     assert "не зарегистрирован" in state["response"]
     assert state["source_ref"]["requested_agent"] == "risk"
     assert state["source_ref"]["routing_mode"] == "forced"
+
+
+@pytest.mark.asyncio
+async def test_background_question_skips_ai_response() -> None:
+    state = await run_chat_graph(
+        db=None,
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="API sync",
+        task_status="draft",
+        task_content="Backend and frontend should use one schema for task updates.",
+        message_type="question",
+        message_content="Как погода сегодня?",
+        validation_result=None,
+        requested_agent=None,
+        raw_message_content="Как погода сегодня?",
+    )
+
+    assert state["ai_response_required"] is False
+    assert "agent_name" not in state
+    assert "response" not in state
+
+
+@pytest.mark.asyncio
+async def test_chat_graph_persists_low_confidence_question_via_langgraph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"answer":"В задаче не хватает данных о терминальных статусах.",'
+                '"confidence":"low",'
+                '"canonical_question":"Какие статусы считаются терминальными?"}'
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=55,
+            prompt_tokens=12,
+            completion_tokens=18,
+            total_tokens=30,
+            estimated_cost_usd=None,
+        )
+
+    audit_events: list[str] = []
+
+    async def fake_record_chat_question(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return SimpleNamespace(
+            id="validation-question-1",
+            question_text="Какие статусы считаются терминальными?",
+        )
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(
+                id=identifier,
+                project_id="project-1",
+                validation_result={
+                    "verdict": "approved",
+                    "validated_at": "2026-04-18T10:00:00+00:00",
+                },
+            )
+
+    def fake_audit_record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        audit_events.append(str(kwargs["event_type"]))
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.validation_question_service.ValidationQuestionService.record_chat_question",
+        fake_record_chat_question,
+    )
+    monkeypatch.setattr("app.services.audit_service.AuditService.record", fake_audit_record)
+
+    state = await run_chat_graph(
+        db=FakeDB(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        source_message_id="message-1",
+        task_title="Status sync",
+        task_status="ready_for_dev",
+        task_content="Backend and frontend should keep statuses in sync.",
+        message_type="question",
+        message_content="Какие статусы считаются терминальными?",
+        validation_result={"verdict": "approved", "questions": []},
+        related_tasks=[{"task_id": "task-2", "title": "Status mapping"}],
+        requested_agent=None,
+        raw_message_content="Какие статусы считаются терминальными?",
+    )
+
+    assert state["source_ref"]["validation_backlog_saved"] is True
+    assert state["source_ref"]["validation_question_id"] == "validation-question-1"
+    assert state["source_ref"]["answer_confidence"] == "low"
+    assert "chat.validation_question_recorded" in audit_events
+
+
+@pytest.mark.asyncio
+async def test_chat_graph_creates_proposal_via_langgraph(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"proposal_text":"Update the API contract",'
+                '"acknowledgement":"Изменение оформлено."}'
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=40,
+            prompt_tokens=10,
+            completion_tokens=12,
+            total_tokens=22,
+            estimated_cost_usd=None,
+        )
+
+    audit_events: list[str] = []
+
+    async def fake_create_from_message(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return SimpleNamespace(id="proposal-1")
+
+    def fake_audit_record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        audit_events.append(str(kwargs["event_type"]))
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.proposal_service.ProposalService.create_from_message",
+        fake_create_from_message,
+    )
+    monkeypatch.setattr("app.services.audit_service.AuditService.record", fake_audit_record)
+
+    state = await run_chat_graph(
+        db=object(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        source_message_id="message-1",
+        task_title="API sync",
+        task_status="draft",
+        task_content="Backend and frontend should use one schema.",
+        message_type="change_proposal",
+        message_content="Update the API contract",
+        validation_result=None,
+        related_tasks=[{"task_id": "task-2", "title": "Schema sync"}],
+        requested_agent=None,
+        raw_message_content="Update the API contract",
+    )
+
+    assert state["message_type"] == "agent_proposal"
+    assert state["source_ref"]["proposal_id"] == "proposal-1"
+    assert "chat.proposal_requested" in audit_events
+
+
+@pytest.mark.asyncio
+async def test_external_subgraph_is_used_for_forced_routing() -> None:
+    async def can_handle(context: ChatAgentContext) -> bool:
+        return "#risk" in context.message_content.lower()
+
+    async def run_external(context: ChatAgentContext, routing_mode: str) -> ChatState:
+        return {
+            "agent_name": "RiskAgent",
+            "message_type": "agent_answer",
+            "response": f"Routing mode: {routing_mode}",
+            "source_ref": {"collection": "messages"},
+        }
+
+    register_agent_subgraph(
+        AgentSubgraphSpec(
+            metadata=ChatAgentMetadata(
+                key="risk",
+                name="RiskAgent",
+                description="Анализирует риски.",
+                aliases=("risk-review",),
+                priority=40,
+            ),
+            can_handle=can_handle,
+            runner=run_external,
+        )
+    )
+
+    requested_agent, routed_content = parse_requested_agent("@risk Review rollout")
+    state = await run_chat_graph(
+        db=None,
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="Rollout",
+        task_status="draft",
+        task_content="Need a release risk check.",
+        message_type="general",
+        message_content=routed_content,
+        validation_result=None,
+        related_tasks=[],
+        requested_agent=requested_agent,
+        raw_message_content="@risk Review rollout",
+    )
+
+    assert state["agent_name"] == "RiskAgent"
+    assert state["response"] == "Routing mode: forced"
+    assert state["source_ref"]["agent_key"] == "risk"
+
+
+@pytest.mark.asyncio
+async def test_external_subgraph_is_used_for_auto_routing() -> None:
+    async def can_handle(context: ChatAgentContext) -> bool:
+        return "#risk" in context.message_content.lower()
+
+    async def run_external(context: ChatAgentContext, routing_mode: str) -> ChatState:
+        return {
+            "agent_name": "RiskAgent",
+            "message_type": "agent_answer",
+            "response": f"Auto route for {context.task_title}",
+            "source_ref": {"collection": "messages"},
+        }
+
+    register_agent_subgraph(
+        AgentSubgraphSpec(
+            metadata=ChatAgentMetadata(
+                key="risk",
+                name="RiskAgent",
+                description="Анализирует риски.",
+                aliases=("risk-review",),
+                priority=40,
+            ),
+            can_handle=can_handle,
+            runner=run_external,
+        )
+    )
+
+    state = await run_chat_graph(
+        db=None,
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="Release",
+        task_status="draft",
+        task_content="Need a risk review before production rollout.",
+        message_type="general",
+        message_content="Please review #risk before release",
+        validation_result=None,
+        related_tasks=[],
+        requested_agent=None,
+        raw_message_content="Please review #risk before release",
+    )
+
+    assert state["ai_response_required"] is True
+    assert state["agent_name"] == "RiskAgent"
+    assert state["response"] == "Auto route for Release"
+    assert state["source_ref"]["routing_mode"] == "auto"

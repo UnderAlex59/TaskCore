@@ -67,6 +67,16 @@ async def update_task(
     return await TaskService.update_task(project_id, task_id, payload, current_user, db)
 
 
+@router.post("/{task_id}/commit", response_model=TaskRead)
+async def commit_task_changes(
+    project_id: str,
+    task_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.commit_task_changes(project_id, task_id, current_user, db)
+
+
 @router.post("/{task_id}/approve", response_model=TaskRead)
 async def approve_task(
     project_id: str,

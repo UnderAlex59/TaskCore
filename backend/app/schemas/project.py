@@ -7,6 +7,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.models.user import UserRole
 
 
+class ValidationNodeSettings(BaseModel):
+    core_rules: bool = True
+    custom_rules: bool = True
+    context_questions: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=3, max_length=255)
     description: str | None = None
@@ -15,6 +23,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=3, max_length=255)
     description: str | None = None
+    validation_node_settings: ValidationNodeSettings | None = None
 
 
 class ProjectRead(BaseModel):
@@ -24,6 +33,7 @@ class ProjectRead(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    validation_node_settings: ValidationNodeSettings
 
     model_config = ConfigDict(from_attributes=True)
 

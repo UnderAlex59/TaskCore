@@ -1,12 +1,8 @@
 """Business logic services."""
 
-from app.services.auth_service import AuthService
-from app.services.chat_service import ChatService
-from app.services.project_service import ProjectService
-from app.services.proposal_service import ProposalService
-from app.services.rag_service import RagService
-from app.services.task_service import TaskService
-from app.services.user_service import UserService
+from __future__ import annotations
+
+from importlib import import_module
 
 __all__ = [
     "AuthService",
@@ -17,3 +13,21 @@ __all__ = [
     "TaskService",
     "UserService",
 ]
+
+_SERVICE_MODULES = {
+    "AuthService": "app.services.auth_service",
+    "ChatService": "app.services.chat_service",
+    "ProjectService": "app.services.project_service",
+    "ProposalService": "app.services.proposal_service",
+    "RagService": "app.services.rag_service",
+    "TaskService": "app.services.task_service",
+    "UserService": "app.services.user_service",
+}
+
+
+def __getattr__(name: str):
+    module_path = _SERVICE_MODULES.get(name)
+    if module_path is None:
+        raise AttributeError(name)
+    module = import_module(module_path)
+    return getattr(module, name)

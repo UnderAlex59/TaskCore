@@ -1,6 +1,12 @@
 import { apiClient } from "@/api/client";
 import type { UserRole } from "@/api/authApi";
 
+export interface ValidationNodeSettings {
+  core_rules: boolean;
+  custom_rules: boolean;
+  context_questions: boolean;
+}
+
 export interface ProjectRead {
   id: string;
   name: string;
@@ -8,11 +14,18 @@ export interface ProjectRead {
   created_by: string;
   created_at: string;
   updated_at: string;
+  validation_node_settings: ValidationNodeSettings;
 }
 
 export interface ProjectCreate {
   name: string;
   description?: string | null;
+}
+
+export interface ProjectUpdate {
+  name?: string | null;
+  description?: string | null;
+  validation_node_settings?: ValidationNodeSettings;
 }
 
 export interface ProjectMemberRead {
@@ -47,7 +60,7 @@ export const projectsApi = {
   list: async () => (await apiClient.get<ProjectRead[]>("/projects")).data,
   create: async (payload: ProjectCreate) => (await apiClient.post<ProjectRead>("/projects", payload)).data,
   get: async (projectId: string) => (await apiClient.get<ProjectRead>(`/projects/${projectId}`)).data,
-  update: async (projectId: string, payload: Partial<ProjectCreate>) =>
+  update: async (projectId: string, payload: ProjectUpdate) =>
     (await apiClient.patch<ProjectRead>(`/projects/${projectId}`, payload)).data,
   remove: async (projectId: string) => {
     await apiClient.delete(`/projects/${projectId}`);

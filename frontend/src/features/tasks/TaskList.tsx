@@ -19,8 +19,10 @@ import {
   type TaskRead,
   type TaskStatus,
 } from "@/api/tasksApi";
+import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
 import { usersApi, type UserSummary } from "@/api/usersApi";
 import TaskCard from "@/features/tasks/TaskCard";
+import TagMultiSelect from "@/shared/components/TagMultiSelect";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
@@ -58,6 +60,7 @@ export default function TaskList() {
 
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [tasks, setTasks] = useState<TaskRead[]>([]);
+  const [taskTags, setTaskTags] = useState<TaskTagOption[]>([]);
   const [members, setMembers] = useState<ProjectMemberRead[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,19 +91,26 @@ export default function TaskList() {
       const shouldLoadUsers = ["ADMIN", "ANALYST", "MANAGER"].includes(
         user?.role ?? "",
       );
-      const [loadedProject, loadedTasks, loadedMembers, loadedUsers] =
-        await Promise.all([
-          projectsApi.get(projectId),
-          tasksApi.list(projectId, {
-            search: deferredSearch || undefined,
-            status: statusFilter || undefined,
-            size: 100,
-          }),
-          projectsApi.listMembers(projectId),
-          shouldLoadUsers ? usersApi.list() : Promise.resolve([]),
-        ]);
+      const [
+        loadedProject,
+        loadedTasks,
+        loadedMembers,
+        loadedUsers,
+        loadedTaskTags,
+      ] = await Promise.all([
+        projectsApi.get(projectId),
+        tasksApi.list(projectId, {
+          search: deferredSearch || undefined,
+          status: statusFilter || undefined,
+          size: 100,
+        }),
+        projectsApi.listMembers(projectId),
+        shouldLoadUsers ? usersApi.list() : Promise.resolve([]),
+        taskTagsApi.list(),
+      ]);
       setProject(loadedProject);
       setTasks(loadedTasks);
+      setTaskTags(loadedTaskTags);
       setMembers(loadedMembers);
       setUsers(loadedUsers);
     } catch (caught) {
@@ -118,7 +128,9 @@ export default function TaskList() {
     void onLoadData();
   }, [projectId, deferredSearch, statusFilter, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const currentMembership = members.find((member) => member.user_id === user?.id);
+  const currentMembership = members.find(
+    (member) => member.user_id === user?.id,
+  );
   const canManageMembers =
     user?.role === "ADMIN" ||
     currentMembership?.role === "MANAGER" ||
@@ -192,7 +204,9 @@ export default function TaskList() {
       setRemovingMemberId(memberPendingRemoval.user_id);
       await projectsApi.removeMember(projectId, memberPendingRemoval.user_id);
       setMembers((current) =>
-        current.filter((member) => member.user_id !== memberPendingRemoval.user_id),
+        current.filter(
+          (member) => member.user_id !== memberPendingRemoval.user_id,
+        ),
       );
       setMemberPendingRemoval(null);
     } catch (caught) {
@@ -336,21 +350,26 @@ export default function TaskList() {
                 <span className="mb-2 block text-sm font-semibold text-ink/70">
                   Теги
                 </span>
-                <input
-                  autoComplete="off"
-                  className="ui-field"
+                <TagMultiSelect
+                  helperText={
+                    taskTags.length === 0
+                      ? "Администратор ещё не добавил теги в справочник."
+                      : "Теги выбираются только из справочника."
+                  }
+                  hideLabel
+                  label="Теги"
                   name="task-tags"
-                  onChange={(event) =>
+                  noOptionsLabel="Справочник тегов пока пуст"
+                  onChange={(tags) =>
                     setTaskForm((current) => ({
                       ...current,
-                      tags: event.target.value
-                        .split(",")
-                        .map((tag) => tag.trim())
-                        .filter(Boolean),
+                      tags,
                     }))
                   }
-                  placeholder="авторизация, api, отчеты"
-                  value={taskForm.tags?.join(", ") ?? ""}
+                  options={taskTags}
+                  placeholder="Выберите теги"
+                  searchPlaceholder="Найти тег"
+                  value={taskForm.tags ?? []}
                 />
               </label>
               <p className="rounded-[10px] bg-black/5 px-4 py-3 text-sm text-slate/75">
@@ -378,7 +397,8 @@ export default function TaskList() {
                   <div>
                     <p className="font-semibold">{member.full_name}</p>
                     <p className="text-slate/70">
-                      {member.email} · роль в проекте {getRoleLabel(member.role)}
+                      {member.email} · роль в проекте{" "}
+                      {getRoleLabel(member.role)}
                     </p>
                   </div>
                   {canManageMembers ? (

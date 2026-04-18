@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.validation_settings import normalize_validation_node_settings
 from app.models.custom_rule import CustomRule
 from app.models.project import Project, ProjectMember
 from app.models.user import User, UserRole
@@ -20,10 +21,23 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.services.audit_service import AuditService
+from app.services.task_tag_service import TaskTagService
 
 
 class ProjectService:
     manager_roles = {UserRole.MANAGER, UserRole.ADMIN}
+
+    @staticmethod
+    def _serialize_project(project: Project) -> ProjectRead:
+        return ProjectRead(
+            id=project.id,
+            name=project.name,
+            description=project.description,
+            created_by=project.created_by,
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+            validation_node_settings=normalize_validation_node_settings(project.validation_node_settings),
+        )
 
     @staticmethod
     async def get_project_or_404(project_id: str, db: AsyncSession) -> Project:
@@ -84,7 +98,7 @@ class ProjectService:
             )
 
         projects = list((await db.execute(stmt)).scalars().all())
-        return [ProjectRead.model_validate(project) for project in projects]
+        return [ProjectService._serialize_project(project) for project in projects]
 
     @staticmethod
     async def create_project(payload: ProjectCreate, current_user: User, db: AsyncSession) -> ProjectRead:
@@ -114,12 +128,12 @@ class ProjectService:
         )
         await db.commit()
         await db.refresh(project)
-        return ProjectRead.model_validate(project)
+        return ProjectService._serialize_project(project)
 
     @staticmethod
     async def get_project(project_id: str, current_user: User, db: AsyncSession) -> ProjectRead:
         project = await ProjectService.ensure_project_access(project_id, current_user, db)
-        return ProjectRead.model_validate(project)
+        return ProjectService._serialize_project(project)
 
     @staticmethod
     async def update_project(
@@ -129,7 +143,17 @@ class ProjectService:
         db: AsyncSession,
     ) -> ProjectRead:
         project = await ProjectService.ensure_project_manager(project_id, current_user, db)
-        for field_name, value in payload.model_dump(exclude_unset=True).items():
+        payload_data = payload.model_dump(exclude_unset=True)
+        validation_node_settings = payload_data.pop("validation_node_settings", None)
+        if validation_node_settings is not None:
+            if current_user.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Только администратор может изменять узлы валидации проекта",
+                )
+            project.validation_node_settings = normalize_validation_node_settings(validation_node_settings)
+
+        for field_name, value in payload_data.items():
             setattr(project, field_name, value)
 
         AuditService.record(
@@ -142,7 +166,7 @@ class ProjectService:
         )
         await db.commit()
         await db.refresh(project)
-        return ProjectRead.model_validate(project)
+        return ProjectService._serialize_project(project)
 
     @staticmethod
     async def delete_project(project_id: str, current_user: User, db: AsyncSession) -> None:
@@ -300,7 +324,7 @@ class ProjectService:
             project_id=project_id,
             title=payload.title,
             description=payload.description,
-            applies_to_tags=payload.applies_to_tags,
+            applies_to_tags=await TaskTagService.validate_reference_tags(payload.applies_to_tags, db),
             is_active=payload.is_active,
             created_by=current_user.id,
         )
@@ -333,7 +357,14 @@ class ProjectService:
                 detail="Правило не найдено",
             )
 
-        for field_name, value in payload.model_dump(exclude_unset=True).items():
+        updates = payload.model_dump(exclude_unset=True)
+        if "applies_to_tags" in updates:
+            updates["applies_to_tags"] = await TaskTagService.validate_reference_tags(
+                list(updates["applies_to_tags"] or []),
+                db,
+            )
+
+        for field_name, value in updates.items():
             setattr(rule, field_name, value)
 
         AuditService.record(

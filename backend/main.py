@@ -19,6 +19,7 @@ from app.routers.chat import router as chat_router
 from app.routers.projects import router as projects_router
 from app.routers.proposals import router as proposals_router
 from app.routers.tasks import router as tasks_router
+from app.routers.task_tags import router as task_tags_router
 from app.routers.users import router as users_router
 from app.routers.validation import router as validation_router
 
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router)
     app.include_router(projects_router)
     app.include_router(tasks_router)
+    app.include_router(task_tags_router)
     app.include_router(validation_router)
     app.include_router(chat_router)
     app.include_router(proposals_router)

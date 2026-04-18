@@ -81,8 +81,11 @@ UPLOAD_DIR=/var/lib/task-platform/uploads
 Для локальной разработки:
 
 ```env
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=/api
+VITE_API_PROXY_TARGET=http://localhost:8000
 ```
+
+В этом режиме `vite dev server` проксирует и обычные HTTP-запросы, и WebSocket-подключения `/api/*` на backend.
 
 Для production-сборки frontend обычно собирается с `VITE_API_URL=/api`.
 

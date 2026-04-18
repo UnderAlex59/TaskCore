@@ -13,7 +13,9 @@ from app.models.task import TaskStatus
 from app.models.user import User, UserRole
 from app.schemas.proposal import ProposalRead, ProposalUpdate
 from app.services.audit_service import AuditService
+from app.services.chat_realtime import chat_connection_manager, serialize_message
 from app.services.task_service import TaskService
+from app.services.validation_question_service import ValidationQuestionService
 
 
 class ProposalService:
@@ -88,8 +90,8 @@ class ProposalService:
 
         rows = (await db.execute(stmt)).all()
         return [
-          ProposalService._serialize(proposal, proposed_by_name, reviewed_by_name)
-          for proposal, proposed_by_name, reviewed_by_name in rows
+            ProposalService._serialize(proposal, proposed_by_name, reviewed_by_name)
+            for proposal, proposed_by_name, reviewed_by_name in rows
         ]
 
     @staticmethod
@@ -123,21 +125,22 @@ class ProposalService:
                 separator = "\n\n## Одобренные изменения\n"
                 task.content = f"{task.content.rstrip()}{separator}- {proposal.proposal_text.strip()}"
             task.validation_result = None
+            await ValidationQuestionService.clear_for_task(task.id, db)
             task.status = TaskStatus.NEEDS_REWORK
 
-        db.add(
-            Message(
-                task_id=task.id,
-                author_id=None,
-                agent_name="ChangeTrackerAgent",
-                message_type=MessageType.AGENT_PROPOSAL,
-                content=(
-                    f"Предложение `{proposal.id}` переведено в статус `{proposal.status.value}` "
-                    f"пользователем {current_user.full_name}."
-                ),
-                source_ref={"proposal_id": proposal.id, "collection": "change_proposals"},
-            )
+        status_message = Message(
+            task_id=task.id,
+            author_id=None,
+            agent_name="ChangeTrackerAgent",
+            message_type=MessageType.AGENT_PROPOSAL,
+            content=(
+                f"Предложение `{proposal.id}` переведено в статус `{proposal.status.value}` "
+                f"пользователем {current_user.full_name}."
+            ),
+            source_ref={"proposal_id": proposal.id, "collection": "change_proposals"},
         )
+        db.add(status_message)
+        await db.flush()
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -150,4 +153,14 @@ class ProposalService:
         )
         await db.commit()
         await db.refresh(proposal)
+        await chat_connection_manager.broadcast_messages(
+            task.id,
+            [
+                serialize_message(
+                    status_message,
+                    author_name=None,
+                    author_avatar_url=None,
+                )
+            ],
+        )
         return ProposalService._serialize(proposal, None, current_user.full_name)

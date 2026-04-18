@@ -1,66 +1,88 @@
-# Chat Agents
+# Agent Graphs
 
-Chat agents are now pluggable.
+Проект использует `subgraph-per-agent` как основной способ orchestration для AI-сценариев.
 
-## Fast path for a new agent
+## Встроенные agent subgraphs
 
-1. Add a new module in `app/agents/chat_agents/`.
-2. Create a class that inherits from `BaseChatAgent`.
-3. Add `metadata` with a unique `key`, human-readable `name`, optional `aliases`, and `priority`.
-4. Decorate the class with `@register_chat_agent`.
-5. Implement:
-   - `can_handle(context)` for automatic routing
-   - `handle(context)` for the final response
-6. If the agent should call an LLM, use:
-   - `self.get_llm_profile()` to inspect the resolved per-agent provider/model
-   - `self.build_chat_model()` to construct the LangChain chat model
+Встроенные чат-агенты оформлены как отдельные LangGraph subgraphs:
 
-## Manual routing from chat
+- `qa_agent_graph`
+- `change_tracker_agent_graph`
+- `manager_agent_graph`
 
-The chat supports explicit targeting:
+Главный `chat_graph` не вызывает `handle()` напрямую. Он:
 
-- `@qa How should acceptance criteria look?`
-- `@change Update the API contract`
-- `@manager Save this note in the thread`
+1. собирает `ChatAgentContext`
+2. выбирает подходящий agent subgraph через `subgraph_registry`
+3. запускает subgraph runner
+4. затем выполняет общие persistence side-effects
 
-The prefix is stripped before the agent handles the content.
+## External agent subgraphs
 
-## External modules
+Внешние агенты теперь тоже можно подключать без возврата к старому `dispatch_chat_agent`-подходу.
 
-If you want to keep agents outside `app/agents/chat_agents/`, set:
+Для этого внешний модуль должен:
 
-```env
-CHAT_AGENT_MODULES=["your.package.agent_module"]
+1. импортироваться через `CHAT_AGENT_MODULES`
+2. зарегистрировать `AgentSubgraphSpec` через `register_agent_subgraph(...)`
+3. предоставить:
+   - `metadata`
+   - `runner(context, routing_mode)`
+   - `can_handle(context)` для auto-routing
+   - при необходимости `graph_factory` для экспорта диаграмм
+   - при необходимости `llm_profile` для bootstrap per-agent provider overrides
+
+Минимальный пример:
+
+```python
+from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
+from app.agents.chat_agents.llm import ChatAgentLLMProfile
+from app.agents.state import ChatState
+from app.agents.subgraph_registry import AgentSubgraphSpec, register_agent_subgraph
+
+
+async def can_handle(context: ChatAgentContext) -> bool:
+    return context.message_type == "question" and "#risk" in context.message_content.lower()
+
+
+async def run_risk_agent(context: ChatAgentContext, routing_mode: str) -> ChatState:
+    return {
+        "agent_name": "RiskAgent",
+        "message_type": "agent_answer",
+        "response": "Нужен отдельный анализ рисков.",
+        "source_ref": {"collection": "messages"},
+    }
+
+
+register_agent_subgraph(
+    AgentSubgraphSpec(
+        metadata=ChatAgentMetadata(
+            key="risk",
+            name="RiskAgent",
+            description="Анализирует риски по задаче.",
+            aliases=("risk-review",),
+            priority=40,
+        ),
+        can_handle=can_handle,
+        runner=run_risk_agent,
+        llm_profile=ChatAgentLLMProfile(
+            provider="openai",
+            model="gpt-4o-mini",
+            temperature=0.1,
+        ),
+    )
+)
 ```
 
-Each imported module can register one or more agents through the same decorator.
+## Routing
 
-## Per-agent LLM provider overrides
+Поддерживаются оба режима:
 
-Each agent can have its own provider and model, including a local Ollama runtime.
+- auto-routing через `can_handle(context)`
+- forced routing через префиксы вида `@qa`, `@change-tracker`, `@risk`
 
-For OpenAI-compatible local endpoints such as LM Studio or vLLM, keep `provider: "openai"` and override `base_url` and `api_key` per agent.
+Если requested agent не найден, управление уходит в `ManagerAgent`, который возвращает список зарегистрированных subgraphs.
 
-Example:
+## LLM overrides
 
-```env
-CHAT_AGENT_LLM_OVERRIDES={
-  "qa": {
-    "provider": "ollama",
-    "model": "llama3.1",
-    "base_url": "http://localhost:11434",
-    "temperature": 0.1
-  },
-  "change-tracker": {
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "temperature": 0.0
-  }
-}
-```
-
-Resolution order:
-
-1. Agent default profile from code.
-2. `CHAT_AGENT_LLM_OVERRIDES[agent_key]`.
-3. Provider-specific global defaults like `OPENAI_MODEL`, `OLLAMA_MODEL`, `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`.
+`LLMRuntimeService` теперь bootstrap-ит provider overrides по `subgraph_registry`, а не по старому chat-agent dispatch registry. Это значит, что внешние agent subgraphs тоже могут иметь собственный `llm_profile` и собственные настройки через `CHAT_AGENT_LLM_OVERRIDES`.

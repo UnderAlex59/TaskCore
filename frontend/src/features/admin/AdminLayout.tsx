@@ -2,6 +2,8 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const adminNavItems = [
   { href: "/admin/monitoring", label: "Мониторинг" },
+  { href: "/admin/validation-questions", label: "Вопросы валидации" },
+  { href: "/admin/task-tags", label: "Теги задач" },
   { href: "/admin/providers", label: "Провайдеры" },
   { href: "/admin/users", label: "Пользователи" },
 ];
@@ -18,7 +20,10 @@ export default function AdminLayout() {
           Управляйте профилями провайдеров, настраивайте маршрутизацию LLM,
           смотрите использование системы и храните аудит критичных действий.
         </p>
-        <nav aria-label="Администрирование" className="mt-6 flex flex-wrap gap-2">
+        <nav
+          aria-label="Администрирование"
+          className="mt-6 flex flex-wrap gap-2"
+        >
           {adminNavItems.map((item) => (
             <NavLink
               key={item.href}

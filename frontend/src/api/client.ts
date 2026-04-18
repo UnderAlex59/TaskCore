@@ -2,7 +2,7 @@ import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestCo
 
 import { useAuthStore } from "@/store/authStore";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+export const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 type TokenResponse = {
   access_token: string;

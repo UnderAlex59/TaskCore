@@ -1,26 +1,25 @@
 from __future__ import annotations
 
-import json
+from app.agents.change_tracker_agent_graph import (
+    CHANGE_TRACKER_AGENT_ALIASES,
+    CHANGE_TRACKER_AGENT_DESCRIPTION,
+    CHANGE_TRACKER_AGENT_KEY,
+    CHANGE_TRACKER_AGENT_NAME,
+    run_change_tracker_agent_graph,
+)
 
 from .base import BaseChatAgent, ChatAgentContext, ChatAgentMetadata, ChatAgentResult
 from .llm import ChatAgentLLMProfile
 from .registry import register_chat_agent
 
 
-def _fallback_acknowledgement() -> str:
-    return (
-        "Предложение по изменению зарегистрировано и ожидает проверки аналитиком "
-        "или администратором. После одобрения требование будет возвращено на доработку и повторную проверку."
-    )
-
-
 @register_chat_agent
 class ChangeTrackerAgent(BaseChatAgent):
     metadata = ChatAgentMetadata(
-        key="change-tracker",
-        name="ChangeTrackerAgent",
-        description="Преобразует запросы из чата в отслеживаемые предложения по изменению требований.",
-        aliases=("change", "proposal", "changes"),
+        key=CHANGE_TRACKER_AGENT_KEY,
+        name=CHANGE_TRACKER_AGENT_NAME,
+        description=CHANGE_TRACKER_AGENT_DESCRIPTION,
+        aliases=CHANGE_TRACKER_AGENT_ALIASES,
         priority=30,
     )
     llm_profile = ChatAgentLLMProfile(
@@ -33,44 +32,25 @@ class ChangeTrackerAgent(BaseChatAgent):
         return context.message_type == "change_proposal"
 
     async def handle(self, context: ChatAgentContext) -> ChatAgentResult:
-        llm_result = await self.invoke_llm(
-            context,
-            system_prompt=(
-                "Ты нормализуешь запросы на изменение требований. "
-                "Верни строгий JSON с ключами proposal_text и acknowledgement. "
-                "proposal_text должен содержать чёткое, выполнимое изменение требования. "
-                "acknowledgement должен быть одной короткой фразой для пользователя. "
-                "Отвечай только на русском языке."
-            ),
-            user_prompt=(
-                f"Название задачи: {context.task_title}\n"
-                f"Статус задачи: {context.task_status}\n"
-                f"Описание задачи:\n{context.task_content}\n\n"
-                f"Запрошенное изменение:\n{context.message_content}\n"
-            ),
+        state = await run_change_tracker_agent_graph(
+            db=context.db,
+            actor_user_id=context.actor_user_id,
+            task_id=context.task_id,
+            project_id=context.project_id,
+            task_title=context.task_title,
+            task_status=context.task_status,
+            task_content=context.task_content,
+            message_content=context.message_content,
+            routing_mode="direct",
         )
-
-        proposal_text = context.message_content
-        response = _fallback_acknowledgement()
-        if llm_result is not None and llm_result.ok and llm_result.text:
-            try:
-                payload = json.loads(llm_result.text)
-                proposal_text = str(payload.get("proposal_text") or proposal_text).strip()
-                response = str(payload.get("acknowledgement") or response).strip()
-            except json.JSONDecodeError:
-                proposal_text = context.message_content
-        elif llm_result is not None and llm_result.error_message:
-            response = _fallback_acknowledgement()
-
         return ChatAgentResult(
-            agent_name=self.metadata.name,
-            message_type="agent_proposal",
-            proposal_text=proposal_text,
-            response=response,
-            source_ref={
-                "collection": "change_proposals",
-                "provider_kind": llm_result.provider_kind if llm_result is not None and llm_result.ok else None,
-                "model": llm_result.model if llm_result is not None and llm_result.ok else None,
-                "fallback": llm_result is None or not llm_result.ok,
-            },
+            agent_name=str(state.get("agent_name", self.metadata.name)),
+            message_type=str(state.get("message_type", "agent_proposal")),
+            response=str(state.get("response", "")),
+            source_ref=dict(state.get("source_ref", {})),
+            proposal_text=(
+                str(state.get("proposal_text"))
+                if state.get("proposal_text") is not None
+                else None
+            ),
         )

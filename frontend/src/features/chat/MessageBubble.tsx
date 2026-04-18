@@ -3,6 +3,7 @@ import { Avatar } from "@/shared/components/Avatar";
 import { formatDateTime } from "@/shared/lib/locale";
 
 interface Props {
+  currentUserId?: string;
   message: MessageRead;
 }
 
@@ -10,9 +11,11 @@ function formatTimestamp(value: string) {
   return formatDateTime(value);
 }
 
-export default function MessageBubble({ message }: Props) {
-  const isUser = message.author_id !== null;
-  const authorLabel = isUser
+export default function MessageBubble({ currentUserId, message }: Props) {
+  const isHumanMessage = message.author_id !== null;
+  const isOwnMessage =
+    isHumanMessage && currentUserId != null && message.author_id === currentUserId;
+  const authorLabel = isHumanMessage
     ? (message.author_name ?? "Пользователь")
     : (message.agent_name ?? "Агент");
   const agentKey =
@@ -25,10 +28,17 @@ export default function MessageBubble({ message }: Props) {
       : agentKey === "qa" || message.agent_name === "QAAgent"
         ? "border-ink/10 bg-white/90"
         : "border-black/10 bg-white/80";
+  const bubbleClass = isOwnMessage
+    ? "rounded-[12px] border-ink bg-ink text-white"
+    : isHumanMessage
+      ? "rounded-[10px] border-black/10 bg-white/80"
+      : `rounded-[10px] ${accent}`;
 
   return (
-    <div className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-      {!isUser ? (
+    <div
+      className={`flex items-end gap-3 ${isOwnMessage ? "justify-end" : "justify-start"}`}
+    >
+      {!isOwnMessage ? (
         <Avatar
           className="h-10 w-10 shrink-0 text-xs"
           imageUrl={message.author_avatar_url}
@@ -39,25 +49,23 @@ export default function MessageBubble({ message }: Props) {
       <div
         className={[
           "max-w-[92%] border px-4 py-3 shadow-soft sm:max-w-[88%]",
-          isUser
-            ? "rounded-[12px] border-ink bg-ink text-white"
-            : `rounded-[10px] ${accent}`,
+          bubbleClass,
         ].join(" ")}
       >
         <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
           <span>{authorLabel}</span>
-          <span className={isUser ? "text-white/60" : "text-slate/60"}>
+          <span className={isOwnMessage ? "text-white/60" : "text-slate/60"}>
             {formatTimestamp(message.created_at)}
           </span>
         </div>
         <p
-          className={`break-words text-sm leading-7 ${isUser ? "text-white/90" : "text-slate/80"}`}
+          className={`break-words text-sm leading-7 ${isOwnMessage ? "text-white/90" : "text-slate/80"}`}
         >
           {message.content}
         </p>
       </div>
 
-      {isUser ? (
+      {isOwnMessage ? (
         <Avatar
           className="h-10 w-10 shrink-0 text-xs"
           imageUrl={message.author_avatar_url}

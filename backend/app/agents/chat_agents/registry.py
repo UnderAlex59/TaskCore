@@ -108,7 +108,7 @@ def _unknown_agent_result(requested_agent: str) -> ChatAgentResult:
         agent_name="ManagerAgent",
         message_type="agent_answer",
         response=(
-            f"Агент '{requested_agent}' не зарегистрирован. "
+            f"Agent '{requested_agent}' не зарегистрирован. "
             f"Доступные агенты: {available_keys}."
         ),
         source_ref={
