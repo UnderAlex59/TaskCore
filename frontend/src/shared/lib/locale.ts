@@ -42,18 +42,20 @@ const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
 };
 
 const AGENT_KEY_LABELS: Record<string, string> = {
+  "chat-routing": "Маршрутизация чата",
   "change-tracker": "Трекер изменений",
   manager: "Маршрутизатор",
   qa: "Агент вопросов",
+  "task-validation": "Валидация задачи",
 };
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   "admin.llm_override.updated": "Обновлено правило маршрутизации агента",
   "admin.llm_provider.created": "Создан профиль провайдера",
-  "admin.llm_provider.default_set": "Изменён провайдер по умолчанию",
+  "admin.llm_provider.default_set": "Изменен провайдер по умолчанию",
   "admin.llm_provider.tested": "Проверено подключение к провайдеру",
-  "admin.llm_provider.updated": "Обновлён профиль провайдера",
-  "admin.validation_question.deleted": "Удалён вопрос из очереди валидации",
+  "admin.llm_provider.updated": "Обновлен профиль провайдера",
+  "admin.validation_question.deleted": "Удален вопрос из очереди валидации",
   "auth.login.success": "Успешный вход",
   "auth.logout": "Выход из системы",
   "auth.refresh.success": "Продление сессии",
@@ -62,10 +64,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   "chat.message_sent": "Отправлено сообщение",
   "chat.proposal_requested": "Запрошено изменение требования",
   "project.created": "Создан проект",
-  "project.deleted": "Удалён проект",
-  "project.member_removed": "Участник удалён из проекта",
-  "project.member_upserted": "Состав участников проекта обновлён",
-  "project.updated": "Проект обновлён",
+  "project.deleted": "Удален проект",
+  "project.member_removed": "Участник удален из проекта",
+  "project.member_upserted": "Состав участников проекта обновлен",
+  "project.updated": "Проект обновлен",
   "proposal.created": "Создано предложение изменения",
   "proposal.reviewed": "Предложение изменения рассмотрено",
   "rule.created": "Создано правило",
@@ -77,7 +79,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   "task.deleted": "Удалена задача",
   "task.updated": "Задача обновлена",
   "task.validated": "Задача проверена",
-  "user.updated": "Профиль пользователя обновлён",
+  "user.updated": "Профиль пользователя обновлен",
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
@@ -205,7 +207,9 @@ export function getTaskStatusLabel(status: string | null | undefined) {
     return "Статус не указан";
   }
 
-  return TASK_STATUS_LABELS[status as TaskStatus] ?? normalizeFallbackLabel(status);
+  return (
+    TASK_STATUS_LABELS[status as TaskStatus] ?? normalizeFallbackLabel(status)
+  );
 }
 
 export function getValidationVerdictLabel(

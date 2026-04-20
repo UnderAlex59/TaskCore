@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 
 import {
   adminApi,
+  type AgentDirectoryRead,
   type AgentOverrideRead,
   type ProviderConfigPayload,
   type ProviderConfigRead,
@@ -9,10 +10,7 @@ import {
 } from "@/api/adminApi";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
-import {
-  getAgentKeyLabel,
-  getProviderKindLabel,
-} from "@/shared/lib/locale";
+import { getAgentKeyLabel, getProviderKindLabel } from "@/shared/lib/locale";
 
 type ProviderFormState = {
   base_url: string;
@@ -32,16 +30,14 @@ type OverrideDraft = {
 };
 
 const PROVIDER_OPTIONS: Array<{ description: string; value: ProviderKind }> = [
-  { value: "openai", description: "Облачный API OpenAI" },
-  { value: "ollama", description: "Локальный сервер Ollama" },
+  { value: "openai", description: "Облачный профиль OpenAI" },
+  { value: "ollama", description: "Локальный профиль Ollama" },
   { value: "openrouter", description: "Профиль OpenRouter" },
-  { value: "gigachat", description: "GigaChat с обменом токенов" },
-  { value: "openai_compatible", description: "Совместимый с OpenAI API сервер" },
-];
-
-const AGENT_OPTIONS = [
-  { key: "qa", label: "Агент вопросов" },
-  { key: "change-tracker", label: "Трекер изменений" },
+  { value: "gigachat", description: "Профиль GigaChat" },
+  {
+    value: "openai_compatible",
+    description: "Совместимый сервер по OpenAI API",
+  },
 ];
 
 const DEFAULT_MODELS: Record<ProviderKind, string> = {
@@ -100,8 +96,12 @@ function toFormState(provider: ProviderConfigRead): ProviderFormState {
     model: provider.model,
     temperature: String(provider.temperature),
     enabled: provider.enabled,
-    input_cost_per_1k_tokens: provider.input_cost_per_1k_tokens ? String(provider.input_cost_per_1k_tokens) : "",
-    output_cost_per_1k_tokens: provider.output_cost_per_1k_tokens ? String(provider.output_cost_per_1k_tokens) : "",
+    input_cost_per_1k_tokens: provider.input_cost_per_1k_tokens
+      ? String(provider.input_cost_per_1k_tokens)
+      : "",
+    output_cost_per_1k_tokens: provider.output_cost_per_1k_tokens
+      ? String(provider.output_cost_per_1k_tokens)
+      : "",
     secret: "",
   };
 }
@@ -109,11 +109,14 @@ function toFormState(provider: ProviderConfigRead): ProviderFormState {
 function buildOverrideDrafts(
   providers: ProviderConfigRead[],
   overrides: AgentOverrideRead[],
+  agentOptions: AgentDirectoryRead[],
 ): Record<string, OverrideDraft> {
-  const overrideByAgent = new Map(overrides.map((item) => [item.agent_key, item]));
+  const overrideByAgent = new Map(
+    overrides.map((item) => [item.agent_key, item]),
+  );
   const fallbackProviderId = providers[0]?.id ?? "";
   return Object.fromEntries(
-    AGENT_OPTIONS.map((item) => {
+    agentOptions.map((item) => {
       const override = overrideByAgent.get(item.key);
       return [
         item.key,
@@ -128,14 +131,25 @@ function buildOverrideDrafts(
 
 export default function ProviderSettingsPage() {
   const [providers, setProviders] = useState<ProviderConfigRead[]>([]);
-  const [overrideDrafts, setOverrideDrafts] = useState<Record<string, OverrideDraft>>({});
+  const [availableAgents, setAvailableAgents] = useState<AgentDirectoryRead[]>(
+    [],
+  );
+  const [overrideDrafts, setOverrideDrafts] = useState<
+    Record<string, OverrideDraft>
+  >({});
   const [form, setForm] = useState<ProviderFormState>(EMPTY_FORM);
-  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
+  const [testingProviderId, setTestingProviderId] = useState<string | null>(
+    null,
+  );
   const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
-  const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(null);
+  const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(
+    null,
+  );
   const [testMessages, setTestMessages] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -143,14 +157,23 @@ export default function ProviderSettingsPage() {
     try {
       setLoading(true);
       setError(null);
-      const [loadedProviders, loadedOverrides] = await Promise.all([
+      const [loadedProviders, loadedOverrides, loadedAgents] = await Promise.all([
         adminApi.listProviders(),
         adminApi.listOverrides(),
+        adminApi.listAvailableAgents(),
       ]);
       setProviders(loadedProviders);
-      setOverrideDrafts(buildOverrideDrafts(loadedProviders, loadedOverrides));
+      setAvailableAgents(loadedAgents);
+      setOverrideDrafts(
+        buildOverrideDrafts(loadedProviders, loadedOverrides, loadedAgents),
+      );
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось загрузить настройки провайдеров."));
+      setError(
+        getApiErrorMessage(
+          caught,
+          "Не удалось загрузить настройки модельных профилей.",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -158,7 +181,6 @@ export default function ProviderSettingsPage() {
 
   const onLoadData = useEffectEvent(loadData);
 
-  // Effect Events must stay out of deps, otherwise the load effect re-triggers itself.
   useEffect(() => {
     void onLoadData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -178,7 +200,9 @@ export default function ProviderSettingsPage() {
       setForm(EMPTY_FORM);
       await loadData();
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось сохранить профиль провайдера."));
+      setError(
+        getApiErrorMessage(caught, "Не удалось сохранить модельный профиль."),
+      );
     } finally {
       setSaving(false);
     }
@@ -190,10 +214,12 @@ export default function ProviderSettingsPage() {
       const result = await adminApi.testProvider(providerId);
       setTestMessages((current) => ({
         ...current,
-        [providerId]: `${result.ok ? "Успешно" : "Ошибка"}${result.latency_ms ? ` · ${result.latency_ms} мс` : ""} · ${result.message}`,
+        [providerId]: `${result.ok ? "Успешно" : "Ошибка"}${result.latency_ms ? ` / ${result.latency_ms} мс` : ""} / ${result.message}`,
       }));
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось проверить профиль провайдера."));
+      setError(
+        getApiErrorMessage(caught, "Не удалось проверить модельный профиль."),
+      );
     } finally {
       setTestingProviderId(null);
     }
@@ -205,7 +231,9 @@ export default function ProviderSettingsPage() {
       await adminApi.setDefaultProvider(providerId);
       await loadData();
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось обновить провайдера по умолчанию."));
+      setError(
+        getApiErrorMessage(caught, "Не удалось обновить профиль по умолчанию."),
+      );
     } finally {
       setSettingDefaultId(null);
     }
@@ -214,16 +242,25 @@ export default function ProviderSettingsPage() {
   async function handleSaveOverride(agentKey: string) {
     const draft = overrideDrafts[agentKey];
     if (!draft?.provider_config_id) {
-      setError("Выберите провайдера перед сохранением маршрутизации.");
+      setError("Выберите профиль перед сохранением правила маршрутизации.");
       return;
     }
 
     try {
       setSavingOverrideKey(agentKey);
-      await adminApi.updateOverride(agentKey, draft.provider_config_id, draft.enabled);
+      await adminApi.updateOverride(
+        agentKey,
+        draft.provider_config_id,
+        draft.enabled,
+      );
       await loadData();
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось сохранить маршрутизацию агента."));
+      setError(
+        getApiErrorMessage(
+          caught,
+          "Не удалось сохранить правило маршрутизации.",
+        ),
+      );
     } finally {
       setSavingOverrideKey(null);
     }
@@ -239,47 +276,75 @@ export default function ProviderSettingsPage() {
     setForm(EMPTY_FORM);
   }
 
+  const agentNameByKey = new Map(
+    availableAgents.map((agent) => [agent.key, agent.name]),
+  );
+
+  function getResolvedAgentLabel(agentKey: string) {
+    return agentNameByKey.get(agentKey) ?? getAgentKeyLabel(agentKey);
+  }
+
   if (loading) {
-    return <LoadingSpinner label="Загрузка провайдеров" />;
+    return <LoadingSpinner label="Загрузка модельных профилей" />;
   }
 
   return (
     <section className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <form className="glass-panel space-y-4 rounded-[28px] border border-black/10 p-6 shadow-panel" onSubmit={handleSubmit}>
+        <form
+          className="glass-panel space-y-4 rounded-[28px] border border-black/10 p-6 shadow-panel"
+          onSubmit={handleSubmit}
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">Профиль провайдера</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">
+                Модельный профиль
+              </p>
               <h3 className="mt-2 text-2xl font-extrabold text-ink">
-                {editingProviderId ? "Редактирование рабочего профиля" : "Создание нового профиля"}
+                {editingProviderId
+                  ? "Редактирование рабочего профиля"
+                  : "Создание нового профиля"}
               </h3>
             </div>
             {editingProviderId ? (
-              <button className="ui-button-secondary" onClick={resetForm} type="button">
+              <button
+                className="ui-button-secondary"
+                onClick={resetForm}
+                type="button"
+              >
                 Отмена
               </button>
             ) : null}
           </div>
 
           {error ? (
-            <p aria-live="polite" className="rounded-2xl bg-ember/10 px-4 py-3 text-sm text-ember">
+            <p
+              aria-live="polite"
+              className="rounded-2xl bg-ember/10 px-4 py-3 text-sm text-ember"
+            >
               {error}
             </p>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Название профиля</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Название профиля
+              </span>
               <input
                 className="ui-field"
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                placeholder="Экспериментальный OpenRouter"
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, name: event.target.value }))
+                }
+                placeholder="Основной OpenRouter"
                 required
                 value={form.name}
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Тип провайдера</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Тип подключения
+              </span>
               <select
                 className="ui-field"
                 onChange={(event) => {
@@ -287,15 +352,21 @@ export default function ProviderSettingsPage() {
                   setForm((current) => ({
                     ...current,
                     provider_kind,
-                    base_url: current.base_url || DEFAULT_BASE_URLS[provider_kind] || "",
-                    model: current.model === DEFAULT_MODELS[current.provider_kind] ? DEFAULT_MODELS[provider_kind] : current.model,
+                    base_url:
+                      current.base_url ||
+                      DEFAULT_BASE_URLS[provider_kind] ||
+                      "",
+                    model:
+                      current.model === DEFAULT_MODELS[current.provider_kind]
+                        ? DEFAULT_MODELS[provider_kind]
+                        : current.model,
                   }));
                 }}
                 value={form.provider_kind}
               >
                 {PROVIDER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {getProviderKindLabel(option.value)} · {option.description}
+                    {getProviderKindLabel(option.value)} / {option.description}
                   </option>
                 ))}
               </select>
@@ -304,19 +375,33 @@ export default function ProviderSettingsPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Базовый URL</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Базовый URL
+              </span>
               <input
                 className="ui-field"
-                onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))}
-                placeholder={DEFAULT_BASE_URLS[form.provider_kind] ?? "https://example.local/v1"}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    base_url: event.target.value,
+                  }))
+                }
+                placeholder={
+                  DEFAULT_BASE_URLS[form.provider_kind] ??
+                  "https://example.local/v1"
+                }
                 value={form.base_url}
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Модель</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Модель
+              </span>
               <input
                 className="ui-field"
-                onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, model: event.target.value }))
+                }
                 placeholder={DEFAULT_MODELS[form.provider_kind]}
                 required
                 value={form.model}
@@ -326,23 +411,37 @@ export default function ProviderSettingsPage() {
 
           <div className="grid gap-4 md:grid-cols-3">
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Температура</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Температура
+              </span>
               <input
                 className="ui-field"
                 max="2"
                 min="0"
-                onChange={(event) => setForm((current) => ({ ...current, temperature: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    temperature: event.target.value,
+                  }))
+                }
                 step="0.1"
                 type="number"
                 value={form.temperature}
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Стоимость входа / 1k</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Стоимость входа / 1k
+              </span>
               <input
                 className="ui-field"
                 min="0"
-                onChange={(event) => setForm((current) => ({ ...current, input_cost_per_1k_tokens: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    input_cost_per_1k_tokens: event.target.value,
+                  }))
+                }
                 placeholder="0.000000"
                 step="0.000001"
                 type="number"
@@ -350,11 +449,18 @@ export default function ProviderSettingsPage() {
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">Стоимость выхода / 1k</span>
+              <span className="mb-2 block text-sm font-semibold text-ink/70">
+                Стоимость выхода / 1k
+              </span>
               <input
                 className="ui-field"
                 min="0"
-                onChange={(event) => setForm((current) => ({ ...current, output_cost_per_1k_tokens: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    output_cost_per_1k_tokens: event.target.value,
+                  }))
+                }
                 placeholder="0.000000"
                 step="0.000001"
                 type="number"
@@ -365,13 +471,22 @@ export default function ProviderSettingsPage() {
 
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-ink/70">
-              Секрет {editingProviderId ? "(оставьте пустым, чтобы сохранить текущее значение)" : ""}
+              Ключ доступа{" "}
+              {editingProviderId
+                ? "(оставьте пустым, чтобы сохранить текущее значение)"
+                : ""}
             </span>
             <input
               autoComplete="new-password"
               className="ui-field"
-              onChange={(event) => setForm((current) => ({ ...current, secret: event.target.value }))}
-              placeholder={form.provider_kind === "gigachat" ? "Ключ авторизации" : "API-ключ или токен"}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, secret: event.target.value }))
+              }
+              placeholder={
+                form.provider_kind === "gigachat"
+                  ? "Токен авторизации"
+                  : "API-ключ или токен"
+              }
               type="password"
               value={form.secret}
             />
@@ -380,7 +495,12 @@ export default function ProviderSettingsPage() {
           <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white/60 px-4 py-3 text-sm text-ink">
             <input
               checked={form.enabled}
-              onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  enabled: event.target.checked,
+                }))
+              }
               type="checkbox"
             />
             Включить этот профиль сразу после сохранения
@@ -388,9 +508,17 @@ export default function ProviderSettingsPage() {
 
           <div className="flex flex-wrap gap-3">
             <button className="ui-button-primary" disabled={saving} type="submit">
-              {saving ? "Сохраняем..." : editingProviderId ? "Обновить профиль" : "Создать профиль"}
+              {saving
+                ? "Сохраняем..."
+                : editingProviderId
+                  ? "Обновить профиль"
+                  : "Создать профиль"}
             </button>
-            <button className="ui-button-secondary" onClick={resetForm} type="button">
+            <button
+              className="ui-button-secondary"
+              onClick={resetForm}
+              type="button"
+            >
               Сбросить
             </button>
           </div>
@@ -398,22 +526,34 @@ export default function ProviderSettingsPage() {
 
         <div className="glass-panel space-y-4 rounded-[28px] border border-black/10 p-6 shadow-panel">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">Маршрутизация агентов</p>
-            <h3 className="mt-2 text-2xl font-extrabold text-ink">Отдельные правила для агентов</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">
+              Маршрутизация
+            </p>
+            <h3 className="mt-2 text-2xl font-extrabold text-ink">
+              Специальные правила для сценариев
+            </h3>
             <p className="mt-3 text-sm leading-7 text-ink/70">
-              Направляйте `qa` и `change-tracker` на другой профиль без смены
-              глобального провайдера по умолчанию.
+              Направляйте отдельные LLM-сценарии на выделенный профиль, не
+              меняя глобальный профиль по умолчанию.
             </p>
           </div>
 
-          {AGENT_OPTIONS.map((agent) => {
+          {availableAgents.map((agent) => {
             const draft = overrideDrafts[agent.key];
             return (
-              <article key={agent.key} className="rounded-[24px] border border-black/10 bg-white/70 p-4">
+              <article
+                key={agent.key}
+                className="rounded-[24px] border border-black/10 bg-white/70 p-4"
+              >
                 <div className="flex flex-col gap-3">
                   <div>
-                    <p className="text-sm font-bold text-ink">{agent.label}</p>
-                    <p className="text-xs uppercase tracking-[0.14em] text-ink/45">{agent.key}</p>
+                    <p className="text-sm font-bold text-ink">{agent.name}</p>
+                    <p className="text-xs uppercase tracking-[0.14em] text-ink/45">
+                      {agent.key}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-ink/65">
+                      {agent.description}
+                    </p>
                   </div>
                   <select
                     className="ui-field"
@@ -429,11 +569,13 @@ export default function ProviderSettingsPage() {
                     value={draft?.provider_config_id ?? ""}
                   >
                     <option value="" disabled>
-                      Выберите провайдера
+                      Выберите профиль
                     </option>
                     {providers.map((provider) => (
                       <option key={provider.id} value={provider.id}>
-                        {provider.name} · {getProviderKindLabel(provider.provider_kind)} · {provider.model}
+                        {provider.name} /{" "}
+                        {getProviderKindLabel(provider.provider_kind)} /{" "}
+                        {provider.model}
                       </option>
                     ))}
                   </select>
@@ -444,7 +586,9 @@ export default function ProviderSettingsPage() {
                         setOverrideDrafts((current) => ({
                           ...current,
                           [agent.key]: {
-                            ...(current[agent.key] ?? { provider_config_id: providers[0]?.id ?? "" }),
+                            ...(current[agent.key] ?? {
+                              provider_config_id: providers[0]?.id ?? "",
+                            }),
                             enabled: event.target.checked,
                           },
                         }))
@@ -455,22 +599,35 @@ export default function ProviderSettingsPage() {
                   </label>
                   <button
                     className="ui-button-secondary"
-                    disabled={savingOverrideKey === agent.key || !draft?.provider_config_id}
+                    disabled={
+                      savingOverrideKey === agent.key || !draft?.provider_config_id
+                    }
                     onClick={() => void handleSaveOverride(agent.key)}
                     type="button"
                   >
-                    {savingOverrideKey === agent.key ? "Сохраняем..." : "Сохранить правило"}
+                    {savingOverrideKey === agent.key
+                      ? "Сохраняем..."
+                      : "Сохранить правило"}
                   </button>
                 </div>
               </article>
             );
           })}
+          {availableAgents.length === 0 ? (
+            <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/70">
+              В системе пока не зарегистрировано отдельных LLM-сценариев для
+              переопределения.
+            </p>
+          ) : null}
         </div>
       </div>
 
       <div className="space-y-4">
         {providers.map((provider) => (
-          <article key={provider.id} className="glass-panel rounded-[28px] border border-black/10 p-5 shadow-panel">
+          <article
+            key={provider.id}
+            className="glass-panel rounded-[28px] border border-black/10 p-5 shadow-panel"
+          >
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -489,8 +646,12 @@ export default function ProviderSettingsPage() {
                   ) : null}
                 </div>
                 <div>
-                  <h3 className="text-2xl font-extrabold text-ink">{provider.name}</h3>
-                  <p className="mt-1 text-sm text-ink/60">{provider.base_url}</p>
+                  <h3 className="text-2xl font-extrabold text-ink">
+                    {provider.name}
+                  </h3>
+                  <p className="mt-1 text-sm text-ink/60">
+                    {provider.base_url}
+                  </p>
                 </div>
                 <dl className="grid gap-3 text-sm text-ink/70 sm:grid-cols-2 xl:grid-cols-4">
                   <div>
@@ -502,25 +663,35 @@ export default function ProviderSettingsPage() {
                     <dd>{provider.temperature}</dd>
                   </div>
                   <div>
-                    <dt className="font-semibold text-ink/45">Секрет</dt>
+                    <dt className="font-semibold text-ink/45">Ключ</dt>
                     <dd>{provider.masked_secret ?? "Не настроен"}</dd>
                   </div>
                   <div>
-                    <dt className="font-semibold text-ink/45">Используется для</dt>
+                    <dt className="font-semibold text-ink/45">
+                      Используется для
+                    </dt>
                     <dd>
                       {provider.used_by_agents.length > 0
-                        ? provider.used_by_agents.map((agentKey) => getAgentKeyLabel(agentKey)).join(", ")
+                        ? provider.used_by_agents
+                            .map((agentKey) => getResolvedAgentLabel(agentKey))
+                            .join(", ")
                         : "Только профиль по умолчанию"}
                     </dd>
                   </div>
                 </dl>
                 {testMessages[provider.id] ? (
-                  <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/75">{testMessages[provider.id]}</p>
+                  <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/75">
+                    {testMessages[provider.id]}
+                  </p>
                 ) : null}
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <button className="ui-button-secondary" onClick={() => startEdit(provider)} type="button">
+                <button
+                  className="ui-button-secondary"
+                  onClick={() => startEdit(provider)}
+                  type="button"
+                >
                   Изменить
                 </button>
                 <button
@@ -529,7 +700,9 @@ export default function ProviderSettingsPage() {
                   onClick={() => void handleTest(provider.id)}
                   type="button"
                 >
-                  {testingProviderId === provider.id ? "Проверяем..." : "Проверить подключение"}
+                  {testingProviderId === provider.id
+                    ? "Проверяем..."
+                    : "Проверить подключение"}
                 </button>
                 <button
                   className="ui-button-primary"

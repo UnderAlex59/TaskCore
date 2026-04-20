@@ -9,7 +9,7 @@ from typing import Any
 
 from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
 from app.agents.chat_agents.llm import ChatAgentLLMProfile
-from app.agents.chat_routing import message_relates_to_task_context
+from app.agents.chat_routing import analyze_task_context_relevance
 from app.agents.state import ChatState
 from app.core.config import get_settings
 
@@ -100,7 +100,13 @@ def _register_builtin_subgraphs() -> None:
     )
 
     async def qa_can_handle(context: ChatAgentContext) -> bool:
-        return context.message_type == "question" and message_relates_to_task_context(
+        if context.message_type != "question":
+            return False
+        return await analyze_task_context_relevance(
+            db=context.db,
+            actor_user_id=context.actor_user_id,
+            task_id=context.task_id,
+            project_id=context.project_id,
             task_title=context.task_title,
             task_content=context.task_content,
             message_content=context.message_content,

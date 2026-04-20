@@ -88,10 +88,11 @@ export default function TagMultiSelect({
   return (
     <div ref={rootRef} className="block">
       {hideLabel ? null : (
-        <span className="mb-2 block text-sm font-semibold text-ink/70">
+        <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
           {label}
         </span>
       )}
+
       <div className="relative">
         <button
           aria-label={`${label}: ${summary}`}
@@ -103,10 +104,12 @@ export default function TagMultiSelect({
           onClick={() => setIsOpen((current) => !current)}
           type="button"
         >
-          <span className={value.length === 0 ? "text-slate/50" : "text-ink"}>
+          <span
+            className={value.length === 0 ? "text-[#7a869a]" : "text-[#172b4d]"}
+          >
             {summary}
           </span>
-          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate/60">
+          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[#626f86]">
             {isOpen ? "Скрыть" : "Выбрать"}
           </span>
         </button>
@@ -114,7 +117,7 @@ export default function TagMultiSelect({
         {isOpen ? (
           <div
             id={panelId}
-            className="absolute z-20 mt-2 w-full rounded-[12px] border border-black/10 bg-white p-3 shadow-panel"
+            className="absolute z-20 mt-2 w-full rounded-[14px] border border-[rgba(9,30,66,0.12)] bg-white p-3 shadow-[0_12px_24px_rgba(9,30,66,0.08)]"
           >
             <input
               aria-label={`${label}: поиск`}
@@ -127,13 +130,13 @@ export default function TagMultiSelect({
               value={query}
             />
 
-            <div className="mt-3 max-h-60 overflow-auto rounded-[10px] border border-black/10 bg-slate-50/50 p-2">
+            <div className="mt-3 max-h-60 overflow-auto rounded-[12px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] p-2">
               {mergedOptions.length === 0 ? (
-                <p className="px-3 py-4 text-sm text-slate/70">
+                <p className="px-3 py-4 text-sm text-[#626f86]">
                   {noOptionsLabel}
                 </p>
               ) : filteredOptions.length === 0 ? (
-                <p className="px-3 py-4 text-sm text-slate/70">{emptyLabel}</p>
+                <p className="px-3 py-4 text-sm text-[#626f86]">{emptyLabel}</p>
               ) : (
                 filteredOptions.map((option) => {
                   const checked = value.includes(option.name);
@@ -141,7 +144,7 @@ export default function TagMultiSelect({
                   return (
                     <label
                       key={option.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-[8px] px-3 py-2 text-sm text-ink transition-colors hover:bg-white"
+                      className="flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 text-sm text-[#172b4d] transition-colors hover:bg-white"
                     >
                       <input
                         checked={checked}
@@ -155,10 +158,10 @@ export default function TagMultiSelect({
               )}
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate/70">
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-[#626f86]">
               <span>Выбрано: {value.length}</span>
               <button
-                className="font-semibold text-ember disabled:cursor-not-allowed disabled:text-slate/40"
+                className="font-semibold text-[#0c66e4] disabled:cursor-not-allowed disabled:text-[#97a0af]"
                 disabled={disabled || value.length === 0}
                 onClick={() => onChange([])}
                 type="button"
@@ -171,7 +174,7 @@ export default function TagMultiSelect({
       </div>
 
       {helperText ? (
-        <p className="mt-2 text-xs leading-6 text-slate/70">{helperText}</p>
+        <p className="mt-2 text-xs leading-6 text-[#626f86]">{helperText}</p>
       ) : null}
 
       {value.length > 0 ? (
@@ -180,7 +183,7 @@ export default function TagMultiSelect({
             <button
               aria-label={`Убрать тег ${tag}`}
               key={tag}
-              className="rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-slate/80 transition-colors hover:bg-black/10 disabled:cursor-default disabled:hover:bg-black/5"
+              className="rounded-full border border-[rgba(9,30,66,0.08)] bg-[#f7f8fa] px-3 py-1 text-xs font-semibold text-[#44546f] transition-colors hover:bg-[#eef0f3] disabled:cursor-default disabled:hover:bg-[#f7f8fa]"
               disabled={disabled}
               onClick={() => removeTag(tag)}
               type="button"

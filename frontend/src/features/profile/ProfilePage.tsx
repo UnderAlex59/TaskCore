@@ -37,7 +37,7 @@ export default function ProfilePage() {
       setUser(updatedUser);
       setCurrentPassword("");
       setNewPassword("");
-      setSuccess("Профиль обновлён.");
+      setSuccess("Профиль обновлен.");
     } catch (caught) {
       setError(getApiErrorMessage(caught, "Не удалось обновить профиль."));
     } finally {
@@ -45,7 +45,9 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleAvatarChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -57,7 +59,7 @@ export default function ProfilePage() {
       setSuccess(null);
       const updatedUser = await usersApi.uploadAvatar(file);
       setUser(updatedUser);
-      setSuccess("Аватар обновлён.");
+      setSuccess("Аватар обновлен.");
     } catch (caught) {
       setError(getApiErrorMessage(caught, "Не удалось загрузить аватар."));
     } finally {
@@ -73,7 +75,7 @@ export default function ProfilePage() {
       setSuccess(null);
       const updatedUser = await usersApi.updateMe({ remove_avatar: true });
       setUser(updatedUser);
-      setSuccess("Аватар удалён.");
+      setSuccess("Аватар удален.");
     } catch (caught) {
       setError(getApiErrorMessage(caught, "Не удалось удалить аватар."));
     } finally {
@@ -83,33 +85,35 @@ export default function ProfilePage() {
 
   return (
     <section className="space-y-6">
-      <header className="glass-panel border border-black/10 p-6 shadow-panel sm:p-8">
-        <p className="section-eyebrow">Профиль</p>
-        <h2 className="mt-3 text-3xl font-bold text-ink sm:text-4xl">
+      <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
+        <p className="section-eyebrow">Profile</p>
+        <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
           Настройки пользователя
         </h2>
-        <p className="mt-4 max-w-2xl text-sm leading-7 text-slate/80">
-          Здесь можно обновить никнейм, сменить пароль и загрузить аватар, который
-          будет показываться в чате.
+        <p className="mt-4 max-w-2xl text-sm leading-7 text-[#44546f]">
+          Обновите отображаемое имя, пароль и аватар, который используется в
+          интерфейсе и обсуждениях задач.
         </p>
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="glass-panel border border-black/10 p-6 shadow-panel">
+      <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-6">
           <div className="flex flex-col items-center text-center">
             <Avatar
               className="h-28 w-28 text-3xl"
               imageUrl={user.avatar_url}
               name={getUserDisplayName(user)}
             />
-            <h3 className="mt-4 text-2xl font-bold text-ink">
+            <h3 className="mt-4 text-2xl font-semibold text-[#172b4d]">
               {getUserDisplayName(user)}
             </h3>
-            <p className="mt-2 break-all text-sm text-slate/70">{user.email}</p>
+            <p className="mt-2 break-all text-sm text-[#44546f]">
+              {user.email}
+            </p>
           </div>
 
           <div className="mt-6 space-y-3">
-            <label className="ui-button-primary flex cursor-pointer items-center justify-center">
+            <label className="ui-button-secondary flex cursor-pointer items-center justify-center">
               <span>{uploading ? "Загружаем..." : "Загрузить аватар"}</span>
               <input
                 accept="image/*"
@@ -120,7 +124,7 @@ export default function ProfilePage() {
               />
             </label>
             <button
-              className="ui-button-secondary w-full"
+              className="ui-button-ghost w-full justify-center"
               disabled={removingAvatar || !user.avatar_url}
               onClick={() => void handleRemoveAvatar()}
               type="button"
@@ -131,11 +135,11 @@ export default function ProfilePage() {
         </aside>
 
         <form
-          className="glass-panel space-y-5 border border-black/10 p-6 shadow-panel"
+          className="space-y-5 rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-6"
           onSubmit={handleSubmit}
         >
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-ink/70">
+            <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
               Никнейм
             </span>
             <input
@@ -149,7 +153,7 @@ export default function ProfilePage() {
 
           <div className="grid gap-5 md:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">
+              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                 Текущий пароль
               </span>
               <input
@@ -162,7 +166,7 @@ export default function ProfilePage() {
             </label>
 
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">
+              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                 Новый пароль
               </span>
               <input
@@ -175,18 +179,18 @@ export default function ProfilePage() {
             </label>
           </div>
 
-          <p className="text-xs leading-6 text-slate/65">
-            Если меняете пароль, укажите текущий. Новый пароль должен содержать
-            минимум 8 символов, одну заглавную букву и одну цифру.
+          <p className="text-xs leading-6 text-[#626f86]">
+            Если меняете пароль, укажите текущий. Новый пароль должен
+            соответствовать правилам безопасности системы.
           </p>
 
           {error ? (
-            <p className="rounded-[10px] bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p className="rounded-[12px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]">
               {error}
             </p>
           ) : null}
           {success ? (
-            <p className="rounded-[10px] bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            <p className="rounded-[12px] border border-[rgba(34,154,22,0.14)] bg-[#e8f5e9] px-4 py-3 text-sm text-[#216e1f]">
               {success}
             </p>
           ) : null}

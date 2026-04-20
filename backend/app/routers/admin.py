@@ -8,6 +8,7 @@ from app.core.dependencies import DBSession, require_role
 from app.models.task import TaskStatus
 from app.models.user import User, UserRole
 from app.schemas.admin_llm import (
+    AgentDirectoryRead,
     AgentOverrideRead,
     AgentOverrideUpdate,
     ProviderConfigPayload,
@@ -85,6 +86,13 @@ async def list_llm_overrides(
     db: DBSession,
 ) -> list[AgentOverrideRead]:
     return await AdminLLMService.list_agent_overrides(db)
+
+
+@router.get("/llm/agents", response_model=list[AgentDirectoryRead])
+async def list_llm_agents(
+    _: AdminUser,
+) -> list[AgentDirectoryRead]:
+    return await AdminLLMService.list_available_agents()
 
 
 @router.put("/llm/overrides/{agent_key}", response_model=AgentOverrideRead)

@@ -13,11 +13,9 @@ export function LoadingSpinner({
 
   return (
     <div aria-live="polite" className={wrapperClass} role="status">
-      <div className="glass-panel flex items-center gap-3 rounded-[10px] border border-black/10 px-5 py-3 shadow-panel">
-        <span className="h-3 w-3 animate-pulse rounded-full bg-ember" />
-        <span className="text-sm font-semibold uppercase tracking-[0.18em] text-ink/70">
-          {label}
-        </span>
+      <div className="flex items-center gap-3 rounded-[14px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-3 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
+        <span className="h-3 w-3 animate-pulse rounded-full bg-[#0c66e4]" />
+        <span className="text-sm font-semibold text-[#44546f]">{label}</span>
       </div>
     </div>
   );

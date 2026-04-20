@@ -14,25 +14,25 @@ function formatTimestamp(value: string) {
 export default function MessageBubble({ currentUserId, message }: Props) {
   const isHumanMessage = message.author_id !== null;
   const isOwnMessage =
-    isHumanMessage && currentUserId != null && message.author_id === currentUserId;
+    isHumanMessage &&
+    currentUserId != null &&
+    message.author_id === currentUserId;
   const authorLabel = isHumanMessage
     ? (message.author_name ?? "Пользователь")
-    : (message.agent_name ?? "Агент");
+    : (message.agent_name ?? "Система");
   const agentKey =
     typeof message.source_ref?.agent_key === "string"
       ? message.source_ref.agent_key
       : null;
-  const accent =
-    agentKey === "change-tracker" || message.agent_name === "ChangeTrackerAgent"
-      ? "border-ember/20 bg-mist/70"
+
+  const surfaceClass = isOwnMessage
+    ? "border-[#0c66e4] bg-[#0c66e4] text-white"
+    : agentKey === "change-tracker" ||
+        message.agent_name === "ChangeTrackerAgent"
+      ? "border-[rgba(172,107,8,0.18)] bg-[#fff4e5] text-[#172b4d]"
       : agentKey === "qa" || message.agent_name === "QAAgent"
-        ? "border-ink/10 bg-white/90"
-        : "border-black/10 bg-white/80";
-  const bubbleClass = isOwnMessage
-    ? "rounded-[12px] border-ink bg-ink text-white"
-    : isHumanMessage
-      ? "rounded-[10px] border-black/10 bg-white/80"
-      : `rounded-[10px] ${accent}`;
+        ? "border-[rgba(12,102,228,0.14)] bg-[#e9f2ff] text-[#172b4d]"
+        : "border-[rgba(9,30,66,0.1)] bg-white text-[#172b4d]";
 
   return (
     <div
@@ -48,18 +48,18 @@ export default function MessageBubble({ currentUserId, message }: Props) {
 
       <div
         className={[
-          "max-w-[92%] border px-4 py-3 shadow-soft sm:max-w-[88%]",
-          bubbleClass,
+          "max-w-[92%] rounded-[16px] border px-4 py-3 shadow-[0_1px_2px_rgba(9,30,66,0.05)] sm:max-w-[88%]",
+          surfaceClass,
         ].join(" ")}
       >
-        <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
           <span>{authorLabel}</span>
-          <span className={isOwnMessage ? "text-white/60" : "text-slate/60"}>
+          <span className={isOwnMessage ? "text-white/70" : "text-[#626f86]"}>
             {formatTimestamp(message.created_at)}
           </span>
         </div>
         <p
-          className={`break-words text-sm leading-7 ${isOwnMessage ? "text-white/90" : "text-slate/80"}`}
+          className={`break-words text-sm leading-7 ${isOwnMessage ? "text-white/95" : "text-[#172b4d]"}`}
         >
           {message.content}
         </p>

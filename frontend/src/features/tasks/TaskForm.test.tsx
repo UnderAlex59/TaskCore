@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import TaskForm from "@/features/tasks/TaskForm";
+import { buildTaskDocumentFromEditors } from "@/features/tasks/taskDocument";
 
 const baseTask = {
   id: "task-1",
@@ -30,7 +31,7 @@ const availableTags = [
 ];
 
 describe("TaskForm", () => {
-  it("submits editable task fields through the reference tag selector", async () => {
+  it("submits task content from the single document editor", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -42,30 +43,45 @@ describe("TaskForm", () => {
       />,
     );
 
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-
-    const titleInput = screen.getByRole("textbox", { name: "Название" });
+    const titleInput = screen.getByRole("textbox", {
+      name: "Название задачи",
+    });
     await user.clear(titleInput);
     await user.type(titleInput, "Approved workflow");
 
+    const documentInput = screen.getByRole("textbox", {
+      name: "Текст задачи",
+    });
+    await user.clear(documentInput);
+    await user.type(
+      documentInput,
+      "## Описание\nApproved workflow body\n\n## Acceptance criteria\nFilter preset is restored after refresh.",
+    );
+
     await user.click(screen.getByRole("button", { name: "Теги: Reports" }));
     await user.click(screen.getByRole("checkbox", { name: "Analytics" }));
-    await user.click(screen.getByRole("button", { name: "Сохранить задачу" }));
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить страницу" }),
+    );
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: "Approved workflow",
-      content: baseTask.content,
+      content: buildTaskDocumentFromEditors(
+        "## Описание\nApproved workflow body\n\n## Acceptance criteria\nFilter preset is restored after refresh.",
+        "",
+      ),
       tags: ["Reports", "Analytics"],
     });
   });
 
-  it("blocks explicit commit while post-approval changes are still unsaved", async () => {
+  it("keeps history changes in a separate pane and blocks commit when they are unsaved", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCommit = vi.fn().mockResolvedValue(undefined);
 
     render(
       <TaskForm
+        activePane="history"
         availableTags={availableTags}
         canCommitChanges
         embeddingsStale
@@ -84,12 +100,16 @@ describe("TaskForm", () => {
     });
     expect(commitButton).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Теги: Reports" }));
-    await user.click(screen.getByRole("checkbox", { name: "Analytics" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "История изменений" }),
+      "19.04 — Added clarification for refresh behavior.",
+    );
 
     expect(commitButton).toBeDisabled();
 
-    const saveButton = screen.getByRole("button", { name: "Сохранить задачу" });
+    const saveButton = screen.getByRole("button", {
+      name: "Сохранить страницу",
+    });
     expect(saveButton).toBeEnabled();
 
     await user.click(saveButton);

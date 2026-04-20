@@ -1,28 +1,31 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #0f172a;
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba(37, 99, 235, 0.14),
-      transparent 30%
-    ),
-    radial-gradient(
-      circle at bottom right,
-      rgba(148, 163, 184, 0.14),
-      transparent 28%
-    ),
-    #f8fafc;
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: #172b4d;
+  background: #f5f6f8;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
-  font-weight: 500;
-  --radius-panel: 12px;
+  font-weight: 400;
+  --radius-panel: 14px;
   --radius-control: 10px;
+  --surface-default: #ffffff;
+  --surface-subtle: #fafbfc;
+  --surface-muted: #f7f8fa;
+  --border-subtle: rgba(9, 30, 66, 0.12);
+  --border-strong: rgba(9, 30, 66, 0.2);
+  --text-primary: #172b4d;
+  --text-secondary: #44546f;
+  --text-muted: #626f86;
+  --brand-primary: #0c66e4;
+  --brand-primary-strong: #0055cc;
+  --brand-tint: #e9f2ff;
+  --success-tint: #e8f5e9;
+  --warning-tint: #fff4e5;
+  --danger-tint: #fdecec;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -48,35 +51,35 @@
 
 @layer components {
   .skip-link {
-    @apply sr-only left-4 top-4 z-[60] rounded-[10px] bg-ink px-4 py-2 text-sm font-semibold text-white focus:not-sr-only focus:fixed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/20;
+    @apply sr-only left-4 top-4 z-[60] rounded-[10px] bg-[#172b4d] px-4 py-2 text-sm font-semibold text-white focus:not-sr-only focus:fixed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100;
   }
 
   .ui-field {
-    @apply w-full rounded-[10px] border border-black/10 bg-white/90 px-4 py-3 text-base text-ink placeholder:text-slate/50 transition-[border-color,box-shadow,background-color,color] focus-visible:border-ember focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/10 disabled:cursor-not-allowed disabled:bg-black/5 disabled:text-ink/50 sm:text-sm;
+    @apply w-full rounded-[10px] border border-[rgba(9,30,66,0.14)] bg-white px-4 py-3 text-sm text-[#172b4d] shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] transition-[border-color,box-shadow,background-color,color] placeholder:text-[#7a869a] focus-visible:border-[#0c66e4] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#f4f5f7] disabled:text-[#7a869a];
   }
 
   .ui-button-primary {
-    @apply inline-flex items-center justify-center rounded-[10px] bg-ember px-4 py-2.5 text-sm font-semibold text-white touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-ember/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember/20 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-[10px] border border-[#0c66e4] bg-[#0c66e4] px-4 py-2.5 text-sm font-semibold text-white transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[#0055cc] hover:bg-[#0055cc] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-secondary {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-black/10 bg-white/90 px-4 py-2.5 text-sm font-semibold text-ink touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ink/10 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-[10px] border border-[rgba(9,30,66,0.14)] bg-white px-4 py-2.5 text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-ghost {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-black/10 bg-transparent px-4 py-2.5 text-sm font-semibold text-ink touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ink/10 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-[10px] border border-transparent bg-transparent px-4 py-2.5 text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[rgba(9,30,66,0.12)] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-danger {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 touch-manipulation transition-[background-color,border-color,color,box-shadow,opacity,transform] hover:bg-red-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-[10px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-2.5 text-sm font-semibold text-[#ae2e24] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f9d8d6] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .section-eyebrow {
-    @apply text-xs font-bold uppercase tracking-[0.2em] text-ember;
+    @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84];
   }
 
   .subtle-divider {
-    @apply border-black/10;
+    @apply border-[rgba(9,30,66,0.12)];
   }
 }
 
@@ -85,24 +88,8 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   margin: 0;
-  color: #0f172a;
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba(37, 99, 235, 0.08),
-      transparent 28%
-    ),
-    radial-gradient(
-      circle at bottom right,
-      rgba(148, 163, 184, 0.14),
-      transparent 32%
-    ),
-    linear-gradient(
-      180deg,
-      rgba(248, 250, 252, 0.98),
-      rgba(226, 232, 240, 0.84)
-    ),
-    #f8fafc;
+  color: var(--text-primary);
+  background: #f5f6f8;
   padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom)
     var(--safe-area-left);
 }
@@ -115,19 +102,16 @@ body {
 .app-shell {
   min-height: 100vh;
   min-height: 100svh;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.08), transparent 18%),
-    linear-gradient(
-      180deg,
-      rgba(248, 250, 252, 0.96),
-      rgba(226, 232, 240, 0.78)
-    );
+  background: linear-gradient(180deg, #f7f8fa 0%, #f1f2f4 100%);
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--surface-default);
   border-radius: var(--radius-panel);
-  backdrop-filter: blur(14px);
+  border: 1px solid var(--border-subtle);
+  box-shadow:
+    0 1px 2px rgba(9, 30, 66, 0.06),
+    0 8px 24px rgba(9, 30, 66, 0.04);
 }
 
 .mesh-card {
@@ -138,8 +122,12 @@ body {
 .mesh-card::after {
   content: "";
   position: absolute;
-  inset: auto -15% -65% 35%;
-  height: 180px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.18), transparent 68%);
+  inset: auto -10% -55% 48%;
+  height: 140px;
+  background: radial-gradient(
+    circle,
+    rgba(12, 102, 228, 0.08),
+    transparent 70%
+  );
   pointer-events: none;
 }

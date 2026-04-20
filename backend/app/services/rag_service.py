@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.rag_pipeline import run_rag_pipeline
 from app.models.task import Task, TaskAttachment
+from app.services.qdrant_service import QdrantService
 
 
 class RagService:
@@ -24,7 +25,24 @@ class RagService:
         query_text: str,
         exclude_task_id: str | None = None,
         limit: int = 3,
-    ) -> list[dict[str, str | int]]:
+    ) -> list[dict[str, str | int | float]]:
+        semantic_matches = await QdrantService.search_related_tasks(
+            project_id=project_id,
+            query_text=query_text,
+            exclude_task_id=exclude_task_id,
+            limit=limit,
+        )
+        if semantic_matches:
+            return [
+                {
+                    "task_id": str(item["task_id"]),
+                    "title": str(item["title"]),
+                    "status": str(item["status"]),
+                    "score": float(item["score"]),
+                }
+                for item in semantic_matches
+            ]
+
         stmt: Select[tuple[Task]] = select(Task).where(Task.project_id == project_id).order_by(Task.updated_at.desc())
         if exclude_task_id is not None:
             stmt = stmt.where(Task.id != exclude_task_id)
@@ -57,7 +75,7 @@ class RagService:
         *,
         validation_result: dict | None = None,
     ) -> list[str]:
-        chunk_ids = await run_rag_pipeline(
+        rag_index = await run_rag_pipeline(
             task_id=task.id,
             title=task.title,
             content=task.content,
@@ -72,5 +90,13 @@ class RagService:
             ],
             validation_result=validation_result,
         )
-        task.indexed_at = datetime.now(timezone.utc)
-        return chunk_ids
+        indexed = await QdrantService.replace_task_knowledge(
+            task_id=task.id,
+            project_id=task.project_id,
+            task_title=task.title,
+            task_status=task.status.value,
+            tags=list(task.tags),
+            chunks=list(rag_index.get("chunks", [])),
+        )
+        task.indexed_at = datetime.now(timezone.utc) if indexed else None
+        return list(rag_index.get("chunk_ids", [])) if indexed else []

@@ -36,7 +36,7 @@ COPY --from=builder /app/backend /app/backend
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir --no-index --find-links=/tmp/wheels task-platform-backend \
     && rm -rf /tmp/wheels \
-    && mkdir -p /var/lib/task-platform/uploads \
+    && mkdir -p /var/lib/task-platform/uploads /var/lib/task-platform/langgraph_graphs \
     && chown -R appuser:appuser /app/backend /var/lib/task-platform
 
 USER appuser

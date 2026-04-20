@@ -37,7 +37,7 @@ export default function RegisterPage() {
       }
     }
 
-    return "Не удалось зарегистрироваться. Укажите уникальный email, минимум одну заглавную букву и одну цифру.";
+    return "Не удалось зарегистрироваться. Укажите уникальный email и корректный пароль.";
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -62,39 +62,43 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-[100svh] items-center justify-center px-3 py-4 sm:px-4 sm:py-8">
-      <div className="glass-panel grid w-full max-w-4xl gap-6 border border-black/10 p-6 shadow-panel sm:p-8 lg:grid-cols-[0.95fr_1.05fr] lg:p-10">
-        <section>
+    <div className="min-h-[100svh] bg-[#f5f6f8] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <section className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-8">
           <Link
-            className="section-eyebrow inline-flex items-center gap-2"
+            className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84] hover:text-[#0c66e4]"
             to="/"
           >
-            <span aria-hidden="true">/</span>
             На главную
           </Link>
-          <p className="mt-8 section-eyebrow">Регистрация</p>
-          <h1 className="mt-3 text-balance text-3xl font-bold text-ink sm:text-4xl">
-            Создайте аккаунт в системе.
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-slate/80">
-            После регистрации вы получите доступ к проектам, обсуждениям задач и
-            проверке требований в одном интерфейсе. Первый аккаунт автоматически
-            становится администратором платформы.
+          <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
+            Регистрация
           </p>
-          <div className="mt-8 space-y-3 text-sm leading-7 text-slate/75">
-            <p>1. Создайте аккаунт с надёжным паролем.</p>
-            <p>2. Откройте рабочее пространство и создайте первый проект.</p>
-            <p>
-              3. Уточняйте задачи через чат, проверку и согласование изменений.
-            </p>
+          <h1 className="mt-4 text-3xl font-semibold leading-tight text-[#172b4d]">
+            Создайте рабочий аккаунт.
+          </h1>
+          <p className="mt-4 text-sm leading-7 text-[#44546f]">
+            После регистрации вы получите доступ к проектам, требованиям и
+            командной работе по задачам. Первый аккаунт в системе становится
+            администратором платформы.
+          </p>
+          <div className="mt-8 space-y-3 text-sm leading-6 text-[#44546f]">
+            <p>1. Создайте аккаунт с рабочими данными.</p>
+            <p>2. Откройте проекты и настройте состав команды.</p>
+            <p>3. Ведите постановки и изменения в одном рабочем контексте.</p>
           </div>
         </section>
 
-        <section>
-          <p className="mt-1 max-w-2xl text-sm leading-7 text-slate/80">
-            Первый зарегистрированный аккаунт автоматически становится
-            администратором платформы. Все следующие аккаунты создаются как
-            разработчики и могут быть повышены из админ-консоли.
+        <section className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-8 lg:px-8">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
+            Новый пользователь
+          </p>
+          <h2 className="mt-3 text-2xl font-semibold text-[#172b4d]">
+            Зарегистрировать аккаунт
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-[#44546f]">
+            Используйте имя, email и пароль. После успешной регистрации вход
+            выполнится автоматически.
           </p>
 
           <form
@@ -102,7 +106,7 @@ export default function RegisterPage() {
             onSubmit={handleSubmit}
           >
             <label className="block sm:col-span-2">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">
+              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                 Полное имя
               </span>
               <input
@@ -118,7 +122,7 @@ export default function RegisterPage() {
             </label>
 
             <label className="block sm:col-span-2">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">
+              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                 Электронная почта
               </span>
               <input
@@ -135,7 +139,7 @@ export default function RegisterPage() {
             </label>
 
             <label className="block sm:col-span-2">
-              <span className="mb-2 block text-sm font-semibold text-ink/70">
+              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                 Пароль
               </span>
               <input
@@ -144,7 +148,7 @@ export default function RegisterPage() {
                 minLength={8}
                 name="password"
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Не менее 8 символов, заглавная буква и цифра"
+                placeholder="Не менее 8 символов"
                 required
                 type="password"
                 value={password}
@@ -154,24 +158,24 @@ export default function RegisterPage() {
             {error ? (
               <p
                 aria-live="polite"
-                className="rounded-[10px] bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 sm:col-span-2"
+                className="rounded-[12px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24] sm:col-span-2"
               >
                 {error}
               </p>
             ) : null}
 
             <button
-              className="ui-button-primary px-5 py-3 font-bold uppercase tracking-[0.12em] sm:col-span-2"
+              className="ui-button-primary justify-center sm:col-span-2"
               disabled={isLoading}
               type="submit"
             >
-              {isLoading ? "Создаём аккаунт..." : "Создать аккаунт"}
+              {isLoading ? "Создаем аккаунт..." : "Создать аккаунт"}
             </button>
           </form>
 
-          <p className="mt-6 text-sm text-slate/75">
+          <p className="mt-6 text-sm text-[#44546f]">
             Уже зарегистрированы?{" "}
-            <Link className="font-bold text-ember" to="/login">
+            <Link className="font-semibold text-[#0c66e4]" to="/login">
               Войти
             </Link>
           </p>

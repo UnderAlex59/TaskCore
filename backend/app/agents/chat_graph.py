@@ -167,12 +167,14 @@ async def _persist_chat_artifacts(state: ChatGraphState) -> ChatGraphState:
     project_id = state.get("project_id")
     message_type = str(state.get("message_type", ""))
 
-    if state.get("proposal_text") is not None or message_type == "agent_proposal":
+    duplicate_proposal = bool(source_ref.get("duplicate_proposal"))
+    if (state.get("proposal_text") is not None or message_type == "agent_proposal") and not duplicate_proposal:
         from app.services.audit_service import AuditService
         from app.services.proposal_service import ProposalService
 
         proposal = await ProposalService.create_from_message(
             str(task_id),
+            project_id=str(project_id) if project_id else None,
             source_message_id=str(source_message_id) if source_message_id else None,
             proposed_by=str(actor_user_id) if actor_user_id else None,
             proposal_text=str(state.get("proposal_text", state.get("message_content", ""))),

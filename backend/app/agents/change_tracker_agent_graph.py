@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
 from app.services.llm_runtime_service import LLMRuntimeService
+from app.services.qdrant_service import QdrantService
 
 CHANGE_TRACKER_AGENT_KEY = "change-tracker"
 CHANGE_TRACKER_AGENT_NAME = "ChangeTrackerAgent"
@@ -33,6 +34,7 @@ class ChangeTrackerGraphState(ChatState, total=False):
     model: str | None
     llm_ok: bool
     llm_error_message: str | None
+    duplicate_match: dict[str, object] | None
 
 
 def _fallback_acknowledgement() -> str:
@@ -91,6 +93,28 @@ async def _invoke_change_tracker_llm(state: ChangeTrackerGraphState) -> ChangeTr
     }
 
 
+async def _detect_duplicate_proposal(state: ChangeTrackerGraphState) -> ChangeTrackerGraphState:
+    proposal_text = str(state.get("message_content", "")).strip()
+    raw_response = str(state.get("response", "")).strip()
+    if state.get("llm_ok") and raw_response:
+        try:
+            payload = json.loads(raw_response)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            proposal_text = str(payload.get("proposal_text") or proposal_text).strip()
+
+    project_id = str(state.get("project_id") or "").strip()
+    if not proposal_text or not project_id:
+        return {"duplicate_match": None}
+
+    duplicate_match = await QdrantService.find_duplicate_proposal(
+        project_id=project_id,
+        proposal_text=proposal_text,
+    )
+    return {"duplicate_match": duplicate_match}
+
+
 def _finalize_change_request(state: ChangeTrackerGraphState) -> ChangeTrackerGraphState:
     proposal_text = str(state.get("message_content", ""))
     response = _fallback_acknowledgement()
@@ -105,13 +129,41 @@ def _finalize_change_request(state: ChangeTrackerGraphState) -> ChangeTrackerGra
             proposal_text = str(payload.get("proposal_text") or proposal_text).strip()
             response = str(payload.get("acknowledgement") or response).strip()
 
+    duplicate_match = state.get("duplicate_match")
+    if isinstance(duplicate_match, dict):
+        duplicate_task_id = str(duplicate_match.get("task_id", "")).strip()
+        duplicate_proposal_id = str(duplicate_match.get("proposal_id", "")).strip()
+        response = (
+            "Похожее предложение уже зарегистрировано"
+            + (f" в задаче {duplicate_task_id}" if duplicate_task_id else "")
+            + ". Новый дубликат не сохранён."
+        )
+        return {
+            "agent_name": CHANGE_TRACKER_AGENT_NAME,
+            "message_type": "agent_answer",
+            "proposal_text": proposal_text,
+            "response": response,
+            "source_ref": {
+                "collection": "task_proposals",
+                "provider_kind": state.get("provider_kind") if state.get("llm_ok") else None,
+                "model": state.get("model") if state.get("llm_ok") else None,
+                "fallback": not bool(state.get("llm_ok")),
+                "agent_key": CHANGE_TRACKER_AGENT_KEY,
+                "agent_description": CHANGE_TRACKER_AGENT_DESCRIPTION,
+                "routing_mode": str(state.get("routing_mode", "auto")),
+                "duplicate_proposal": True,
+                "duplicate_task_id": duplicate_task_id or None,
+                "duplicate_proposal_id": duplicate_proposal_id or None,
+            },
+        }
+
     return {
         "agent_name": CHANGE_TRACKER_AGENT_NAME,
         "message_type": "agent_proposal",
         "proposal_text": proposal_text,
         "response": response,
         "source_ref": {
-            "collection": "change_proposals",
+            "collection": "task_proposals",
             "provider_kind": state.get("provider_kind") if state.get("llm_ok") else None,
             "model": state.get("model") if state.get("llm_ok") else None,
             "fallback": not bool(state.get("llm_ok")),
@@ -127,10 +179,12 @@ def get_change_tracker_agent_graph():
     graph = StateGraph(ChangeTrackerGraphState)
     graph.add_node("prepare_change_request", _prepare_change_request)
     graph.add_node("invoke_change_tracker_llm", _invoke_change_tracker_llm)
+    graph.add_node("detect_duplicate_proposal", _detect_duplicate_proposal)
     graph.add_node("finalize_change_request", _finalize_change_request)
     graph.add_edge(START, "prepare_change_request")
     graph.add_edge("prepare_change_request", "invoke_change_tracker_llm")
-    graph.add_edge("invoke_change_tracker_llm", "finalize_change_request")
+    graph.add_edge("invoke_change_tracker_llm", "detect_duplicate_proposal")
+    graph.add_edge("detect_duplicate_proposal", "finalize_change_request")
     graph.add_edge("finalize_change_request", END)
     return graph.compile()
 

@@ -7,7 +7,6 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.chat_agents.registry import list_chat_agents
 from app.agents.provider_test_graph import run_provider_test_graph
 from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_provider_config import LLMProviderConfig
@@ -23,6 +22,7 @@ from app.schemas.admin_llm import (
     ProviderTestResult,
 )
 from app.services.audit_service import AuditService
+from app.services.llm_agent_registry import list_llm_agents
 from app.services.llm_runtime_service import LLMRuntimeService
 
 
@@ -238,7 +238,7 @@ class AdminLLMService:
         actor: User,
         db: AsyncSession,
     ) -> AgentOverrideRead:
-        available_agent_keys = {item.key for item in list_chat_agents()}
+        available_agent_keys = {item.key for item in list_llm_agents()}
         if agent_key not in available_agent_keys:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -293,7 +293,7 @@ class AdminLLMService:
                 description=item.description,
                 aliases=list(item.aliases),
             )
-            for item in list_chat_agents()
+            for item in list_llm_agents()
         ]
 
     @staticmethod

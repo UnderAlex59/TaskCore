@@ -57,6 +57,13 @@ export interface AgentOverrideRead {
   enabled: boolean;
 }
 
+export interface AgentDirectoryRead {
+  key: string;
+  name: string;
+  description: string;
+  aliases: string[];
+}
+
 export interface MonitoringSummaryRead {
   range: MonitoringRange;
   window_start: string;
@@ -221,6 +228,8 @@ export const adminApi = {
     ).data,
   listOverrides: async () =>
     (await apiClient.get<AgentOverrideRead[]>("/admin/llm/overrides")).data,
+  listAvailableAgents: async () =>
+    (await apiClient.get<AgentDirectoryRead[]>("/admin/llm/agents")).data,
   updateOverride: async (
     agentKey: string,
     providerConfigId: string,

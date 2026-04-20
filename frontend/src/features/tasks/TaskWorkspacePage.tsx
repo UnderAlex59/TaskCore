@@ -1,4 +1,10 @@
-import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import {
@@ -11,7 +17,6 @@ import { proposalsApi, type ProposalRead } from "@/api/proposalsApi";
 import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
 import { tasksApi, type TaskRead, type TaskUpdate } from "@/api/tasksApi";
 import ChatWindow from "@/features/chat/ChatWindow";
-import AttachmentUpload from "@/features/tasks/AttachmentUpload";
 import TaskForm from "@/features/tasks/TaskForm";
 import ValidationPanel from "@/features/tasks/ValidationPanel";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
@@ -28,6 +33,8 @@ import { useAuthStore } from "@/store/authStore";
 interface Props {
   mode: "chat" | "detail";
 }
+
+type WorkspaceTab = "document" | "chat" | "history";
 
 function canUserAccessChat(task: TaskRead, userId?: string, role?: string) {
   if (!userId || !role) {
@@ -65,6 +72,28 @@ function mergeMessages(current: MessageRead[], incoming: MessageRead[]) {
   });
 }
 
+function InspectorCard({
+  children,
+  title,
+  eyebrow,
+}: {
+  children: ReactNode;
+  eyebrow?: string;
+  title: string;
+}) {
+  return (
+    <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
+      {eyebrow ? (
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+          {eyebrow}
+        </p>
+      ) : null}
+      <h3 className="mt-2 text-lg font-semibold text-[#172b4d]">{title}</h3>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
 export default function TaskWorkspacePage({ mode }: Props) {
   const { projectId, taskId } = useParams();
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -88,6 +117,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [approving, setApproving] = useState(false);
   const [developerSelection, setDeveloperSelection] = useState("");
   const [testerSelection, setTesterSelection] = useState("");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(
+    mode === "chat" ? "chat" : "document",
+  );
 
   const developerMembers = useMemo(
     () => members.filter((member) => member.role === "DEVELOPER"),
@@ -105,6 +137,10 @@ export default function TaskWorkspacePage({ mode }: Props) {
     setDeveloperSelection(task?.developer_id ?? "");
     setTesterSelection(task?.tester_id ?? "");
   }, [task?.developer_id, task?.tester_id]);
+
+  useEffect(() => {
+    setActiveTab(mode === "chat" ? "chat" : "document");
+  }, [mode, taskId]);
 
   async function loadData() {
     if (!projectId || !taskId) {
@@ -389,7 +425,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
 
   if (!task || !projectId || !taskId) {
     return (
-      <section className="glass-panel border border-black/10 p-6 shadow-panel sm:p-8">
+      <section className="glass-panel p-6 sm:p-8">
         <p aria-live="polite" className="text-sm text-red-700">
           {error ?? "Задача не найдена."}
         </p>
@@ -417,14 +453,12 @@ export default function TaskWorkspacePage({ mode }: Props) {
     task.status === "awaiting_approval";
   const canReviewProposals = user?.role === "ADMIN" || user?.role === "ANALYST";
   const canCommitTask =
-    canEditTask &&
-    task.status !== "validating" &&
-    task.embeddings_stale;
+    canEditTask && task.status !== "validating" && task.embeddings_stale;
   const needsManualCommit =
     ["ready_for_dev", "in_progress", "done"].includes(task.status) &&
     task.embeddings_stale;
-  const fullChatHref = `/projects/${projectId}/tasks/${taskId}/chat`;
   const detailHref = `/projects/${projectId}/tasks/${taskId}`;
+  const tasksHref = `/projects/${projectId}/tasks`;
 
   if (mode === "chat" && !canAccessChat) {
     return <Navigate replace to={detailHref} />;
@@ -450,74 +484,84 @@ export default function TaskWorkspacePage({ mode }: Props) {
       key: "developer",
       title: "Разработчик",
       member: developer,
-      fallback: "Будет назначен на этапе approve.",
+      fallback: "Будет назначен после подтверждения.",
     },
     {
       key: "tester",
       title: "Тестировщик",
       member: tester,
-      fallback: "Будет назначен на этапе approve.",
+      fallback: "Будет назначен после подтверждения.",
     },
+  ];
+
+  const workspaceTabs: Array<{
+    key: WorkspaceTab;
+    label: string;
+    disabled?: boolean;
+  }> = [
+    { key: "document", label: "Задача" },
+    { key: "chat", label: "Чат", disabled: !canAccessChat },
+    { key: "history", label: "История изменений" },
   ];
 
   const chatSection = canAccessChat ? (
     <ChatWindow
-      actions={
-        mode === "detail" ? (
-          <Link className="ui-button-secondary" to={fullChatHref}>
-            Полноэкранный режим
-          </Link>
-        ) : null
-      }
-      className={
-        mode === "chat"
-          ? "h-[calc(100svh-14rem)] max-h-[calc(100svh-14rem)] min-h-[calc(100svh-14rem)]"
-          : "min-h-[30rem] xl:min-h-[36rem]"
-      }
-      description={
-        mode === "chat"
-          ? "Общий чат задачи. До approve он доступен только аналитику, после формирования команды — всем участникам задачи."
-          : "Единый чат задачи. История сохраняется при переходе от аналитической фазы к работе команды."
-      }
+      className="min-h-[40rem]"
       currentUserId={user?.id}
+      description="Рабочее обсуждение задачи: уточнения, решения, изменения и явная проверка через /qaagent."
       disabled={!canAccessChat}
-      inputPlaceholder="Напишите вопрос, уточнение или изменение по задаче..."
+      inputPlaceholder="Напишите вопрос по задаче, решение или используйте /qaagent для явного QA-вопроса..."
       messages={messages}
       onSend={handleSendMessage}
       sending={sendingMessage}
-      title={mode === "chat" ? "Полноэкранный диалог" : "Обсуждение задачи"}
+      title="Чат задачи"
     />
   ) : (
-    <article className="glass-panel border border-dashed border-black/10 p-5 text-sm text-slate/70 shadow-panel sm:p-6">
-      Чат откроется после формирования команды задачи. До этого сообщения
-      доступны только аналитику и администратору.
+    <article className="rounded-[16px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-5 py-6 text-sm leading-7 text-[#44546f]">
+      Чат откроется после формирования команды задачи. До этого обсуждение
+      доступно только аналитику и администратору.
     </article>
   );
 
-  if (mode === "chat") {
-    return (
-      <section className="space-y-6">
-        <header className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="section-eyebrow">Фокусный чат задачи</p>
-              <h2 className="mt-3 text-balance text-3xl font-bold text-ink sm:text-4xl">
+  return (
+    <section className="space-y-5">
+      <header className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-[#626f86]">
+            <Link className="hover:text-[#0c66e4]" to={tasksHref}>
+              Задачи
+            </Link>
+            <span>/</span>
+            <span>Рабочая страница аналитика</span>
+          </div>
+
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <p className="section-eyebrow">Analyst Task Workspace</p>
+              <h2 className="mt-2 text-balance text-3xl font-semibold leading-tight text-[#172b4d] sm:text-[2.25rem]">
                 {task.title}
               </h2>
-              <p className="mt-3 max-w-3xl text-sm leading-7 text-slate/80">
-                Единый чат задачи сохраняет историю аналитической фазы и
-                командной работы без отдельной ветки обсуждения.
+              <p className="mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
+                Пространство разделено на три рабочие вкладки: основной текст
+                задачи, чат по задаче и история изменений. Это убирает
+                перегрузку и позволяет работать с каждым контекстом отдельно.
               </p>
             </div>
-            <Link className="ui-button-secondary" to={detailHref}>
-              Вернуться к задаче
-            </Link>
           </div>
-          <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate/70">
-            <span className="rounded-[8px] bg-ember/10 px-3 py-2 text-ember">
+
+          <div className="flex flex-wrap gap-2 text-xs font-medium text-[#44546f]">
+            <span className="rounded-full bg-[#e9f2ff] px-3 py-1.5 text-[#0c66e4]">
               {getTaskStatusLabel(task.status)}
             </span>
-            <span className="rounded-[8px] bg-black/5 px-3 py-2">
+            <span className="rounded-full bg-[#f7f8fa] px-3 py-1.5">
+              {formatCountLabel(
+                proposals.length,
+                "предложение",
+                "предложения",
+                "предложений",
+              )}
+            </span>
+            <span className="rounded-full bg-[#f7f8fa] px-3 py-1.5">
               {formatCountLabel(
                 messages.length,
                 "сообщение",
@@ -525,307 +569,306 @@ export default function TaskWorkspacePage({ mode }: Props) {
                 "сообщений",
               )}
             </span>
-            <span className="rounded-[8px] bg-black/5 px-3 py-2">
+            <span className="rounded-full bg-[#f7f8fa] px-3 py-1.5">
               Обновлено {formatDateTime(task.updated_at)}
             </span>
+            {needsManualCommit ? (
+              <span className="rounded-full bg-[#e9f2ff] px-3 py-1.5 text-[#0c66e4]">
+                Требуется commit
+              </span>
+            ) : null}
           </div>
-        </header>
-        {chatSection}
-      </section>
-    );
-  }
 
-  return (
-    <section className="space-y-6">
-      <header className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <p className="section-eyebrow">Рабочее пространство задачи</p>
-            <h2 className="mt-3 text-balance text-3xl font-bold text-ink sm:text-4xl">
-              {task.title}
-            </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate/80">
-              Аналитик работает в широком редакторе, а командный контекст,
-              статус проверки и предложения по изменениям остаются рядом в одном
-              workspace.
-            </p>
+          <div className="flex flex-wrap gap-2">
+            {workspaceTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={
+                  activeTab === tab.key
+                    ? "rounded-[10px] border border-[#bfd4f6] bg-[#e9f2ff] px-4 py-2.5 text-sm font-medium text-[#0c66e4]"
+                    : "rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-2.5 text-sm font-medium text-[#44546f] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                }
+                disabled={tab.disabled}
+                onClick={() => setActiveTab(tab.key)}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-          {canAccessChat ? (
-            <Link className="ui-button-primary" to={fullChatHref}>
-              Открыть полноэкранный чат
-            </Link>
-          ) : null}
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate/70">
-          <span className="rounded-[8px] bg-ember/10 px-3 py-2 text-ember">
-            {getTaskStatusLabel(task.status)}
-          </span>
-          <span className="rounded-[8px] bg-black/5 px-3 py-2">
-            {formatCountLabel(
-              proposals.length,
-              "предложение",
-              "предложения",
-              "предложений",
-            )}
-          </span>
-          <span className="rounded-[8px] bg-black/5 px-3 py-2">
-            Обновлено {formatDateTime(task.updated_at)}
-          </span>
-          {task.indexed_at ? (
-            <span className="rounded-[8px] bg-black/5 px-3 py-2">
-              Индекс обновлен {formatDateTime(task.indexed_at)}
-            </span>
-          ) : null}
-          {needsManualCommit ? (
-            <span className="rounded-[8px] bg-sky-100 px-3 py-2 text-sky-900">
-              Нужен commit эмбеддингов
-            </span>
-          ) : null}
         </div>
       </header>
 
       {error ? (
         <p
           aria-live="polite"
-          className="rounded-[10px] bg-red-50 px-4 py-3 text-sm text-red-700"
+          className="rounded-[14px] border border-[rgba(174,46,36,0.16)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]"
         >
           {error}
         </p>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.85fr)] xl:items-start">
-        <div className="space-y-6">
-          <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-            <TaskForm
-              availableTags={taskTags}
-              canCommitChanges={canCommitTask}
-              committing={committingTask}
-              disabled={!canEditTask}
-              embeddingsStale={task.embeddings_stale}
-              loading={savingTask}
-              onCommit={handleCommitTaskChanges}
-              onSubmit={handleSave}
-              task={task}
-            />
-          </section>
+      <div className={activeTab === "chat" ? "hidden" : "space-y-5"}>
+          <TaskForm
+            activePane={activeTab === "history" ? "history" : "document"}
+            attachments={task.attachments}
+            attachmentsUploading={uploading}
+            availableTags={taskTags}
+            canCommitChanges={canCommitTask}
+            committing={committingTask}
+            disabled={!canEditTask}
+            embeddingsStale={task.embeddings_stale}
+            loading={savingTask}
+            onCommit={handleCommitTaskChanges}
+            onSubmit={handleSave}
+            onUploadAttachment={handleUpload}
+            task={task}
+          />
 
-          <div className="grid gap-6 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-              <p className="section-eyebrow">Проверка и материалы</p>
-              <h3 className="mt-2 text-2xl font-bold text-ink">
-                Контекст задачи
-              </h3>
-              <div className="mt-5 grid gap-4">
+          {activeTab === "document" ? (
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+              <InspectorCard eyebrow="Workflow" title="Проверка требования">
                 <ValidationPanel
                   canValidate={canValidate}
                   onValidate={handleValidate}
                   result={task.validation_result}
                   validating={validating}
                 />
-                <AttachmentUpload
-                  attachments={task.attachments}
-                  busy={uploading}
-                  onUpload={handleUpload}
-                />
-              </div>
-            </section>
+              </InspectorCard>
 
-            {chatSection}
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-            <p className="section-eyebrow">Состояние публикации</p>
-            <h3 className="mt-2 text-2xl font-bold text-ink">
-              Семантическая версия задачи
-            </h3>
-            <div className="mt-4 space-y-3 text-sm leading-7 text-slate/75">
-              <p>
-                Последнее изменение карточки:{" "}
-                <span className="font-semibold text-ink">
-                  {formatDateTime(task.updated_at)}
-                </span>
-              </p>
-              <p>
-                Последний пересчет эмбеддингов:{" "}
-                <span className="font-semibold text-ink">
-                  {task.indexed_at
-                    ? formatDateTime(task.indexed_at)
-                    : "еще не выполнялся"}
-                </span>
-              </p>
-              <p
-                className={
-                  task.embeddings_stale
-                    ? "rounded-[12px] border border-sky-200 bg-sky-50 px-4 py-3 text-sky-900"
-                    : "rounded-[12px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900"
-                }
-              >
-                {task.embeddings_stale
-                  ? "Карточка задачи уже обновлена, но эмбеддинги еще используют прошлую версию текста."
-                  : "Карточка задачи и эмбеддинги синхронизированы."}
-              </p>
-            </div>
-          </section>
-
-          <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-            <p className="section-eyebrow">Команда задачи</p>
-            <div className="mt-4 grid gap-3">
-              {teamCards.map((item) => (
-                <article
-                  key={item.key}
-                  className="rounded-[10px] border border-black/10 bg-white/80 p-4"
-                >
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate/65">
-                    {item.title}
-                  </p>
-                  {item.member ? (
-                    <>
-                      <p className="mt-2 font-semibold text-ink">
-                        {item.member.full_name}
-                      </p>
-                      <p className="mt-1 text-sm text-slate/70">
-                        {item.member.email} · {getRoleLabel(item.member.role)}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate/70">
-                      {item.fallback}
-                    </p>
-                  )}
-                </article>
-              ))}
-            </div>
-
-            {canApprove ? (
-              <div className="mt-5 space-y-4 rounded-[12px] border border-amber-200 bg-amber-50/80 p-4">
-                <div>
-                  <p className="text-sm font-semibold text-ink">
-                    Подтверждение задачи после ревью
-                  </p>
-                  <p className="mt-1 text-sm text-slate/75">
-                    Назначьте одного разработчика и одного тестировщика. После
-                    этого задача перейдет в работу команды, а чат откроется для
-                    всех участников задачи.
-                  </p>
-                </div>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
-                    Разработчик
-                  </span>
-                  <select
-                    className="ui-field"
-                    onChange={(event) =>
-                      setDeveloperSelection(event.target.value)
-                    }
-                    value={developerSelection}
-                  >
-                    <option value="">Выберите разработчика</option>
-                    {developerMembers.map((member) => (
-                      <option key={member.user_id} value={member.user_id}>
-                        {member.full_name}
-                      </option>
+              <div className="space-y-5">
+                <InspectorCard eyebrow="Team" title="Участники задачи">
+                  <div className="space-y-3">
+                    {teamCards.map((item) => (
+                      <article
+                        key={item.key}
+                        className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+                          {item.title}
+                        </p>
+                        {item.member ? (
+                          <>
+                            <p className="mt-2 font-medium text-[#172b4d]">
+                              {item.member.full_name}
+                            </p>
+                            <p className="mt-1 text-sm text-[#44546f]">
+                              {item.member.email} /{" "}
+                              {getRoleLabel(item.member.role)}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="mt-2 text-sm leading-6 text-[#626f86]">
+                            {item.fallback}
+                          </p>
+                        )}
+                      </article>
                     ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
-                    Тестировщик
-                  </span>
-                  <select
-                    className="ui-field"
-                    onChange={(event) => setTesterSelection(event.target.value)}
-                    value={testerSelection}
-                  >
-                    <option value="">Выберите тестировщика</option>
-                    {testerMembers.map((member) => (
-                      <option key={member.user_id} value={member.user_id}>
-                        {member.full_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="ui-button-primary"
-                  disabled={
-                    approving || !developerSelection || !testerSelection
-                  }
-                  onClick={() => void handleApprove()}
-                  type="button"
-                >
-                  {approving
-                    ? "Формируем команду..."
-                    : "Подтвердить и назначить команду"}
-                </button>
-              </div>
-            ) : null}
-          </section>
+                  </div>
 
-          <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="section-eyebrow">Предложения по изменениям</p>
-                <h3 className="mt-2 text-2xl font-bold text-ink">
-                  Отслеживаемые изменения требований
-                </h3>
-              </div>
-            </div>
-            <div className="mt-5 space-y-3">
-              {proposals.length === 0 ? (
-                <p className="text-sm text-slate/70">
-                  Предложений по изменениям пока нет.
-                </p>
-              ) : (
-                proposals.map((proposal) => (
-                  <article
-                    key={proposal.id}
-                    className="rounded-[10px] border border-black/10 bg-white/80 p-4"
-                  >
-                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-ember">
-                      {getProposalStatusLabel(proposal.status)}
-                    </p>
-                    <p className="mt-2 break-words text-sm leading-7 text-slate/80">
-                      {proposal.proposal_text}
-                    </p>
-                    <p className="mt-2 text-xs text-slate/60">
-                      Предложил:{" "}
-                      {proposal.proposed_by_name ?? "неизвестный пользователь"}.
-                      {proposal.reviewed_by_name
-                        ? ` Рассмотрел: ${proposal.reviewed_by_name}.`
-                        : ""}
-                    </p>
-                    {canReviewProposals && proposal.status === "new" ? (
-                      <div className="mt-3 flex flex-wrap gap-3">
-                        <button
-                          className="ui-button-primary"
-                          disabled={reviewingProposalId === proposal.id}
-                          onClick={() =>
-                            void handleProposalReview(proposal.id, "accepted")
-                          }
-                          type="button"
-                        >
-                          Принять
-                        </button>
-                        <button
-                          className="ui-button-secondary"
-                          disabled={reviewingProposalId === proposal.id}
-                          onClick={() =>
-                            void handleProposalReview(proposal.id, "rejected")
-                          }
-                          type="button"
-                        >
-                          Отклонить
-                        </button>
+                  {canApprove ? (
+                    <div className="mt-5 space-y-4 rounded-[14px] border border-[rgba(172,107,8,0.18)] bg-[#fff4e5] p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-[#172b4d]">
+                          Подтверждение после review
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-[#7f4c00]">
+                          Выберите разработчика и тестировщика, чтобы передать
+                          задачу в командную работу.
+                        </p>
                       </div>
-                    ) : null}
-                  </article>
-                ))
-              )}
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-[#172b4d]">
+                          Разработчик
+                        </span>
+                        <select
+                          className="ui-field"
+                          onChange={(event) =>
+                            setDeveloperSelection(event.target.value)
+                          }
+                          value={developerSelection}
+                        >
+                          <option value="">Выберите разработчика</option>
+                          {developerMembers.map((member) => (
+                            <option key={member.user_id} value={member.user_id}>
+                              {member.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-[#172b4d]">
+                          Тестировщик
+                        </span>
+                        <select
+                          className="ui-field"
+                          onChange={(event) =>
+                            setTesterSelection(event.target.value)
+                          }
+                          value={testerSelection}
+                        >
+                          <option value="">Выберите тестировщика</option>
+                          {testerMembers.map((member) => (
+                            <option key={member.user_id} value={member.user_id}>
+                              {member.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="ui-button-primary w-full"
+                        disabled={
+                          approving || !developerSelection || !testerSelection
+                        }
+                        onClick={() => void handleApprove()}
+                        type="button"
+                      >
+                        {approving
+                          ? "Формируем команду..."
+                          : "Подтвердить и назначить"}
+                      </button>
+                    </div>
+                  ) : null}
+                </InspectorCard>
+
+                <InspectorCard
+                  eyebrow="Review Artifacts"
+                  title="Предложения по изменениям"
+                >
+                  <div className="space-y-3">
+                    {proposals.length === 0 ? (
+                      <p className="text-sm leading-6 text-[#626f86]">
+                        Предложений по изменениям пока нет.
+                      </p>
+                    ) : (
+                      proposals.map((proposal) => (
+                        <article
+                          key={proposal.id}
+                          className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] p-4"
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+                            {getProposalStatusLabel(proposal.status)}
+                          </p>
+                          <p className="mt-2 text-sm leading-7 text-[#172b4d]">
+                            {proposal.proposal_text}
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-[#626f86]">
+                            Предложил:{" "}
+                            {proposal.proposed_by_name ??
+                              "неизвестный пользователь"}
+                            .
+                            {proposal.reviewed_by_name
+                              ? ` Рассмотрел: ${proposal.reviewed_by_name}.`
+                              : ""}
+                          </p>
+                          {canReviewProposals && proposal.status === "new" ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                className="ui-button-primary"
+                                disabled={reviewingProposalId === proposal.id}
+                                onClick={() =>
+                                  void handleProposalReview(
+                                    proposal.id,
+                                    "accepted",
+                                  )
+                                }
+                                type="button"
+                              >
+                                Принять
+                              </button>
+                              <button
+                                className="ui-button-secondary"
+                                disabled={reviewingProposalId === proposal.id}
+                                onClick={() =>
+                                  void handleProposalReview(
+                                    proposal.id,
+                                    "rejected",
+                                  )
+                                }
+                                type="button"
+                              >
+                                Отклонить
+                              </button>
+                            </div>
+                          ) : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </InspectorCard>
+              </div>
             </div>
-          </section>
-        </div>
+          ) : (
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <InspectorCard eyebrow="Publication" title="Состояние публикации">
+                <div className="space-y-3 text-sm leading-7 text-[#44546f]">
+                  <p>
+                    Последняя правка карточки:
+                    <span className="ml-2 font-medium text-[#172b4d]">
+                      {formatDateTime(task.updated_at)}
+                    </span>
+                  </p>
+                  <p>
+                    Последний пересчет индекса:
+                    <span className="ml-2 font-medium text-[#172b4d]">
+                      {task.indexed_at
+                        ? formatDateTime(task.indexed_at)
+                        : "еще не выполнялся"}
+                    </span>
+                  </p>
+                  <div
+                    className={
+                      task.embeddings_stale
+                        ? "rounded-[14px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] px-4 py-3 text-[#0c66e4]"
+                        : "rounded-[14px] border border-[rgba(34,154,22,0.14)] bg-[#e8f5e9] px-4 py-3 text-[#216e1f]"
+                    }
+                  >
+                    {task.embeddings_stale
+                      ? "Текст уже обновлен, но индекс еще использует предыдущую опубликованную версию."
+                      : "Карточка задачи и индекс синхронизированы."}
+                  </div>
+                </div>
+              </InspectorCard>
+
+              <InspectorCard eyebrow="Context" title="Команда и review">
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {teamCards.map((item) => (
+                      <article
+                        key={item.key}
+                        className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+                          {item.title}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-[#172b4d]">
+                          {item.member?.full_name ?? item.fallback}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3 text-sm leading-7 text-[#44546f]">
+                    <p>
+                      Предложений по изменениям:{" "}
+                      <span className="font-medium text-[#172b4d]">
+                        {proposals.length}
+                      </span>
+                    </p>
+                    <p>
+                      Текущий статус задачи:{" "}
+                      <span className="font-medium text-[#172b4d]">
+                        {getTaskStatusLabel(task.status)}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </InspectorCard>
+            </div>
+          )}
+      </div>
+
+      <div className={activeTab === "chat" ? "block" : "hidden"}>
+        {chatSection}
       </div>
     </section>
   );

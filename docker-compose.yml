@@ -50,6 +50,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://app_user:app_pass@postgres:5432/taskplatform
       QDRANT_URL: http://qdrant:6333
       UPLOAD_DIR: /var/lib/task-platform/uploads
+      LANGGRAPH_IMAGES_DIR: /var/lib/task-platform/langgraph_graphs
       UVICORN_WORKERS: 1
     depends_on:
       postgres:
@@ -60,6 +61,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - uploads:/var/lib/task-platform/uploads
+      - ./langgraph_graphs:/var/lib/task-platform/langgraph_graphs
     healthcheck:
       test:
         [

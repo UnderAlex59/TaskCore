@@ -136,13 +136,32 @@ async def test_admin_can_create_test_and_override_provider(
     assert default_response.json()["is_default"] is True
 
     override_response = await client.put(
-        "/admin/llm/overrides/qa",
+        "/admin/llm/overrides/task-validation",
         headers={"Authorization": f"Bearer {access_token}"},
         json={"provider_config_id": provider_id, "enabled": True},
     )
     assert override_response.status_code == 200
-    assert override_response.json()["agent_key"] == "qa"
+    assert override_response.json()["agent_key"] == "task-validation"
     assert override_response.json()["provider_config_id"] == provider_id
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-llm-consumers@example.com",
+        full_name="Admin User",
+    )
+
+    response = await client.get(
+        "/admin/llm/agents",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    keys = {item["key"] for item in payload}
+    assert {"qa", "change-tracker", "chat-routing", "task-validation"} <= keys
 
 
 @pytest.mark.asyncio

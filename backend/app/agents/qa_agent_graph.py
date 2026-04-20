@@ -9,11 +9,12 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
 from app.services.llm_runtime_service import LLMRuntimeService
+from app.services.qdrant_service import QdrantService
 
 QA_AGENT_KEY = "qa"
 QA_AGENT_NAME = "QAAgent"
 QA_AGENT_DESCRIPTION = (
-    "Отвечает на вопросы по требованиям с учётом контекста задачи и последней проверки."
+    "Отвечает на вопросы по требованиям с учётом контекста задачи, Qdrant RAG и последней проверки."
 )
 QA_AGENT_ALIASES = ("question", "analyst", "qaagent", "qa-agent")
 
@@ -46,6 +47,8 @@ class QAAgentGraphState(ChatState, total=False):
     related_titles: str
     issues: list[object]
     questions: list[object]
+    rag_snippets: list[str]
+    rag_chunk_ids: list[str]
     system_prompt: str
     user_prompt: str
     llm_payload: dict[str, object] | None
@@ -107,16 +110,15 @@ def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
         for item in list(state.get("related_tasks", []))[:3]
         if "title" in item
     )
-    issues = list(validation_result.get("issues", []))
-    questions = list(validation_result.get("questions", []))
     return {
         "related_titles": related_titles,
-        "issues": issues,
-        "questions": questions,
+        "issues": list(validation_result.get("issues", [])),
+        "questions": list(validation_result.get("questions", [])),
         "system_prompt": (
             "Ты опытный продуктовый аналитик. "
             "Отвечай на вопрос пользователя только на русском языке, "
-            "используя контекст задачи, результаты последней проверки и связанные задачи. "
+            "используя описание задачи, результаты последней проверки, связанные задачи "
+            "и RAG-контекст из Qdrant. "
             "Не придумывай факты. "
             "Верни строгий JSON с ключами answer, confidence, canonical_question. "
             "confidence должен быть high только если "
@@ -127,10 +129,41 @@ def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
             "для базы валидации. "
             "Если confidence=high, canonical_question верни null."
         ),
+    }
+
+
+async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
+    task_id = str(state.get("task_id") or "").strip()
+    rag_documents = (
+        await QdrantService.search_task_knowledge(
+            task_id=task_id,
+            query_text=str(state.get("message_content", "")),
+            limit=4,
+        )
+        if task_id
+        else []
+    )
+    rag_snippets = [document.page_content for document in rag_documents if document.page_content.strip()]
+    rag_chunk_ids = [
+        str(document.metadata.get("chunk_id"))
+        for document in rag_documents
+        if document.metadata.get("chunk_id")
+    ]
+
+    validation_result = state.get("validation_result") or {}
+    issues = list(state.get("issues", []))
+    questions = list(state.get("questions", []))
+    related_titles = str(state.get("related_titles", ""))
+    rag_context = "\n\n".join(f"- {snippet}" for snippet in rag_snippets) if rag_snippets else "нет"
+
+    return {
+        "rag_snippets": rag_snippets,
+        "rag_chunk_ids": rag_chunk_ids,
         "user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Статус задачи: {state.get('task_status', '')}\n"
             f"Описание задачи:\n{state.get('task_content', '')}\n\n"
+            f"RAG-контекст из task_knowledge:\n{rag_context}\n\n"
             f"Вопрос пользователя:\n{state.get('message_content', '')}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
             f"Замечания проверки: {issues}\n"
@@ -183,6 +216,9 @@ def _build_fallback_response(state: QAAgentGraphState) -> tuple[str, str]:
         ),
         "Базовое описание: " + str(state.get("task_content", ""))[:280],
     ]
+    rag_snippets = list(state.get("rag_snippets", []))
+    if rag_snippets:
+        fallback_parts.append("Найден релевантный контекст в task_knowledge: " + rag_snippets[0][:220])
     verdict = validation_result.get("verdict")
     if verdict:
         fallback_parts.append(f"Последний вердикт проверки: `{verdict}`.")
@@ -234,11 +270,12 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
         "message_type": "agent_answer",
         "response": response,
         "source_ref": {
-            "collection": "tasks",
+            "collection": "task_knowledge" if state.get("rag_chunk_ids") else "tasks",
             "provider_kind": state.get("provider_kind"),
             "model": state.get("model"),
             "answer_confidence": confidence,
             "validation_backlog_question": validation_backlog_question,
+            "chunk_ids": list(state.get("rag_chunk_ids", [])),
             "related_task_ids": [
                 item["task_id"]
                 for item in list(state.get("related_tasks", []))
@@ -255,10 +292,12 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
 def get_qa_agent_graph():
     graph = StateGraph(QAAgentGraphState)
     graph.add_node("prepare_qa_request", _prepare_qa_request)
+    graph.add_node("collect_qa_context", _collect_qa_context)
     graph.add_node("invoke_qa_llm", _invoke_qa_llm)
     graph.add_node("finalize_qa_response", _finalize_qa_response)
     graph.add_edge(START, "prepare_qa_request")
-    graph.add_edge("prepare_qa_request", "invoke_qa_llm")
+    graph.add_edge("prepare_qa_request", "collect_qa_context")
+    graph.add_edge("collect_qa_context", "invoke_qa_llm")
     graph.add_edge("invoke_qa_llm", "finalize_qa_response")
     graph.add_edge("finalize_qa_response", END)
     return graph.compile()

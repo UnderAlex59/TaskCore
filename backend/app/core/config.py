@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o"
     LLM_TEMPERATURE: float = 0.2
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSION: int | None = None
     CHAT_AGENT_LLM_OVERRIDES: dict[str, ChatAgentLLMOverrideSettings] = Field(default_factory=dict)
     LLM_SETTINGS_ENCRYPTION_KEY: str | None = None
 

@@ -50,7 +50,9 @@ export default function MonitoringPage() {
       setLlm(loadedLlm);
       setAudit(loadedAudit);
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось загрузить данные мониторинга."));
+      setError(
+        getApiErrorMessage(caught, "Не удалось загрузить данные мониторинга."),
+      );
     } finally {
       setLoading(false);
     }
@@ -80,7 +82,7 @@ export default function MonitoringPage() {
   const providerKinds = Array.from(
     new Set((llm?.daily ?? []).flatMap((item) => Object.keys(item.providers))),
   );
-  const llmSeries = providerKinds.map((providerKind, index) => ({
+  const modelSeries = providerKinds.map((providerKind, index) => ({
     label: getProviderKindLabel(providerKind),
     color: SERIES_COLORS[index % SERIES_COLORS.length],
     points: (llm?.daily ?? []).map((item) => ({
@@ -98,18 +100,22 @@ export default function MonitoringPage() {
               Мониторинг
             </p>
             <h3 className="mt-2 text-2xl font-extrabold text-ink sm:text-3xl">
-              Прозрачность системы
+              Состояние платформы
             </h3>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-ink/70">
-              Следите за использованием платформы, административной активностью
-              и работой провайдеров в выбранном временном окне.
+              Следите за использованием платформы, операционной активностью и
+              стабильностью модельного слоя в выбранном временном окне.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             {RANGE_OPTIONS.map((item) => (
               <button
                 key={item}
-                className={item === range ? "ui-button-primary" : "ui-button-secondary"}
+                className={
+                  item === range
+                    ? "ui-button-primary"
+                    : "ui-button-secondary"
+                }
                 onClick={() => setRange(item)}
                 type="button"
               >
@@ -176,7 +182,7 @@ export default function MonitoringPage() {
         </article>
         <article className="glass-panel rounded-[24px] border border-black/10 p-5 shadow-panel">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-ink/45">
-            LLM-запросы
+            Вызовы моделей
           </p>
           <p className="mt-3 text-3xl font-extrabold text-ink">
             {summary?.range_metrics.llm_requests_total ?? 0}
@@ -187,7 +193,7 @@ export default function MonitoringPage() {
         </article>
         <article className="glass-panel rounded-[24px] border border-black/10 p-5 shadow-panel">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-ink/45">
-            Производительность
+            Отклик моделей
           </p>
           <p className="mt-3 text-3xl font-extrabold text-ink">
             {summary?.range_metrics.avg_llm_latency_ms
@@ -195,7 +201,10 @@ export default function MonitoringPage() {
               : "н/д"}
           </p>
           <p className="mt-2 text-sm text-ink/60">
-            Оценочная стоимость: {formatCurrencyUsd(summary?.range_metrics.estimated_llm_cost_usd ?? null)}
+            Оценочная стоимость:{" "}
+            {formatCurrencyUsd(
+              summary?.range_metrics.estimated_llm_cost_usd ?? null,
+            )}
           </p>
         </article>
       </div>
@@ -211,7 +220,7 @@ export default function MonitoringPage() {
             </h3>
           </div>
           <TrendChart
-            emptyLabel="В выбранном диапазоне событий аудита пока нет."
+            emptyLabel="В выбранном диапазоне аудиторских событий пока нет."
             series={activitySeries}
           />
         </article>
@@ -219,15 +228,15 @@ export default function MonitoringPage() {
         <article className="glass-panel rounded-[28px] border border-black/10 p-6 shadow-panel">
           <div className="mb-4">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">
-              Использование LLM
+              Модельный слой
             </p>
             <h3 className="mt-2 text-2xl font-extrabold text-ink">
-              Ежедневная нагрузка на провайдеров
+              Нагрузка по профилям
             </h3>
           </div>
           <TrendChart
-            emptyLabel="В выбранном диапазоне LLM-запросов пока нет."
-            series={llmSeries}
+            emptyLabel="В выбранном диапазоне вызовов моделей пока нет."
+            series={modelSeries}
           />
         </article>
       </div>
@@ -242,7 +251,9 @@ export default function MonitoringPage() {
           </h3>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-[24px] border border-black/10 bg-white/70 p-4">
-              <p className="text-sm font-bold text-ink">Активные пользователи</p>
+              <p className="text-sm font-bold text-ink">
+                Активные пользователи
+              </p>
               <div className="mt-3 space-y-3">
                 {(activity?.top_actors ?? []).map((actor) => (
                   <div
@@ -250,7 +261,9 @@ export default function MonitoringPage() {
                     className="flex items-center justify-between gap-3 text-sm"
                   >
                     <span className="text-ink/70">{actor.full_name}</span>
-                    <span className="font-bold text-ink">{actor.event_count}</span>
+                    <span className="font-bold text-ink">
+                      {actor.event_count}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -279,7 +292,7 @@ export default function MonitoringPage() {
             Структура
           </p>
           <h3 className="mt-2 text-2xl font-extrabold text-ink">
-            Распределение по провайдерам
+            Распределение по профилям
           </h3>
           <div className="mt-5 space-y-3">
             {(llm?.provider_breakdown ?? []).map((item) => (
@@ -311,12 +324,12 @@ export default function MonitoringPage() {
             Сбои
           </p>
           <h3 className="mt-2 text-2xl font-extrabold text-ink">
-            Последние ошибки LLM
+            Последние ошибки модельного слоя
           </h3>
           <div className="mt-5 space-y-3">
             {(llm?.recent_failures ?? []).length === 0 ? (
               <p className="rounded-[24px] border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-ink/55">
-                В этом окне не было неудачных LLM-вызовов.
+                В этом окне не было неудачных вызовов.
               </p>
             ) : (
               (llm?.recent_failures ?? []).map((item) => (
@@ -327,10 +340,13 @@ export default function MonitoringPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-ink">
-                        {getProviderKindLabel(item.provider_kind)} · {item.model}
+                        {getProviderKindLabel(item.provider_kind)} / {item.model}
                       </p>
                       <p className="text-xs uppercase tracking-[0.14em] text-ink/45">
-                        {item.actor_name} · {item.agent_key ? getAgentKeyLabel(item.agent_key) : "Проверка провайдера"}
+                        {item.actor_name} /{" "}
+                        {item.agent_key
+                          ? getAgentKeyLabel(item.agent_key)
+                          : "Проверка подключения"}
                       </p>
                     </div>
                     <span className="text-xs text-ink/45">
@@ -365,7 +381,7 @@ export default function MonitoringPage() {
                       {getEventTypeLabel(item.event_type)}
                     </p>
                     <p className="text-xs uppercase tracking-[0.14em] text-ink/45">
-                      {item.actor_name} · {getEntityTypeLabel(item.entity_type)}
+                      {item.actor_name} / {getEntityTypeLabel(item.entity_type)}
                     </p>
                   </div>
                   <span className="text-xs text-ink/45">
@@ -373,7 +389,9 @@ export default function MonitoringPage() {
                   </span>
                 </div>
                 {item.entity_id ? (
-                  <p className="mt-3 text-sm text-ink/65">Объект: {item.entity_id}</p>
+                  <p className="mt-3 text-sm text-ink/65">
+                    Объект: {item.entity_id}
+                  </p>
                 ) : null}
               </article>
             ))}

@@ -13,20 +13,20 @@ import {
   type ProjectMemberRead,
   type ProjectRead,
 } from "@/api/projectsApi";
+import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
 import {
   tasksApi,
   type TaskCreate,
   type TaskRead,
   type TaskStatus,
 } from "@/api/tasksApi";
-import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
 import { usersApi, type UserSummary } from "@/api/usersApi";
 import TaskCard from "@/features/tasks/TaskCard";
-import TagMultiSelect from "@/shared/components/TagMultiSelect";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
+import TagMultiSelect from "@/shared/components/TagMultiSelect";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
-import { getRoleLabel } from "@/shared/lib/locale";
+import { getRoleLabel, getTaskStatusLabel } from "@/shared/lib/locale";
 import { useAuthStore } from "@/store/authStore";
 
 const TASK_CREATORS = new Set(["ADMIN", "ANALYST"]);
@@ -37,16 +37,6 @@ const PROJECT_MEMBER_ROLES: UserRole[] = [
   "TESTER",
   "ADMIN",
 ];
-const STATUS_OPTIONS: Array<{ label: string; value: TaskStatus | "" }> = [
-  { label: "Все статусы", value: "" },
-  { label: "Черновик", value: "draft" },
-  { label: "Нужна доработка", value: "needs_rework" },
-  { label: "Ожидает подтверждения", value: "awaiting_approval" },
-  { label: "Готово к разработке", value: "ready_for_dev" },
-  { label: "В работе", value: "in_progress" },
-  { label: "Готово", value: "done" },
-];
-
 const EMPTY_TASK: TaskCreate = {
   title: "",
   content: "",
@@ -224,16 +214,16 @@ export default function TaskList() {
 
   return (
     <section className="space-y-6">
-      <header className="glass-panel border border-black/10 p-5 shadow-panel sm:p-8">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <p className="section-eyebrow">Задачи</p>
-            <h2 className="mt-3 text-balance text-3xl font-bold text-ink sm:text-4xl">
+      <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="section-eyebrow">Tasks</p>
+            <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
               {project?.name ?? "Задачи проекта"}
             </h2>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate/80">
-              Создавайте требования, отправляйте их на ревью и формируйте
-              команду задачи только после успешного подтверждения.
+            <p className="mt-4 text-sm leading-7 text-[#44546f]">
+              Здесь создаются постановки, назначается команда проекта и
+              отслеживается текущий статус задач.
             </p>
           </div>
 
@@ -245,7 +235,7 @@ export default function TaskList() {
                 className="ui-field"
                 name="task-search"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по названию или содержанию..."
+                placeholder="Поиск по названию и содержанию"
                 type="search"
                 value={search}
               />
@@ -260,40 +250,46 @@ export default function TaskList() {
                 }
                 value={statusFilter}
               >
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.label} value={option.value}>
-                    {option.label}
+                <option value="">Все статусы</option>
+                {[
+                  "draft",
+                  "needs_rework",
+                  "awaiting_approval",
+                  "ready_for_dev",
+                  "in_progress",
+                  "done",
+                ].map((status) => (
+                  <option key={status} value={status}>
+                    {getTaskStatusLabel(status)}
                   </option>
                 ))}
               </select>
             </label>
           </div>
         </div>
+
         {error ? (
           <p
             aria-live="polite"
-            className="mt-4 rounded-[10px] bg-red-50 px-4 py-3 text-sm text-red-700"
+            className="mt-4 rounded-[12px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]"
           >
             {error}
           </p>
         ) : null}
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_360px]">
         <div className="space-y-4">
           {tasks.length === 0 ? (
-            <div className="glass-panel border border-dashed border-black/10 p-6 text-sm text-slate/70 shadow-panel">
+            <div className="rounded-[18px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-6 py-8 text-sm leading-7 text-[#626f86]">
               По текущим фильтрам задачи не найдены.
             </div>
           ) : (
             tasks.map((task) => (
-              <div
-                key={task.id}
-                className="space-y-3 [content-visibility:auto] [contain-intrinsic-size:220px]"
-              >
+              <div key={task.id} className="space-y-3">
                 <TaskCard task={task} />
                 <Link
-                  className="ui-button-primary"
+                  className="ui-button-secondary"
                   to={`/projects/${projectId}/tasks/${task.id}`}
                 >
                   Открыть задачу
@@ -306,12 +302,20 @@ export default function TaskList() {
         <div className="space-y-6">
           {canCreateTask ? (
             <form
-              className="glass-panel space-y-4 border border-black/10 p-5 shadow-panel sm:p-6"
+              className="space-y-4 rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-5"
               onSubmit={handleCreateTask}
             >
-              <h3 className="text-xl font-bold text-ink">Новая задача</h3>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
+                  Новая задача
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[#44546f]">
+                  Создайте новую постановку и затем откройте ее в рабочем
+                  пространстве аналитика.
+                </p>
+              </div>
               <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-ink/70">
+                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                   Название задачи
                 </span>
                 <input
@@ -330,11 +334,11 @@ export default function TaskList() {
                 />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-ink/70">
-                  Текст требования
+                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
+                  Исходное описание
                 </span>
                 <textarea
-                  className="ui-field min-h-36"
+                  className="ui-field min-h-32"
                   name="task-content"
                   onChange={(event) =>
                     setTaskForm((current) => ({
@@ -342,19 +346,19 @@ export default function TaskList() {
                       content: event.target.value,
                     }))
                   }
-                  placeholder="Опишите требование, ограничения и ожидаемый результат..."
+                  placeholder="Кратко опишите исходную постановку задачи."
                   value={taskForm.content}
                 />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-ink/70">
+                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                   Теги
                 </span>
                 <TagMultiSelect
                   helperText={
                     taskTags.length === 0
-                      ? "Администратор ещё не добавил теги в справочник."
-                      : "Теги выбираются только из справочника."
+                      ? "Администратор еще не добавил теги в справочник."
+                      : "Теги используются для правил, валидации и поиска."
                   }
                   hideLabel
                   label="Теги"
@@ -372,10 +376,6 @@ export default function TaskList() {
                   value={taskForm.tags ?? []}
                 />
               </label>
-              <p className="rounded-[10px] bg-black/5 px-4 py-3 text-sm text-slate/75">
-                Команда задачи назначается после успешного ревью: отдельно
-                разработчик и тестировщик.
-              </p>
               <button
                 className="ui-button-primary"
                 disabled={creatingTask}
@@ -386,24 +386,34 @@ export default function TaskList() {
             </form>
           ) : null}
 
-          <section className="glass-panel border border-black/10 p-5 shadow-panel sm:p-6">
-            <h3 className="text-xl font-bold text-ink">Участники проекта</h3>
+          <section className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
+                Команда проекта
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-[#172b4d]">
+                Участники
+              </h3>
+            </div>
+
             <div className="mt-4 space-y-3">
               {members.map((member) => (
                 <div
                   key={member.user_id}
-                  className="flex flex-col items-start gap-3 rounded-[10px] bg-white/70 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col items-start gap-3 rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>
-                    <p className="font-semibold">{member.full_name}</p>
-                    <p className="text-slate/70">
+                    <p className="font-medium text-[#172b4d]">
+                      {member.full_name}
+                    </p>
+                    <p className="text-[#44546f]">
                       {member.email} · роль в проекте{" "}
                       {getRoleLabel(member.role)}
                     </p>
                   </div>
                   {canManageMembers ? (
                     <button
-                      className="ui-button-secondary px-3 py-1 text-xs"
+                      className="ui-button-ghost px-3 py-1"
                       onClick={() => requestRemoveMember(member.user_id)}
                       type="button"
                     >
@@ -417,7 +427,7 @@ export default function TaskList() {
             {canManageMembers && availableUsers.length > 0 ? (
               <form className="mt-5 space-y-3" onSubmit={handleAddMember}>
                 <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
+                  <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                     Пользователь
                   </span>
                   <select
@@ -436,7 +446,7 @@ export default function TaskList() {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
+                  <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
                     Роль в проекте
                   </span>
                   <select

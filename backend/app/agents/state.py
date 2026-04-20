@@ -26,6 +26,7 @@ class RagIndexState(TypedDict, total=False):
     task_id: str
     indexed: bool
     chunk_ids: list[str]
+    chunks: list[dict[str, Any]]
 
 
 class ProviderTestState(TypedDict, total=False):

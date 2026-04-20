@@ -56,7 +56,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 px-6 py-8 [overscroll-behavior:contain]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(9,30,66,0.24)] px-6 py-8 [overscroll-behavior:contain]"
       onClick={busy ? undefined : onClose}
     >
       <div
@@ -64,14 +64,14 @@ export function ConfirmDialog({
         aria-describedby={descriptionId}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="glass-panel max-w-md border border-black/10 p-8 shadow-panel"
+        className="w-full max-w-md rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white p-8 shadow-[0_24px_48px_rgba(9,30,66,0.18)]"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
       >
-        <h2 className="text-2xl font-bold text-ink" id={titleId}>
+        <h2 className="text-2xl font-semibold text-[#172b4d]" id={titleId}>
           {title}
         </h2>
-        <p className="mt-3 text-sm leading-7 text-slate/80" id={descriptionId}>
+        <p className="mt-3 text-sm leading-7 text-[#44546f]" id={descriptionId}>
           {description}
         </p>
         <div className="mt-6 flex justify-end gap-3">

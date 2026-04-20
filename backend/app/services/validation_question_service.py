@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.validation_question import ValidationQuestion
 from app.schemas.admin_validation import ValidationQuestionPageRead, ValidationQuestionRead
 from app.services.audit_service import AuditService
+from app.services.qdrant_service import QdrantService
 
 ValidationVerdict = Literal["approved", "needs_rework"]
 
@@ -29,6 +30,7 @@ class ValidationQuestionService:
     @staticmethod
     async def clear_for_task(task_id: str, db: AsyncSession) -> None:
         await db.execute(delete(ValidationQuestion).where(ValidationQuestion.task_id == task_id))
+        await QdrantService.delete_project_questions_for_task(task_id=task_id)
 
     @staticmethod
     async def _clear_synced_validation_rows(task_id: str, db: AsyncSession) -> None:
@@ -45,6 +47,33 @@ class ValidationQuestionService:
         if not normalized:
             return ""
         return normalized[0].upper() + normalized[1:]
+
+    @staticmethod
+    async def _sync_project_questions_index(task: Task, db: AsyncSession) -> None:
+        rows = list(
+            (
+                await db.execute(
+                    select(ValidationQuestion)
+                    .where(ValidationQuestion.task_id == task.id)
+                    .order_by(ValidationQuestion.sort_order.asc(), ValidationQuestion.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await QdrantService.replace_project_questions(
+            task_id=task.id,
+            project_id=task.project_id,
+            tags=list(task.tags),
+            questions=[
+                {
+                    "question_id": row.id,
+                    "question_text": row.question_text,
+                    "validation_verdict": row.validation_verdict,
+                }
+                for row in rows
+            ],
+        )
 
     @staticmethod
     async def sync_for_task(task: Task, db: AsyncSession) -> None:
@@ -92,6 +121,8 @@ class ValidationQuestionService:
                     sort_order=index,
                 )
             )
+        await db.flush()
+        await ValidationQuestionService._sync_project_questions_index(task, db)
 
     @staticmethod
     async def record_chat_question(
@@ -150,6 +181,7 @@ class ValidationQuestionService:
         )
         db.add(question)
         await db.flush()
+        await ValidationQuestionService._sync_project_questions_index(task, db)
         return question
 
     @staticmethod
@@ -262,6 +294,8 @@ class ValidationQuestionService:
             task.validation_result = validation_result
 
         await db.delete(question)
+        await db.flush()
+        await ValidationQuestionService._sync_project_questions_index(task, db)
         AuditService.record(
             db,
             actor_user_id=current_user.id,

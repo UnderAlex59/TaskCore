@@ -90,16 +90,18 @@ describe("MonitoringPage", () => {
   it("renders summary metrics and monitoring sections", async () => {
     render(<MonitoringPage />);
 
-    expect(await screen.findByText("System visibility")).toBeInTheDocument();
-    expect(screen.getByText("Daily operational activity")).toBeInTheDocument();
-    expect(screen.getByText("Recent audit feed")).toBeInTheDocument();
+    expect(await screen.findByText("Состояние платформы")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ежедневная операционная активность"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Последние события аудита")).toBeInTheDocument();
     expect(screen.getByText("Admin User")).toBeInTheDocument();
   });
 
   it("loads monitoring data once on mount", async () => {
     render(<MonitoringPage />);
 
-    await screen.findByText("System visibility");
+    await screen.findByText("Состояние платформы");
     await waitFor(() => {
       expect(adminApiMock.getMonitoringSummary).toHaveBeenCalledTimes(2);
       expect(adminApiMock.getMonitoringActivity).toHaveBeenCalledTimes(2);

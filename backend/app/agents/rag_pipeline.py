@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
@@ -13,43 +14,92 @@ class RagPipelineState(RagIndexState, total=False):
     tags: list[str]
     attachments: list[dict[str, str]]
     validation_result: dict | None
-    base_chunk_ids: list[str]
-    attachment_chunk_ids: list[str]
-    validation_chunk_ids: list[str]
+    base_chunks: list[dict[str, object]]
+    attachment_chunks: list[dict[str, object]]
+    validation_chunks: list[dict[str, object]]
 
 
 def _collect_base_chunks(state: RagPipelineState) -> RagPipelineState:
-    chunk_ids = [f"{state['task_id']}:title", f"{state['task_id']}:content"]
-    if state.get("tags"):
-        chunk_ids.append(f"{state['task_id']}:tags")
-    return {"base_chunk_ids": chunk_ids}
+    chunks: list[dict[str, object]] = [
+        {
+            "chunk_id": f"{state['task_id']}:title",
+            "chunk_kind": "title",
+            "content": str(state.get("title", "")).strip(),
+        },
+        {
+            "chunk_id": f"{state['task_id']}:content",
+            "chunk_kind": "content",
+            "content": str(state.get("content", "")).strip(),
+        },
+    ]
+    tags = list(state.get("tags", []))
+    if tags:
+        chunks.append(
+            {
+                "chunk_id": f"{state['task_id']}:tags",
+                "chunk_kind": "tags",
+                "content": "Tags: " + ", ".join(tags),
+            }
+        )
+    return {"base_chunks": chunks}
 
 
 def _collect_attachment_chunks(state: RagPipelineState) -> RagPipelineState:
     attachments = list(state.get("attachments", []))
     return {
-        "attachment_chunk_ids": [
-            f"{state['task_id']}:attachment:{index}"
+        "attachment_chunks": [
+            {
+                "chunk_id": f"{state['task_id']}:attachment:{index}",
+                "chunk_kind": "attachment",
+                "content": (
+                    "Attachment "
+                    f"{item.get('filename', 'attachment')}"
+                    f" ({item.get('content_type', 'application/octet-stream')})"
+                    f", stored as {item.get('basename', '')}"
+                ).strip(),
+            }
             for index, _ in enumerate(attachments, start=1)
+            for item in [attachments[index - 1]]
         ]
     }
 
 
 def _collect_validation_chunks(state: RagPipelineState) -> RagPipelineState:
-    if state.get("validation_result"):
-        return {"validation_chunk_ids": [f"{state['task_id']}:validation"]}
-    return {"validation_chunk_ids": []}
+    validation_result = state.get("validation_result")
+    if not validation_result:
+        return {"validation_chunks": []}
+
+    verdict = str(validation_result.get("verdict", ""))
+    issues = list(validation_result.get("issues", []))
+    questions = list(validation_result.get("questions", []))
+    validation_payload = {
+        "verdict": verdict,
+        "issues": issues,
+        "questions": questions,
+    }
+    return {
+        "validation_chunks": [
+            {
+                "chunk_id": f"{state['task_id']}:validation",
+                "chunk_kind": "validation",
+                "content": "Validation context: " + json.dumps(validation_payload, ensure_ascii=False),
+            }
+        ]
+    }
 
 
 def _finalize_rag_index(state: RagPipelineState) -> RagPipelineState:
-    chunk_ids = [
-        *list(state.get("base_chunk_ids", [])),
-        *list(state.get("attachment_chunk_ids", [])),
-        *list(state.get("validation_chunk_ids", [])),
+    chunks = [
+        *list(state.get("base_chunks", [])),
+        *list(state.get("attachment_chunks", [])),
+        *list(state.get("validation_chunks", [])),
     ]
+    normalized_chunks = [chunk for chunk in chunks if str(chunk.get("content", "")).strip()]
+    chunk_ids = [str(chunk["chunk_id"]) for chunk in normalized_chunks]
     return {
         "indexed": True,
         "chunk_ids": chunk_ids,
+        "chunks": normalized_chunks,
     }
 
 
@@ -76,7 +126,7 @@ async def run_rag_pipeline(
     tags: list[str],
     attachments: list[dict[str, str]],
     validation_result: dict | None,
-) -> list[str]:
+) -> RagIndexState:
     state = await get_rag_pipeline_graph().ainvoke(
         {
             "task_id": task_id,
@@ -91,5 +141,6 @@ async def run_rag_pipeline(
         "task_id": task_id,
         "indexed": bool(state.get("indexed", False)),
         "chunk_ids": list(state.get("chunk_ids", [])),
+        "chunks": list(state.get("chunks", [])),
     }
-    return result["chunk_ids"]
+    return result

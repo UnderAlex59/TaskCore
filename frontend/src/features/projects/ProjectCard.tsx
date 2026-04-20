@@ -10,10 +10,6 @@ interface Props {
   project: ProjectRead;
 }
 
-function formatDate(value: string) {
-  return formatShortDate(value);
-}
-
 export default function ProjectCard({
   project,
   onDelete,
@@ -21,17 +17,24 @@ export default function ProjectCard({
   canManageRules = false,
 }: Props) {
   return (
-    <article className="glass-panel border border-black/10 p-6 shadow-panel">
-      <p className="section-eyebrow">Проект</p>
-      <h3 className="mt-3 text-balance text-2xl font-bold text-ink">
-        {project.name}
-      </h3>
-      <p className="mt-3 break-words text-sm leading-7 text-slate/80">
-        {project.description ?? "Описание проекта пока не заполнено."}
-      </p>
-      <div className="mt-5 text-xs font-medium uppercase tracking-[0.14em] text-slate/60">
-        Обновлён {formatDate(project.updated_at)}
+    <article className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
+            Проект
+          </p>
+          <h3 className="mt-3 text-2xl font-semibold text-[#172b4d]">
+            {project.name}
+          </h3>
+          <p className="mt-3 break-words text-sm leading-7 text-[#44546f]">
+            {project.description ?? "Описание проекта пока не заполнено."}
+          </p>
+        </div>
+        <div className="shrink-0 rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3 text-sm text-[#44546f]">
+          Обновлен {formatShortDate(project.updated_at)}
+        </div>
       </div>
+
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Link
           className="ui-button-primary"
@@ -44,7 +47,7 @@ export default function ProjectCard({
             className="ui-button-secondary"
             to={`/admin/projects/${project.id}/rules`}
           >
-            Правила и узлы
+            Правила проекта
           </Link>
         ) : null}
         {canDelete && onDelete ? (

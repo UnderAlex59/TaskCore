@@ -6,6 +6,7 @@ import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 const adminApiMock = vi.hoisted(() => ({
   createProvider: vi.fn(),
   getAudit: vi.fn(),
+  listAvailableAgents: vi.fn(),
   getMonitoringActivity: vi.fn(),
   getMonitoringLlm: vi.fn(),
   getMonitoringSummary: vi.fn(),
@@ -52,6 +53,20 @@ describe("ProviderSettingsPage", () => {
         enabled: true,
       },
     ]);
+    adminApiMock.listAvailableAgents.mockResolvedValue([
+      {
+        key: "qa",
+        name: "QAAgent",
+        description: "Отвечает на вопросы по требованиям.",
+        aliases: ["question"],
+      },
+      {
+        key: "task-validation",
+        name: "TaskValidationAgent",
+        description: "Проверяет задачу по правилам валидации.",
+        aliases: [],
+      },
+    ]);
     adminApiMock.setDefaultProvider.mockResolvedValue({});
     adminApiMock.testProvider.mockResolvedValue({
       ok: true,
@@ -67,8 +82,11 @@ describe("ProviderSettingsPage", () => {
     render(<ProviderSettingsPage />);
 
     expect(await screen.findByText("Default provider")).toBeInTheDocument();
-    expect(screen.getByText("Per-agent overrides")).toBeInTheDocument();
-    expect(screen.getByText("Question agent")).toBeInTheDocument();
+    expect(
+      screen.getByText("Специальные правила для сценариев"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("QAAgent")).toBeInTheDocument();
+    expect(screen.getByText("TaskValidationAgent")).toBeInTheDocument();
   });
 
   it("loads provider settings once on mount", async () => {
@@ -78,24 +96,30 @@ describe("ProviderSettingsPage", () => {
     await waitFor(() => {
       expect(adminApiMock.listProviders).toHaveBeenCalledTimes(2);
       expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(2);
+      expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(2);
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(adminApiMock.listProviders).toHaveBeenCalledTimes(2);
     expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(2);
+    expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(2);
   });
 
   it("tests and promotes a provider", async () => {
     render(<ProviderSettingsPage />);
 
-    const testButton = await screen.findByRole("button", { name: "Test connection" });
+    const testButton = await screen.findByRole("button", {
+      name: "Проверить подключение",
+    });
     fireEvent.click(testButton);
 
     await waitFor(() => {
       expect(adminApiMock.testProvider).toHaveBeenCalledWith("provider-1");
     });
 
-    const makeDefaultButton = screen.getByRole("button", { name: "Current default" });
+    const makeDefaultButton = screen.getByRole("button", {
+      name: "Текущий профиль",
+    });
     expect(makeDefaultButton).toBeDisabled();
   });
 });

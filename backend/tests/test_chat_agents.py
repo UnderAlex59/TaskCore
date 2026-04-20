@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.documents import Document
 
 from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
 from app.agents.chat_agents.change_tracker_agent import ChangeTrackerAgent
@@ -169,6 +170,60 @@ async def test_question_agent_marks_low_confidence_answers_for_validation_backlo
 
 
 @pytest.mark.asyncio
+async def test_question_agent_uses_qdrant_task_knowledge_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text='{"answer":"Используйте событие status.changed.", "confidence":"high", "canonical_question":null}',
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=40,
+            prompt_tokens=10,
+            completion_tokens=12,
+            total_tokens=22,
+            estimated_cost_usd=None,
+        )
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return [
+            Document(
+                page_content="Publish event status.changed after every persisted transition.",
+                metadata={"chunk_id": "task-1:content"},
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="ready_for_dev",
+            task_content="Backend and frontend should keep status changes in sync.",
+            message_type="question",
+            message_content="Какой event надо публиковать?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert result.source_ref["collection"] == "task_knowledge"
+    assert result.source_ref["chunk_ids"] == ["task-1:content"]
+
+
+@pytest.mark.asyncio
 async def test_change_tracker_falls_back_to_raw_message_on_bad_llm_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,6 +263,43 @@ async def test_change_tracker_falls_back_to_raw_message_on_bad_llm_payload(
 
     assert result.proposal_text == "Update the API contract"
     assert result.message_type == "agent_proposal"
+
+
+@pytest.mark.asyncio
+async def test_change_tracker_marks_duplicate_proposals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_find_duplicate_proposal(**kwargs):  # type: ignore[no-untyped-def]
+        return {
+            "proposal_id": "proposal-1",
+            "task_id": "task-2",
+            "score": 0.97,
+        }
+
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.find_duplicate_proposal",
+        fake_find_duplicate_proposal,
+    )
+
+    result = await ChangeTrackerAgent().handle(
+        ChatAgentContext(
+            db=None,
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="draft",
+            task_content="Backend and frontend should use one schema.",
+            message_type="change_proposal",
+            message_content="Update the API contract",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert result.message_type == "agent_answer"
+    assert result.source_ref["duplicate_proposal"] is True
+    assert result.source_ref["duplicate_task_id"] == "task-2"
 
 
 @pytest.mark.asyncio
@@ -312,6 +404,124 @@ async def test_background_question_skips_ai_response() -> None:
     assert state["ai_response_required"] is False
     assert "agent_name" not in state
     assert "response" not in state
+
+
+@pytest.mark.asyncio
+async def test_llm_routing_can_skip_non_task_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        assert kwargs["agent_key"] == "chat-routing"
+        return LLMInvocationResult(
+            ok=True,
+            text='{"task_related": false, "reason": "smalltalk"}',
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=25,
+            prompt_tokens=10,
+            completion_tokens=8,
+            total_tokens=18,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    state = await run_chat_graph(
+        db=object(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="API sync",
+        task_status="draft",
+        task_content="Backend and frontend should use one schema for task updates.",
+        message_type="question",
+        message_content="Как настроение в команде сегодня?",
+        validation_result=None,
+        requested_agent=None,
+        raw_message_content="Как настроение в команде сегодня?",
+    )
+
+    assert state["ai_response_required"] is False
+    assert "agent_name" not in state
+
+
+@pytest.mark.asyncio
+async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "chat-routing":
+            return LLMInvocationResult(
+                ok=True,
+                text='{"task_related": true, "reason": "requirements question"}',
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=10,
+                completion_tokens=8,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Терминальные статусы нужно перечислить отдельно в постановке.",'
+                    '"confidence":"low",'
+                    '"canonical_question":"Какие статусы считаются терминальными?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=40,
+                prompt_tokens=20,
+                completion_tokens=18,
+                total_tokens=38,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(
+                id=identifier,
+                project_id="project-1",
+                validation_result={"verdict": "approved", "questions": []},
+            )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    async def fake_record_chat_question(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(
+        "app.services.validation_question_service.ValidationQuestionService.record_chat_question",
+        fake_record_chat_question,
+    )
+
+    state = await run_chat_graph(
+        db=FakeDB(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        source_message_id="message-1",
+        task_title="Status sync",
+        task_status="ready_for_dev",
+        task_content="Backend and frontend should keep statuses in sync.",
+        message_type="question",
+        message_content="Нужно ли отдельно перечислить терминальные статусы для интеграции?",
+        validation_result={"verdict": "approved", "questions": []},
+        related_tasks=[],
+        requested_agent=None,
+        raw_message_content="Нужно ли отдельно перечислить терминальные статусы для интеграции?",
+    )
+
+    assert state["ai_response_required"] is True
+    assert state["agent_name"] == "QAAgent"
+    assert state["source_ref"]["answer_confidence"] == "low"
 
 
 @pytest.mark.asyncio

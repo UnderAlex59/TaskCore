@@ -26,6 +26,7 @@ from app.schemas.task import (
 from app.services.audit_service import AuditService
 from app.services.chat_realtime import chat_connection_manager, serialize_message
 from app.services.project_service import ProjectService
+from app.services.qdrant_service import QdrantService
 from app.services.rag_service import RagService
 from app.services.task_tag_service import TaskTagService
 from app.services.validation_question_service import ValidationQuestionService
@@ -295,8 +296,7 @@ class TaskService:
                 task.status = TaskStatus.NEEDS_REWORK
             await ValidationQuestionService.clear_for_task(task.id, db)
             await RagService.index_task_context(task, attachments, validation_result=None)
-            task.indexed_at = update_timestamp
-            audit_metadata["embeddings_reindexed"] = True
+            audit_metadata["embeddings_reindexed"] = task.indexed_at is not None
         else:
             audit_metadata["embeddings_reindexed"] = False
             audit_metadata["commit_required"] = True
@@ -338,14 +338,13 @@ class TaskService:
 
         attachments = await TaskService._get_attachments(task.id, db)
         stale_before_commit = TaskService._has_stale_embeddings(task)
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
         await RagService.index_task_context(
             task,
             attachments,
             validation_result=task.validation_result,
         )
-        current_timestamp = datetime.now(timezone.utc)
-        task.updated_at = current_timestamp
-        task.indexed_at = current_timestamp
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -392,7 +391,6 @@ class TaskService:
         task.tester_id = payload.tester_id
         task.status = TaskStatus.READY_FOR_DEV
         task.updated_at = current_timestamp
-        task.indexed_at = current_timestamp
 
         developer_name = await TaskService._get_user_name(payload.developer_id, db)
         tester_name = await TaskService._get_user_name(payload.tester_id, db)
@@ -430,6 +428,11 @@ class TaskService:
         )
 
         attachments = await TaskService._get_attachments(task.id, db)
+        await RagService.index_task_context(
+            task,
+            attachments,
+            validation_result=task.validation_result,
+        )
         await db.commit()
         await db.refresh(task)
         approval_message = (
@@ -481,6 +484,7 @@ class TaskService:
             task_id=task.id,
         )
         await db.delete(task)
+        await QdrantService.delete_task_artifacts(task_id=task.id)
         await db.commit()
 
     @staticmethod
@@ -516,14 +520,13 @@ class TaskService:
         await db.flush()
 
         attachments = await TaskService._get_attachments(task.id, db)
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
         await RagService.index_task_context(
             task,
             attachments,
             validation_result=task.validation_result,
         )
-        current_timestamp = datetime.now(timezone.utc)
-        task.updated_at = current_timestamp
-        task.indexed_at = current_timestamp
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -567,6 +570,10 @@ class TaskService:
         )
 
         validation_state = await run_validation_graph(
+            db=db,
+            actor_user_id=current_user.id,
+            task_id=task.id,
+            project_id=task.project_id,
             title=task.title,
             content=task.content,
             tags=task.tags,
@@ -600,14 +607,13 @@ class TaskService:
         )
         await ValidationQuestionService.sync_for_task(task, db)
 
+        current_timestamp = datetime.now(timezone.utc)
+        task.updated_at = current_timestamp
         chunk_ids = await RagService.index_task_context(
             task,
             attachments,
             validation_result=task.validation_result,
         )
-        current_timestamp = datetime.now(timezone.utc)
-        task.updated_at = current_timestamp
-        task.indexed_at = current_timestamp
         db.add(
             Message(
                 task_id=task.id,
@@ -621,7 +627,7 @@ class TaskService:
                     "related_task_ids": [
                         item["task_id"] for item in related_tasks if "task_id" in item
                     ],
-                    "collection": "tasks",
+                    "collection": "task_knowledge" if chunk_ids else "tasks",
                 },
             )
         )

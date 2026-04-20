@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 
-import CreateProjectModal from "@/features/projects/CreateProjectModal";
-import ProjectCard from "@/features/projects/ProjectCard";
 import {
   projectsApi,
   type ProjectCreate,
   type ProjectRead,
 } from "@/api/projectsApi";
-import { useAuthStore } from "@/store/authStore";
+import CreateProjectModal from "@/features/projects/CreateProjectModal";
+import ProjectCard from "@/features/projects/ProjectCard";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
+import { useAuthStore } from "@/store/authStore";
 
 const PROJECT_CREATORS = new Set(["ADMIN", "ANALYST", "MANAGER"]);
 
@@ -87,18 +87,16 @@ export default function ProjectList() {
 
   return (
     <section className="space-y-6">
-      <header className="glass-panel border border-black/10 p-6 shadow-panel sm:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="section-eyebrow">Проекты</p>
-            <h2 className="mt-3 text-3xl font-bold text-ink sm:text-4xl">
+      <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-3xl">
+            <p className="section-eyebrow">Projects</p>
+            <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
               Проекты рабочего пространства
             </h2>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate/80">
-              Первый зарегистрированный пользователь становится администратором
-              платформы. Аналитики, менеджеры и администраторы могут создавать
-              проекты; создатель проекта автоматически получает роль менеджера
-              внутри него.
+            <p className="mt-4 text-sm leading-7 text-[#44546f]">
+              Создавайте проекты, распределяйте команду и ведите постановки
+              задач в едином рабочем контуре.
             </p>
           </div>
           <CreateProjectModal
@@ -110,7 +108,7 @@ export default function ProjectList() {
         {error ? (
           <p
             aria-live="polite"
-            className="mt-4 rounded-[10px] bg-red-50 px-4 py-3 text-sm text-red-700"
+            className="mt-4 rounded-[12px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]"
           >
             {error}
           </p>
@@ -118,9 +116,9 @@ export default function ProjectList() {
       </header>
 
       {projects.length === 0 ? (
-        <div className="glass-panel border border-dashed border-black/10 p-8 text-sm text-slate/70 shadow-panel">
-          Проектов пока нет. Создайте первый проект, чтобы начать добавлять
-          участников и задачи.
+        <div className="rounded-[18px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-6 py-8 text-sm leading-7 text-[#626f86]">
+          Проектов пока нет. Создайте первый проект, чтобы начать работу с
+          задачами и участниками.
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-2">

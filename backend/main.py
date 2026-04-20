@@ -22,6 +22,7 @@ from app.routers.tasks import router as tasks_router
 from app.routers.task_tags import router as task_tags_router
 from app.routers.users import router as users_router
 from app.routers.validation import router as validation_router
+from app.services.qdrant_service import QdrantService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await AnyPath(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    await QdrantService.ensure_collections()
     try:
         export_agent_graph_images(Path(settings.LANGGRAPH_IMAGES_DIR))
     except Exception:
@@ -62,6 +64,11 @@ def create_app() -> FastAPI:
     uploads_app = StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False)
     app.mount("/uploads", uploads_app, name="uploads")
     app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False), name="api-uploads")
+    app.mount(
+        "/langgraph-images",
+        StaticFiles(directory=settings.LANGGRAPH_IMAGES_DIR, check_dir=False, html=True),
+        name="langgraph-images",
+    )
 
     @app.get("/healthz", tags=["system"])
     async def healthz() -> dict[str, str]:

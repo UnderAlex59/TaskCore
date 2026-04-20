@@ -49,6 +49,57 @@ DB_MARKER = "requires_db"
 _DB_PREPARED = False
 
 
+@pytest.fixture(autouse=True)
+def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _ensure_collections() -> bool:
+        return True
+
+    async def _replace_task_knowledge(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    async def _delete_task_knowledge(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    async def _search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def _search_related_tasks(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def _replace_project_questions(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    async def _search_project_questions(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def _delete_project_questions_for_task(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    async def _find_duplicate_proposal(**kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    async def _upsert_proposal(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    async def _delete_task_artifacts(**kwargs) -> None:  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.ensure_collections", _ensure_collections)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.replace_task_knowledge", _replace_task_knowledge)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.delete_task_knowledge", _delete_task_knowledge)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_task_knowledge", _search_task_knowledge)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_related_tasks", _search_related_tasks)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.replace_project_questions", _replace_project_questions)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_project_questions", _search_project_questions)
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.delete_project_questions_for_task",
+        _delete_project_questions_for_task,
+    )
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.find_duplicate_proposal", _find_duplicate_proposal)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.upsert_proposal", _upsert_proposal)
+    monkeypatch.setattr("app.services.qdrant_service.QdrantService.delete_task_artifacts", _delete_task_artifacts)
+
+
 def apply_migrations() -> None:
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "alembic"))

@@ -14,6 +14,7 @@ from app.models.user import User, UserRole
 from app.schemas.proposal import ProposalRead, ProposalUpdate
 from app.services.audit_service import AuditService
 from app.services.chat_realtime import chat_connection_manager, serialize_message
+from app.services.qdrant_service import QdrantService
 from app.services.task_service import TaskService
 from app.services.validation_question_service import ValidationQuestionService
 
@@ -23,6 +24,7 @@ class ProposalService:
     async def create_from_message(
         task_id: str,
         *,
+        project_id: str | None,
         source_message_id: str,
         proposed_by: str,
         proposal_text: str,
@@ -36,6 +38,14 @@ class ProposalService:
         )
         db.add(proposal)
         await db.flush()
+        if project_id is not None:
+            await QdrantService.upsert_proposal(
+                proposal_id=proposal.id,
+                task_id=task_id,
+                project_id=project_id,
+                proposal_text=proposal_text,
+                status=proposal.status.value,
+            )
         AuditService.record(
             db,
             actor_user_id=proposed_by,
@@ -118,7 +128,8 @@ class ProposalService:
 
         proposal.status = ProposalStatus(payload.status)
         proposal.reviewed_by = current_user.id
-        proposal.reviewed_at = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(timezone.utc)
+        proposal.reviewed_at = current_timestamp
 
         if proposal.status == ProposalStatus.ACCEPTED:
             if proposal.proposal_text not in task.content:
@@ -127,6 +138,17 @@ class ProposalService:
             task.validation_result = None
             await ValidationQuestionService.clear_for_task(task.id, db)
             task.status = TaskStatus.NEEDS_REWORK
+
+        if proposal.status == ProposalStatus.ACCEPTED:
+            task.updated_at = current_timestamp
+
+        await QdrantService.upsert_proposal(
+            proposal_id=proposal.id,
+            task_id=task.id,
+            project_id=task.project_id,
+            proposal_text=proposal.proposal_text,
+            status=proposal.status.value,
+        )
 
         status_message = Message(
             task_id=task.id,

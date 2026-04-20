@@ -25,13 +25,13 @@ export default function MessageList({ currentUserId, messages }: Props) {
 
   if (messages.length === 0) {
     return (
-      <div className="flex h-full min-h-[16rem] items-center justify-center rounded-[10px] border border-dashed border-black/10 bg-white/55 px-5 py-8">
+      <div className="flex h-full min-h-[18rem] items-center justify-center rounded-[16px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-6 py-10">
         <p
           aria-live="polite"
-          className="max-w-md text-center text-sm leading-7 text-slate/70"
+          className="max-w-md text-center text-sm leading-7 text-[#626f86]"
         >
           Сообщений пока нет. Начните обсуждение, чтобы уточнить требование,
-          запросить изменение или перейти к следующему шагу проверки.
+          предложить изменение или принять решение по следующему шагу.
         </p>
       </div>
     );

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 _TASK_CONTEXT_HINTS = (
@@ -66,6 +67,13 @@ _TASK_CONTEXT_STOPWORDS = {
     "which",
 }
 
+CHAT_ROUTING_AGENT_KEY = "chat-routing"
+CHAT_ROUTING_AGENT_NAME = "ChatRoutingAgent"
+CHAT_ROUTING_AGENT_DESCRIPTION = (
+    "Определяет, относится ли сообщение пользователя к предметному контексту текущей задачи."
+)
+CHAT_ROUTING_AGENT_ALIASES: tuple[str, ...] = ()
+
 
 def extract_keywords(value: str) -> set[str]:
     return {
@@ -98,3 +106,81 @@ def message_relates_to_task_context(
     if has_keyword_overlap or has_strong_task_hint:
         return True
     return has_task_context_hint and has_keyword_overlap
+
+
+def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
+    text = raw_text.strip()
+    if not text:
+        return None
+
+    candidates = [text]
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match is not None:
+        candidates.append(match.group(0))
+
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _normalize_task_related(candidate: object, *, fallback: bool) -> bool:
+    if isinstance(candidate, bool):
+        return candidate
+    normalized = str(candidate).strip().lower()
+    if normalized in {"true", "yes", "1"}:
+        return True
+    if normalized in {"false", "no", "0"}:
+        return False
+    return fallback
+
+
+async def analyze_task_context_relevance(
+    *,
+    db,
+    actor_user_id: str | None,
+    task_id: str | None,
+    project_id: str | None,
+    task_title: str,
+    task_content: str,
+    message_content: str,
+) -> bool:
+    fallback = message_relates_to_task_context(
+        task_title=task_title,
+        task_content=task_content,
+        message_content=message_content,
+    )
+    if db is None:
+        return fallback
+
+    from app.services.llm_runtime_service import LLMRuntimeService
+
+    result = await LLMRuntimeService.invoke_chat(
+        db,
+        agent_key=CHAT_ROUTING_AGENT_KEY,
+        actor_user_id=actor_user_id,
+        task_id=task_id,
+        project_id=project_id,
+        system_prompt=(
+            "Ты определяешь, требует ли сообщение аналитического ответа по текущей задаче. "
+            "Считай task_related=true только если пользователь спрашивает о требованиях, контексте, критериях, поведении системы, рисках или изменениях именно этой задачи. "
+            "Если это small talk, организационное сообщение, приветствие или вопрос вне предмета задачи, верни task_related=false. "
+            "Верни строго JSON c ключами task_related и reason. Не добавляй текст вне JSON."
+        ),
+        user_prompt=(
+            "Название задачи:\n"
+            f"{task_title.strip()}\n\n"
+            "Описание задачи:\n"
+            f"{task_content.strip()}\n\n"
+            "Сообщение пользователя:\n"
+            f"{message_content.strip()}"
+        ),
+    )
+    payload = _extract_json_payload(result.text or "") if result.ok and result.text else None
+    if payload is None:
+        return fallback
+    return _normalize_task_related(payload.get("task_related"), fallback=fallback)
