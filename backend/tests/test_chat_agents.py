@@ -80,18 +80,74 @@ def test_build_chat_model_supports_openai_compatible_endpoint() -> None:
 
 @pytest.mark.asyncio
 async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    llm_calls: list[str] = []
+
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        llm_calls.append(str(kwargs["agent_key"]))
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":false,'
+                    '"needs_verification":true,"retrieval_query":null,'
+                    '"retrieval_limit":2,"focus_points":["api evolution"],'
+                    '"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openrouter",
+                model="openai/gpt-4o-mini",
+                latency_ms=30,
+                prompt_tokens=6,
+                completion_tokens=12,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Нужно развивать API через версионируемый контракт и явные '
+                    'события синхронизации.","confidence":"high",'
+                    '"canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openrouter",
+                model="openai/gpt-4o-mini",
+                latency_ms=123,
+                prompt_tokens=10,
+                completion_tokens=20,
+                total_tokens=30,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-verifier":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"final_answer":"Нужно развивать API через версионируемый контракт '
+                    'и явные события синхронизации.","confidence":"high",'
+                    '"grounded":true,"canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openrouter",
+                model="openai/gpt-4o-mini",
+                latency_ms=40,
+                prompt_tokens=8,
+                completion_tokens=12,
+                total_tokens=20,
+                estimated_cost_usd=None,
+            )
         return LLMInvocationResult(
-            ok=True,
-            text="Live answer from the provider",
+            ok=False,
+            text=None,
             provider_config_id="provider-1",
             provider_kind="openrouter",
             model="openai/gpt-4o-mini",
-            latency_ms=123,
-            prompt_tokens=10,
-            completion_tokens=20,
-            total_tokens=30,
+            latency_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
             estimated_cost_usd=None,
+            error_message="unexpected agent key",
         )
 
     monkeypatch.setattr(
@@ -114,32 +170,58 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
         )
     )
 
-    assert result.response == "Live answer from the provider"
+    assert result.response == "Нужно развивать API через версионируемый контракт и явные события синхронизации."
     assert result.source_ref["provider_kind"] == "openrouter"
     assert result.source_ref["answer_confidence"] == "high"
+    assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
 async def test_question_agent_marks_low_confidence_answers_for_validation_backlog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    llm_calls: list[str] = []
+
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
-        return LLMInvocationResult(
-            ok=True,
-            text=(
-                '{"answer":"В задаче не указано, какие статусы считаются итоговыми.",'
-                '"confidence":"low",'
-                '"canonical_question":"Какие статусы синхронизируются между системами?"}'
-            ),
-            provider_config_id="provider-1",
-            provider_kind="openai",
-            model="gpt-4o-mini",
-            latency_ms=80,
-            prompt_tokens=12,
-            completion_tokens=18,
-            total_tokens=30,
-            estimated_cost_usd=None,
-        )
+        llm_calls.append(str(kwargs["agent_key"]))
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"deep","needs_rag":true,'
+                    '"needs_verification":true,'
+                    '"retrieval_query":"статусы синхронизации",'
+                    '"retrieval_limit":4,'
+                    '"focus_points":["terminal statuses"],'
+                    '"canonical_question_hint":"Какие статусы синхронизируются между системами?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=25,
+                prompt_tokens=8,
+                completion_tokens=12,
+                total_tokens=20,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"В задаче не указано, какие статусы считаются итоговыми.",'
+                    '"confidence":"low",'
+                    '"canonical_question":"Какие статусы синхронизируются между системами?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=80,
+                prompt_tokens=12,
+                completion_tokens=18,
+                total_tokens=30,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     monkeypatch.setattr(
         "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
@@ -167,25 +249,63 @@ async def test_question_agent_marks_low_confidence_answers_for_validation_backlo
         == "Какие статусы синхронизируются между системами?"
     )
     assert "Вопрос сохранён в базе вопросов" in result.response
+    assert llm_calls == ["qa-planner", "qa-answer"]
 
 
 @pytest.mark.asyncio
 async def test_question_agent_uses_qdrant_task_knowledge_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    llm_calls: list[str] = []
+
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
-        return LLMInvocationResult(
-            ok=True,
-            text='{"answer":"Используйте событие status.changed.", "confidence":"high", "canonical_question":null}',
-            provider_config_id="provider-1",
-            provider_kind="openai",
-            model="gpt-4o-mini",
-            latency_ms=40,
-            prompt_tokens=10,
-            completion_tokens=12,
-            total_tokens=22,
-            estimated_cost_usd=None,
-        )
+        llm_calls.append(str(kwargs["agent_key"]))
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"deep","needs_rag":true,"needs_verification":true,'
+                    '"retrieval_query":"status.changed event",'
+                    '"retrieval_limit":4,'
+                    '"focus_points":["integration event"],'
+                    '"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=25,
+                prompt_tokens=6,
+                completion_tokens=12,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text='{"answer":"Используйте событие status.changed.", "confidence":"high", "canonical_question":null}',
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=40,
+                prompt_tokens=10,
+                completion_tokens=12,
+                total_tokens=22,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-verifier":
+            return LLMInvocationResult(
+                ok=True,
+                text='{"final_answer":"Используйте событие status.changed.", "confidence":"high", "grounded":true, "canonical_question":null}',
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=6,
+                completion_tokens=8,
+                total_tokens=14,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
         return [
@@ -221,6 +341,7 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
 
     assert result.source_ref["collection"] == "task_knowledge"
     assert result.source_ref["chunk_ids"] == ["task-1:content"]
+    assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
@@ -463,7 +584,27 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
                 total_tokens=18,
                 estimated_cost_usd=None,
             )
-        if kwargs["agent_key"] == "qa":
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"deep","needs_rag":true,'
+                    '"needs_verification":true,'
+                    '"retrieval_query":"терминальные статусы интеграции",'
+                    '"retrieval_limit":4,'
+                    '"focus_points":["terminal statuses"],'
+                    '"canonical_question_hint":"Какие статусы считаются терминальными?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
             return LLMInvocationResult(
                 ok=True,
                 text=(
@@ -529,22 +670,44 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
-        return LLMInvocationResult(
-            ok=True,
-            text=(
-                '{"answer":"В задаче не хватает данных о терминальных статусах.",'
-                '"confidence":"low",'
-                '"canonical_question":"Какие статусы считаются терминальными?"}'
-            ),
-            provider_config_id="provider-1",
-            provider_kind="openai",
-            model="gpt-4o-mini",
-            latency_ms=55,
-            prompt_tokens=12,
-            completion_tokens=18,
-            total_tokens=30,
-            estimated_cost_usd=None,
-        )
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"deep","needs_rag":true,'
+                    '"needs_verification":true,'
+                    '"retrieval_query":"терминальные статусы",'
+                    '"retrieval_limit":4,'
+                    '"focus_points":["terminal statuses"],'
+                    '"canonical_question_hint":"Какие статусы считаются терминальными?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=10,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"В задаче не хватает данных о терминальных статусах.",'
+                    '"confidence":"low",'
+                    '"canonical_question":"Какие статусы считаются терминальными?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=55,
+                prompt_tokens=12,
+                completion_tokens=18,
+                total_tokens=30,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     audit_events: list[str] = []
 

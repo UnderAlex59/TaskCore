@@ -46,6 +46,9 @@ const AGENT_KEY_LABELS: Record<string, string> = {
   "change-tracker": "Трекер изменений",
   manager: "Маршрутизатор",
   qa: "Агент вопросов",
+  "qa-answer": "QA: ответ",
+  "qa-planner": "QA: планирование",
+  "qa-verifier": "QA: проверка ответа",
   "task-validation": "Валидация задачи",
 };
 

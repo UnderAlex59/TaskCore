@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -454,7 +454,14 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
     return {"context_questions": questions}
 
 
-def _route_after_normalization(state: ValidationGraphState) -> str:
+def _route_after_normalization(
+    state: ValidationGraphState,
+) -> Literal[
+    "prepare_core_rules_request",
+    "prepare_custom_rules_request",
+    "search_project_questions",
+    "finalize_validation_result",
+]:
     settings = state.get("validation_node_settings", {})
     if not any(settings.get(flag, True) for flag in ("core_rules", "custom_rules", "context_questions")):
         return "finalize_validation_result"
@@ -467,7 +474,13 @@ def _route_after_normalization(state: ValidationGraphState) -> str:
     return "finalize_validation_result"
 
 
-def _route_after_core_rules(state: ValidationGraphState) -> str:
+def _route_after_core_rules(
+    state: ValidationGraphState,
+) -> Literal[
+    "prepare_custom_rules_request",
+    "search_project_questions",
+    "finalize_validation_result",
+]:
     if list(state.get("core_issues", [])):
         return "finalize_validation_result"
 
@@ -479,7 +492,9 @@ def _route_after_core_rules(state: ValidationGraphState) -> str:
     return "finalize_validation_result"
 
 
-def _route_after_custom_rules(state: ValidationGraphState) -> str:
+def _route_after_custom_rules(
+    state: ValidationGraphState,
+) -> Literal["search_project_questions", "finalize_validation_result"]:
     if list(state.get("custom_rule_issues", [])):
         return "finalize_validation_result"
 
@@ -527,11 +542,35 @@ def get_validation_graph():
     graph.add_node("inspect_context", _inspect_context)
     graph.add_node("finalize_validation_result", _finalize_validation_result)
     graph.add_edge(START, "normalize_validation_input")
-    graph.add_conditional_edges("normalize_validation_input", _route_after_normalization)
+    graph.add_conditional_edges(
+        "normalize_validation_input",
+        _route_after_normalization,
+        {
+            "prepare_core_rules_request": "prepare_core_rules_request",
+            "prepare_custom_rules_request": "prepare_custom_rules_request",
+            "search_project_questions": "search_project_questions",
+            "finalize_validation_result": "finalize_validation_result",
+        },
+    )
     graph.add_edge("prepare_core_rules_request", "evaluate_core_rules")
-    graph.add_conditional_edges("evaluate_core_rules", _route_after_core_rules)
+    graph.add_conditional_edges(
+        "evaluate_core_rules",
+        _route_after_core_rules,
+        {
+            "prepare_custom_rules_request": "prepare_custom_rules_request",
+            "search_project_questions": "search_project_questions",
+            "finalize_validation_result": "finalize_validation_result",
+        },
+    )
     graph.add_edge("prepare_custom_rules_request", "evaluate_custom_rules")
-    graph.add_conditional_edges("evaluate_custom_rules", _route_after_custom_rules)
+    graph.add_conditional_edges(
+        "evaluate_custom_rules",
+        _route_after_custom_rules,
+        {
+            "search_project_questions": "search_project_questions",
+            "finalize_validation_result": "finalize_validation_result",
+        },
+    )
     graph.add_edge("search_project_questions", "prepare_context_questions_request")
     graph.add_edge("prepare_context_questions_request", "inspect_context")
     graph.add_edge("inspect_context", "finalize_validation_result")

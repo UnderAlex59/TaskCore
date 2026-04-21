@@ -432,24 +432,47 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
     assert approve_response.status_code == 200
 
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
-        return LLMInvocationResult(
-            ok=True,
-            text=(
-                '{"answer":"В текущем требовании не описано, какие статусы считаются '
-                'терминальными и кто инициирует повторную синхронизацию.",'
-                '"confidence":"low",'
-                '"canonical_question":"Какие статусы считаются терминальными '
-                'и кто инициирует повторную синхронизацию?"}'
-            ),
-            provider_config_id="provider-1",
-            provider_kind="openai",
-            model="gpt-4o-mini",
-            latency_ms=75,
-            prompt_tokens=12,
-            completion_tokens=18,
-            total_tokens=30,
-            estimated_cost_usd=None,
-        )
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"deep","needs_rag":true,'
+                    '"needs_verification":true,'
+                    '"retrieval_query":"терминальные статусы и повторная синхронизация",'
+                    '"retrieval_limit":4,'
+                    '"focus_points":["terminal statuses","sync initiator"],'
+                    '"canonical_question_hint":"Какие статусы считаются терминальными '
+                    'и кто инициирует повторную синхронизацию?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=25,
+                prompt_tokens=8,
+                completion_tokens=10,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"В текущем требовании не описано, какие статусы считаются '
+                    'терминальными и кто инициирует повторную синхронизацию.",'
+                    '"confidence":"low",'
+                    '"canonical_question":"Какие статусы считаются терминальными '
+                    'и кто инициирует повторную синхронизацию?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=75,
+                prompt_tokens=12,
+                completion_tokens=18,
+                total_tokens=30,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     monkeypatch.setattr(
         "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",

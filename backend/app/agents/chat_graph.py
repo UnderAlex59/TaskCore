@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -96,7 +96,7 @@ async def _orchestrate_chat_request(state: ChatGraphState) -> ChatGraphState:
     }
 
 
-def _route_chat_request(state: ChatGraphState) -> str:
+def _route_chat_request(state: ChatGraphState) -> Literal["collect_related_tasks", "__end__"]:
     if state.get("ai_response_required"):
         return "collect_related_tasks"
     return END
@@ -253,7 +253,14 @@ def get_chat_graph():
     graph.add_node("finalize_chat_response", _finalize_chat_response)
     graph.add_edge(START, "prepare_chat_request")
     graph.add_edge("prepare_chat_request", "orchestrate_chat_request")
-    graph.add_conditional_edges("orchestrate_chat_request", _route_chat_request)
+    graph.add_conditional_edges(
+        "orchestrate_chat_request",
+        _route_chat_request,
+        {
+            "collect_related_tasks": "collect_related_tasks",
+            "__end__": END,
+        },
+    )
     graph.add_edge("collect_related_tasks", "invoke_agent_subgraph")
     graph.add_edge("invoke_agent_subgraph", "persist_chat_artifacts")
     graph.add_edge("persist_chat_artifacts", "finalize_chat_response")

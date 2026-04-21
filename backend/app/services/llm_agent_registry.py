@@ -16,10 +16,18 @@ from app.agents.chat_routing import (
     CHAT_ROUTING_AGENT_NAME,
 )
 from app.agents.qa_agent_graph import (
-    QA_AGENT_ALIASES,
-    QA_AGENT_DESCRIPTION,
-    QA_AGENT_KEY,
-    QA_AGENT_NAME,
+    QA_ANSWER_AGENT_ALIASES,
+    QA_ANSWER_AGENT_DESCRIPTION,
+    QA_ANSWER_AGENT_KEY,
+    QA_ANSWER_AGENT_NAME,
+    QA_PLANNER_AGENT_ALIASES,
+    QA_PLANNER_AGENT_DESCRIPTION,
+    QA_PLANNER_AGENT_KEY,
+    QA_PLANNER_AGENT_NAME,
+    QA_VERIFIER_AGENT_ALIASES,
+    QA_VERIFIER_AGENT_DESCRIPTION,
+    QA_VERIFIER_AGENT_KEY,
+    QA_VERIFIER_AGENT_NAME,
 )
 from app.agents.validation_graph import (
     VALIDATION_AGENT_ALIASES,
@@ -33,31 +41,45 @@ from app.agents.validation_graph import (
 def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
     return (
         ChatAgentMetadata(
-            key=QA_AGENT_KEY,
-            name=QA_AGENT_NAME,
-            description=QA_AGENT_DESCRIPTION,
-            aliases=QA_AGENT_ALIASES,
+            key=QA_PLANNER_AGENT_KEY,
+            name=QA_PLANNER_AGENT_NAME,
+            description=QA_PLANNER_AGENT_DESCRIPTION,
+            aliases=QA_PLANNER_AGENT_ALIASES,
             priority=20,
+        ),
+        ChatAgentMetadata(
+            key=QA_ANSWER_AGENT_KEY,
+            name=QA_ANSWER_AGENT_NAME,
+            description=QA_ANSWER_AGENT_DESCRIPTION,
+            aliases=QA_ANSWER_AGENT_ALIASES,
+            priority=30,
+        ),
+        ChatAgentMetadata(
+            key=QA_VERIFIER_AGENT_KEY,
+            name=QA_VERIFIER_AGENT_NAME,
+            description=QA_VERIFIER_AGENT_DESCRIPTION,
+            aliases=QA_VERIFIER_AGENT_ALIASES,
+            priority=40,
         ),
         ChatAgentMetadata(
             key=CHANGE_TRACKER_AGENT_KEY,
             name=CHANGE_TRACKER_AGENT_NAME,
             description=CHANGE_TRACKER_AGENT_DESCRIPTION,
             aliases=CHANGE_TRACKER_AGENT_ALIASES,
-            priority=30,
+            priority=50,
         ),
         ChatAgentMetadata(
             key=CHAT_ROUTING_AGENT_KEY,
             name=CHAT_ROUTING_AGENT_NAME,
             description=CHAT_ROUTING_AGENT_DESCRIPTION,
             aliases=CHAT_ROUTING_AGENT_ALIASES,
-            priority=40,
+            priority=60,
         ),
         ChatAgentMetadata(
             key=VALIDATION_AGENT_KEY,
             name=VALIDATION_AGENT_NAME,
             description=VALIDATION_AGENT_DESCRIPTION,
             aliases=VALIDATION_AGENT_ALIASES,
-            priority=50,
+            priority=70,
         ),
     )
