@@ -597,6 +597,116 @@ async def test_project_validation_node_settings_affect_task_validation(client: A
     assert validate_response.json()["questions"] == []
 
 
+async def test_llm_validation_open_questions_do_not_enter_chat_question_pool(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register_user(client, email="admin-open@example.com", full_name="Alice Admin")
+    await register_user(client, email="analyst-open@example.com", full_name="Nina Analyst")
+
+    admin_token = await login_user(client, email="admin-open@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    analyst_id = next(
+        user["id"] for user in users_response.json() if user["email"] == "analyst-open@example.com"
+    )
+
+    role_response = await client.patch(
+        f"/users/{analyst_id}",
+        headers=admin_headers,
+        json={"role": "ANALYST"},
+    )
+    assert role_response.status_code == 200
+
+    analyst_token = await login_user(client, email="analyst-open@example.com")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Open validation questions", "description": "Validation-only questions"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    update_response = await client.patch(
+        f"/projects/{project_id}",
+        headers=admin_headers,
+        json={
+            "validation_node_settings": {
+                "core_rules": True,
+                "custom_rules": False,
+                "context_questions": False,
+            }
+        },
+    )
+    assert update_response.status_code == 200
+
+    create_task_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "Payment export",
+            "content": (
+                "When an analyst exports payments, the system must include the selected period, "
+                "current payment status and a generated file checksum in the export metadata."
+            ),
+            "tags": [],
+        },
+    )
+    assert create_task_response.status_code == 201
+    task_id = create_task_response.json()["id"]
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        assert kwargs["agent_key"] == "task-validation"
+        return LLMInvocationResult(
+            ok=True,
+            text='{"issues":[],"questions":["Кто подтверждает корректность экспортного файла?"]}',
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=25,
+            prompt_tokens=8,
+            completion_tokens=10,
+            total_tokens=18,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    validate_response = await client.post(
+        f"/tasks/{task_id}/validate",
+        headers=analyst_headers,
+    )
+    assert validate_response.status_code == 200
+    assert validate_response.json()["verdict"] == "approved"
+    assert validate_response.json()["questions"] == [
+        "Кто подтверждает корректность экспортного файла?"
+    ]
+
+    task_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=analyst_headers,
+    )
+    assert task_response.status_code == 200
+    assert task_response.json()["validation_result"]["questions"] == [
+        "Кто подтверждает корректность экспортного файла?"
+    ]
+
+    pool_response = await client.get(
+        "/admin/validation/questions",
+        headers=admin_headers,
+        params={"project_id": project_id},
+    )
+    assert pool_response.status_code == 200
+    assert pool_response.json()["items"] == []
+
+
 async def test_task_can_be_edited_after_approval_and_requires_explicit_embedding_commit(
     client: AsyncClient,
 ) -> None:
@@ -702,6 +812,13 @@ async def test_task_can_be_edited_after_approval_and_requires_explicit_embedding
     assert updated_task["status"] == "ready_for_dev"
     assert updated_task["validation_result"] is not None
     assert updated_task["embeddings_stale"] is True
+    assert updated_task["requires_revalidation"] is True
+
+    stale_validate_response = await client.post(
+        f"/tasks/{task_id}/validate",
+        headers=analyst_headers,
+    )
+    assert stale_validate_response.status_code == 409
 
     commit_response = await client.post(
         f"/projects/{project_id}/tasks/{task_id}/commit",
@@ -712,3 +829,21 @@ async def test_task_can_be_edited_after_approval_and_requires_explicit_embedding
     assert committed_task["status"] == "ready_for_dev"
     assert committed_task["embeddings_stale"] is False
     assert committed_task["indexed_at"] is not None
+    assert committed_task["requires_revalidation"] is True
+
+    revalidate_response = await client.post(
+        f"/tasks/{task_id}/validate",
+        headers=analyst_headers,
+    )
+    assert revalidate_response.status_code == 200
+    assert revalidate_response.json()["verdict"] == "approved"
+
+    revalidated_task_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=analyst_headers,
+    )
+    assert revalidated_task_response.status_code == 200
+    revalidated_task = revalidated_task_response.json()
+    assert revalidated_task["status"] == "ready_for_dev"
+    assert revalidated_task["embeddings_stale"] is False
+    assert revalidated_task["requires_revalidation"] is False

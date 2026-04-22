@@ -1,11 +1,5 @@
-import {
-  startTransition,
-  useDeferredValue,
-  useEffect,
-  useEffectEvent,
-  useState,
-} from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useDeferredValue, useEffect, useEffectEvent, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 
 import type { UserRole } from "@/api/authApi";
 import {
@@ -13,18 +7,11 @@ import {
   type ProjectMemberRead,
   type ProjectRead,
 } from "@/api/projectsApi";
-import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
-import {
-  tasksApi,
-  type TaskCreate,
-  type TaskRead,
-  type TaskStatus,
-} from "@/api/tasksApi";
+import { tasksApi, type TaskRead, type TaskStatus } from "@/api/tasksApi";
 import { usersApi, type UserSummary } from "@/api/usersApi";
 import TaskCard from "@/features/tasks/TaskCard";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
-import TagMultiSelect from "@/shared/components/TagMultiSelect";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { getRoleLabel, getTaskStatusLabel } from "@/shared/lib/locale";
 import { useAuthStore } from "@/store/authStore";
@@ -37,30 +24,20 @@ const PROJECT_MEMBER_ROLES: UserRole[] = [
   "TESTER",
   "ADMIN",
 ];
-const EMPTY_TASK: TaskCreate = {
-  title: "",
-  content: "",
-  tags: [],
-};
-
 export default function TaskList() {
   const { projectId } = useParams();
-  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
 
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [tasks, setTasks] = useState<TaskRead[]>([]);
-  const [taskTags, setTaskTags] = useState<TaskTagOption[]>([]);
   const [members, setMembers] = useState<ProjectMemberRead[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creatingTask, setCreatingTask] = useState(false);
   const [savingMember, setSavingMember] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("");
-  const [taskForm, setTaskForm] = useState<TaskCreate>(EMPTY_TASK);
   const [memberUserId, setMemberUserId] = useState("");
   const [memberRole, setMemberRole] = useState<UserRole>("DEVELOPER");
   const [memberPendingRemoval, setMemberPendingRemoval] =
@@ -81,26 +58,19 @@ export default function TaskList() {
       const shouldLoadUsers = ["ADMIN", "ANALYST", "MANAGER"].includes(
         user?.role ?? "",
       );
-      const [
-        loadedProject,
-        loadedTasks,
-        loadedMembers,
-        loadedUsers,
-        loadedTaskTags,
-      ] = await Promise.all([
-        projectsApi.get(projectId),
-        tasksApi.list(projectId, {
-          search: deferredSearch || undefined,
-          status: statusFilter || undefined,
-          size: 100,
-        }),
-        projectsApi.listMembers(projectId),
-        shouldLoadUsers ? usersApi.list() : Promise.resolve([]),
-        taskTagsApi.list(),
-      ]);
+      const [loadedProject, loadedTasks, loadedMembers, loadedUsers] =
+        await Promise.all([
+          projectsApi.get(projectId),
+          tasksApi.list(projectId, {
+            search: deferredSearch || undefined,
+            status: statusFilter || undefined,
+            size: 100,
+          }),
+          projectsApi.listMembers(projectId),
+          shouldLoadUsers ? usersApi.list() : Promise.resolve([]),
+        ]);
       setProject(loadedProject);
       setTasks(loadedTasks);
-      setTaskTags(loadedTaskTags);
       setMembers(loadedMembers);
       setUsers(loadedUsers);
     } catch (caught) {
@@ -129,30 +99,6 @@ export default function TaskList() {
   const availableUsers = users.filter(
     (candidate) => !members.some((member) => member.user_id === candidate.id),
   );
-
-  async function handleCreateTask(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!projectId) {
-      return;
-    }
-
-    try {
-      setCreatingTask(true);
-      const created = await tasksApi.create(projectId, {
-        ...taskForm,
-        tags: taskForm.tags?.filter(Boolean) ?? [],
-      });
-      setTasks((current) => [created, ...current]);
-      setTaskForm(EMPTY_TASK);
-      startTransition(() => {
-        navigate(`/projects/${projectId}/tasks/${created.id}`);
-      });
-    } catch (caught) {
-      setError(getApiErrorMessage(caught, "Не удалось создать задачу."));
-    } finally {
-      setCreatingTask(false);
-    }
-  }
 
   async function handleAddMember(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -227,44 +173,55 @@ export default function TaskList() {
             </p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block">
-              <span className="sr-only">Поиск задач</span>
-              <input
-                autoComplete="off"
-                className="ui-field"
-                name="task-search"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по названию и содержанию"
-                type="search"
-                value={search}
-              />
-            </label>
-            <label className="block">
-              <span className="sr-only">Фильтр по статусу</span>
-              <select
-                className="ui-field"
-                name="task-status-filter"
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as TaskStatus | "")
-                }
-                value={statusFilter}
+          <div className="space-y-3">
+            {canCreateTask ? (
+              <Link
+                className="ui-button-primary w-full justify-center"
+                to={`/projects/${projectId}/tasks/new`}
               >
-                <option value="">Все статусы</option>
-                {[
-                  "draft",
-                  "needs_rework",
-                  "awaiting_approval",
-                  "ready_for_dev",
-                  "in_progress",
-                  "done",
-                ].map((status) => (
-                  <option key={status} value={status}>
-                    {getTaskStatusLabel(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
+                Создать задачу
+              </Link>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="sr-only">Поиск задач</span>
+                <input
+                  autoComplete="off"
+                  className="ui-field"
+                  name="task-search"
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Поиск по названию и содержанию"
+                  type="search"
+                  value={search}
+                />
+              </label>
+              <label className="block">
+                <span className="sr-only">Фильтр по статусу</span>
+                <select
+                  className="ui-field"
+                  name="task-status-filter"
+                  onChange={(event) =>
+                    setStatusFilter(event.target.value as TaskStatus | "")
+                  }
+                  value={statusFilter}
+                >
+                  <option value="">Все статусы</option>
+                  {[
+                    "draft",
+                    "needs_rework",
+                    "awaiting_approval",
+                    "ready_for_dev",
+                    "in_progress",
+                    "done",
+                  ].map((status) => (
+                    <option key={status} value={status}>
+                      {getTaskStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -300,92 +257,6 @@ export default function TaskList() {
         </div>
 
         <div className="space-y-6">
-          {canCreateTask ? (
-            <form
-              className="space-y-4 rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-5"
-              onSubmit={handleCreateTask}
-            >
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
-                  Новая задача
-                </p>
-                <p className="mt-2 text-sm leading-6 text-[#44546f]">
-                  Создайте новую постановку и затем откройте ее в рабочем
-                  пространстве аналитика.
-                </p>
-              </div>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
-                  Название задачи
-                </span>
-                <input
-                  autoComplete="off"
-                  className="ui-field"
-                  name="task-title"
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  placeholder="Уточнить критерии приемки"
-                  required
-                  value={taskForm.title}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
-                  Исходное описание
-                </span>
-                <textarea
-                  className="ui-field min-h-32"
-                  name="task-content"
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      content: event.target.value,
-                    }))
-                  }
-                  placeholder="Кратко опишите исходную постановку задачи."
-                  value={taskForm.content}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
-                  Теги
-                </span>
-                <TagMultiSelect
-                  helperText={
-                    taskTags.length === 0
-                      ? "Администратор еще не добавил теги в справочник."
-                      : "Теги используются для правил, валидации и поиска."
-                  }
-                  hideLabel
-                  label="Теги"
-                  name="task-tags"
-                  noOptionsLabel="Справочник тегов пока пуст"
-                  onChange={(tags) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      tags,
-                    }))
-                  }
-                  options={taskTags}
-                  placeholder="Выберите теги"
-                  searchPlaceholder="Найти тег"
-                  value={taskForm.tags ?? []}
-                />
-              </label>
-              <button
-                className="ui-button-primary"
-                disabled={creatingTask}
-                type="submit"
-              >
-                {creatingTask ? "Создаем..." : "Создать задачу"}
-              </button>
-            </form>
-          ) : null}
-
           <section className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-5">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">

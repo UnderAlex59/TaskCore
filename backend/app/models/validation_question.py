@@ -24,6 +24,7 @@ class ValidationQuestion(Base):
         nullable=False,
         index=True,
     )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="chat")
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     validation_verdict: Mapped[str] = mapped_column(String(32), nullable=False)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

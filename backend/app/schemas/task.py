@@ -64,6 +64,7 @@ class TaskRead(BaseModel):
     attachments: list[TaskAttachmentRead] = Field(default_factory=list)
     indexed_at: datetime | None = None
     embeddings_stale: bool
+    requires_revalidation: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -33,6 +33,7 @@ from app.services.validation_question_service import ValidationQuestionService
 
 
 class TaskService:
+    revalidation_flag = "requires_revalidation"
     pre_approval_editable_statuses = {
         TaskStatus.DRAFT,
         TaskStatus.NEEDS_REWORK,
@@ -135,6 +136,19 @@ class TaskService:
         return task.updated_at > task.indexed_at
 
     @staticmethod
+    def _requires_revalidation(task: Task) -> bool:
+        return bool(
+            isinstance(task.validation_result, dict)
+            and task.validation_result.get(TaskService.revalidation_flag) is True
+        )
+
+    @staticmethod
+    def _mark_requires_revalidation(task: Task) -> None:
+        validation_result = dict(task.validation_result or {})
+        validation_result[TaskService.revalidation_flag] = True
+        task.validation_result = validation_result
+
+    @staticmethod
     def _serialize_task(task: Task, attachments: list[TaskAttachment]) -> TaskRead:
         return TaskRead(
             id=task.id,
@@ -151,6 +165,7 @@ class TaskService:
             attachments=[TaskAttachmentRead.model_validate(item) for item in attachments],
             indexed_at=task.indexed_at,
             embeddings_stale=TaskService._has_stale_embeddings(task),
+            requires_revalidation=TaskService._requires_revalidation(task),
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
@@ -298,8 +313,10 @@ class TaskService:
             await RagService.index_task_context(task, attachments, validation_result=None)
             audit_metadata["embeddings_reindexed"] = task.indexed_at is not None
         else:
+            TaskService._mark_requires_revalidation(task)
             audit_metadata["embeddings_reindexed"] = False
             audit_metadata["commit_required"] = True
+            audit_metadata["requires_revalidation"] = True
 
         AuditService.record(
             db,
@@ -522,6 +539,8 @@ class TaskService:
         attachments = await TaskService._get_attachments(task.id, db)
         current_timestamp = datetime.now(timezone.utc)
         task.updated_at = current_timestamp
+        if task.status in TaskService.post_approval_editable_statuses:
+            TaskService._mark_requires_revalidation(task)
         await RagService.index_task_context(
             task,
             attachments,
@@ -549,12 +568,26 @@ class TaskService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут запускать проверку задач",
             )
-        if task.status not in {TaskStatus.DRAFT, TaskStatus.NEEDS_REWORK}:
+        is_initial_validation = task.status in {TaskStatus.DRAFT, TaskStatus.NEEDS_REWORK}
+        is_post_approval_revalidation = (
+            task.status in TaskService.post_approval_editable_statuses
+            and TaskService._requires_revalidation(task)
+        )
+        if is_post_approval_revalidation and TaskService._has_stale_embeddings(task):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Перед повторной проверкой нужно выполнить commit "
+                    "и пересчитать эмбеддинги задачи"
+                ),
+            )
+        if not is_initial_validation and not is_post_approval_revalidation:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Перед проверкой задача должна быть в статусе черновика или доработки",
             )
 
+        status_before_validation = task.status
         task.status = TaskStatus.VALIDATING
         await db.flush()
 
@@ -600,13 +633,14 @@ class TaskService:
         )
 
         task.validation_result = validation_result.model_dump(mode="json")
-        task.status = (
-            TaskStatus.AWAITING_APPROVAL
-            if validation_result.verdict == "approved"
-            else TaskStatus.NEEDS_REWORK
-        )
-        await ValidationQuestionService.sync_for_task(task, db)
-
+        if is_post_approval_revalidation and validation_result.verdict == "approved":
+            task.status = status_before_validation
+        else:
+            task.status = (
+                TaskStatus.AWAITING_APPROVAL
+                if validation_result.verdict == "approved"
+                else TaskStatus.NEEDS_REWORK
+            )
         current_timestamp = datetime.now(timezone.utc)
         task.updated_at = current_timestamp
         chunk_ids = await RagService.index_task_context(
@@ -639,7 +673,10 @@ class TaskService:
             entity_id=task.id,
             project_id=task.project_id,
             task_id=task.id,
-            metadata={"verdict": validation_result.verdict},
+            metadata={
+                "verdict": validation_result.verdict,
+                "post_approval_revalidation": is_post_approval_revalidation,
+            },
         )
         await db.commit()
         validation_message = (

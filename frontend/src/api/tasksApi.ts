@@ -26,6 +26,7 @@ export interface TaskRead {
   attachments: TaskAttachmentRead[];
   indexed_at: string | null;
   embeddings_stale: boolean;
+  requires_revalidation: boolean;
   created_at: string;
   updated_at: string;
 }

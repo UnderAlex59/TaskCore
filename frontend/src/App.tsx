@@ -16,6 +16,7 @@ import UserList from "@/features/admin/UserList";
 import LandingPage from "@/features/landing/LandingPage";
 import ProjectList from "@/features/projects/ProjectList";
 import TaskChatPage from "@/features/tasks/TaskChatPage";
+import TaskCreatePage from "@/features/tasks/TaskCreatePage";
 import TaskDetailPage from "@/features/tasks/TaskDetailPage";
 import TaskList from "@/features/tasks/TaskList";
 import { Layout } from "@/shared/components/Layout";
@@ -36,6 +37,10 @@ export default function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/projects" element={<ProjectList />} />
               <Route path="/projects/:projectId/tasks" element={<TaskList />} />
+              <Route
+                path="/projects/:projectId/tasks/new"
+                element={<TaskCreatePage />}
+              />
               <Route
                 path="/projects/:projectId/tasks/:taskId"
                 element={<TaskDetailPage />}

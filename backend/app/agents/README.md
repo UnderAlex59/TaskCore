@@ -1,55 +1,117 @@
-# Agent Graphs
+# LangGraph Agents
 
-Проект использует `subgraph-per-agent` как основной способ orchestration для AI-сценариев.
+Этот модуль содержит agentic-слой проекта. Взаимодействие с ИИ в текущей реализации идет через LangGraph, а не через CrewAI. Каждый сценарий оформлен как граф или subgraph, что упрощает маршрутизацию, расширение и визуализацию.
 
-## Встроенные agent subgraphs
+## Структура
 
-Встроенные чат-агенты оформлены как отдельные LangGraph subgraphs:
+```text
+backend/app/agents/
+├── chat_agents/                  # базовые классы и registry чат-агентов
+├── change_tracker_agent_graph.py # обработка предложений изменений
+├── chat_graph.py                 # общий граф маршрутизации сообщений
+├── chat_routing.py               # эвристики и routing helpers
+├── graph_export.py               # экспорт PNG/HTML схем графов
+├── manager_agent_graph.py        # fallback/manager subgraph
+├── provider_test_graph.py        # проверка LLM-провайдера
+├── qa_agent_graph.py             # ответы на вопросы по задаче
+├── rag_pipeline.py               # подготовка chunks для Qdrant
+├── state.py                      # TypedDict-состояния графов
+├── subgraph_registry.py          # регистрация и выбор subgraphs
+└── validation_graph.py           # валидация требований
+```
 
-- `qa_agent_graph`
-- `change_tracker_agent_graph`
-- `manager_agent_graph`
+## Основной поток чата
 
-Главный `chat_graph` не вызывает `handle()` напрямую. Он:
+1. Пользователь отправляет сообщение в задаче.
+2. `ChatService` сохраняет сообщение и определяет грубый тип: `general`, `question`, `change_proposal`.
+3. `chat_graph` готовит контекст и выбирает agent subgraph.
+4. Если пользователь указал префикс `@qa`, `@change-tracker` или другой alias, используется forced routing.
+5. Если префикса нет, registry вызывает `can_handle(context)` у зарегистрированных subgraphs.
+6. Выбранный subgraph возвращает ответ, source reference и при необходимости `proposal_text`.
+7. `chat_graph` сохраняет связанные артефакты: change proposal или validation backlog question.
+8. Ответ агента публикуется в чат через WebSocket.
 
-1. собирает `ChatAgentContext`
-2. выбирает подходящий agent subgraph через `subgraph_registry`
-3. запускает subgraph runner
-4. затем выполняет общие persistence side-effects
+## Встроенные subgraphs
 
-## External agent subgraphs
+### Manager Agent
 
-Внешние агенты теперь тоже можно подключать без возврата к старому `dispatch_chat_agent`-подходу.
+Файл: `manager_agent_graph.py`
 
-Для этого внешний модуль должен:
+Fallback-агент. Используется, когда forced agent не найден или когда нужен системный ответ о маршрутизации. Не заменяет основную бизнес-логику чата.
 
-1. импортироваться через `CHAT_AGENT_MODULES`
-2. зарегистрировать `AgentSubgraphSpec` через `register_agent_subgraph(...)`
-3. предоставить:
-   - `metadata`
-   - `runner(context, routing_mode)`
-   - `can_handle(context)` для auto-routing
-   - при необходимости `graph_factory` для экспорта диаграмм
-   - при необходимости `llm_profile` для bootstrap per-agent provider overrides
+### QA Agent
 
-Минимальный пример:
+Файл: `qa_agent_graph.py`
+
+Отвечает на вопросы по требованиям и контексту задачи. Использует:
+
+- текст текущей задачи;
+- результат валидации;
+- похожие задачи из `task_knowledge`;
+- LLM runtime;
+- source references для прозрачности ответа.
+
+Если вопрос выявляет недостающий контекст, граф может передать вопрос в backlog валидации.
+
+### ChangeTracker Agent
+
+Файл: `change_tracker_agent_graph.py`
+
+Выделяет предложение изменения из сообщения, проверяет дубли через `task_proposals`, формирует agent proposal и передает данные для сохранения в `change_proposals`.
+
+### Validation Graph
+
+Файл: `validation_graph.py`
+
+Проверяет задачу по трем блокам:
+
+- базовые критерии качества требования;
+- кастомные правила проекта;
+- контекстные вопросы из `project_questions` и похожие задачи.
+
+Граф возвращает `approved` или `needs_rework`, список issues и уточняющие questions.
+
+### RAG Pipeline
+
+Файл: `rag_pipeline.py`
+
+Готовит документы для Qdrant. Текущая реализация формирует chunks из:
+
+- заголовка;
+- основного текста;
+- тегов;
+- метаданных вложений;
+- результата валидации.
+
+Важно: полноценная интерпретация изображений Vision-моделью и chunking по 300-500 токенов пока не реализованы как отдельные шаги. Если это нужно описывать в отчете, следует писать как план развития, а не как уже готовую функцию.
+
+## Qdrant-коллекции
+
+- `task_knowledge` - знания о задачах и результатах валидации.
+- `project_questions` - вопросы, которые используются как расширяемый чек-лист валидации.
+- `task_proposals` - предложения изменений и поиск дублей.
+
+## Расширение внешними агентами
+
+Внешний agent subgraph можно подключить через `CHAT_AGENT_MODULES`. Модуль должен импортироваться при bootstrap и зарегистрировать `AgentSubgraphSpec` через `register_agent_subgraph(...)`.
+
+Минимальная структура:
 
 ```python
 from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
-from app.agents.chat_agents.llm import ChatAgentLLMProfile
 from app.agents.state import ChatState
 from app.agents.subgraph_registry import AgentSubgraphSpec, register_agent_subgraph
 
 
 async def can_handle(context: ChatAgentContext) -> bool:
-    return context.message_type == "question" and "#risk" in context.message_content.lower()
+    return "#risk" in context.message_content.lower()
 
 
 async def run_risk_agent(context: ChatAgentContext, routing_mode: str) -> ChatState:
     return {
         "agent_name": "RiskAgent",
         "message_type": "agent_answer",
-        "response": "Нужен отдельный анализ рисков.",
+        "response": "Нужно отдельно проверить риски требования.",
         "source_ref": {"collection": "messages"},
     }
 
@@ -65,24 +127,18 @@ register_agent_subgraph(
         ),
         can_handle=can_handle,
         runner=run_risk_agent,
-        llm_profile=ChatAgentLLMProfile(
-            provider="openai",
-            model="gpt-4o-mini",
-            temperature=0.1,
-        ),
     )
 )
 ```
 
-## Routing
+## LLM runtime
 
-Поддерживаются оба режима:
+Графы не обращаются напрямую к конкретному провайдеру. Вызовы идут через `LLMRuntimeService`, который учитывает:
 
-- auto-routing через `can_handle(context)`
-- forced routing через префиксы вида `@qa`, `@change-tracker`, `@risk`
+- дефолтный provider;
+- provider configs из админки;
+- agent overrides;
+- `CHAT_AGENT_LLM_OVERRIDES`;
+- параметры модели и температуры.
 
-Если requested agent не найден, управление уходит в `ManagerAgent`, который возвращает список зарегистрированных subgraphs.
-
-## LLM overrides
-
-`LLMRuntimeService` теперь bootstrap-ит provider overrides по `subgraph_registry`, а не по старому chat-agent dispatch registry. Это значит, что внешние agent subgraphs тоже могут иметь собственный `llm_profile` и собственные настройки через `CHAT_AGENT_LLM_OVERRIDES`.
+Это позволяет переключать агенты между OpenAI, Ollama, OpenRouter, GigaChat и OpenAI-compatible API без переписывания графов.

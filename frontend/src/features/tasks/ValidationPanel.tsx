@@ -2,16 +2,20 @@ import type { ValidationResult } from "@/api/tasksApi";
 import { getValidationVerdictLabel } from "@/shared/lib/locale";
 
 interface Props {
+  blockedReason?: string;
   canValidate?: boolean;
   onValidate?: () => Promise<void>;
+  requiresRevalidation?: boolean;
   validating?: boolean;
   result: ValidationResult | null;
 }
 
 export default function ValidationPanel({
+  blockedReason,
   result,
   canValidate = false,
   onValidate,
+  requiresRevalidation = false,
   validating = false,
 }: Props) {
   if (!result) {
@@ -71,6 +75,20 @@ export default function ValidationPanel({
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {requiresRevalidation ? (
+        <div className="mt-4 rounded-[12px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] px-3 py-2 text-sm leading-6 text-[#0c66e4]">
+          После апрува в задачу внесены изменения. Перед повторной
+          проверкой должна быть опубликована версия с пересчитанными
+          эмбеддингами.
+        </div>
+      ) : null}
+
+      {blockedReason ? (
+        <p className="mt-3 text-sm leading-6 text-[#626f86]">
+          {blockedReason}
+        </p>
       ) : null}
 
       {canValidate && onValidate ? (

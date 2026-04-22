@@ -21,6 +21,7 @@ const baseTask = {
   attachments: [],
   indexed_at: null,
   embeddings_stale: true,
+  requires_revalidation: false,
   created_at: new Date("2026-04-16T08:00:00.000Z").toISOString(),
   updated_at: new Date("2026-04-16T08:00:00.000Z").toISOString(),
 };

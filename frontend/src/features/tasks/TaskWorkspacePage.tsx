@@ -442,16 +442,33 @@ export default function TaskWorkspacePage({ mode }: Props) {
     "in_progress",
     "done",
   ]);
+  const postApprovalStatuses = new Set([
+    "ready_for_dev",
+    "in_progress",
+    "done",
+  ]);
+  const hasApprovalRole = user?.role === "ADMIN" || user?.role === "ANALYST";
+  const canRunPostApprovalRevalidation =
+    task.requires_revalidation &&
+    postApprovalStatuses.has(task.status) &&
+    !task.embeddings_stale;
+  const validationBlockedReason =
+    task.requires_revalidation &&
+    postApprovalStatuses.has(task.status) &&
+    task.embeddings_stale
+      ? "Сначала выполните commit изменений, чтобы пересчитать эмбеддинги. " +
+        "После этого задачу можно отправить на повторную проверку."
+      : undefined;
   const canEditTask =
-    (user?.role === "ADMIN" || user?.role === "ANALYST") &&
-    editableStatuses.has(task.status);
+    hasApprovalRole && editableStatuses.has(task.status);
   const canValidate =
-    (user?.role === "ADMIN" || user?.role === "ANALYST") &&
-    (task.status === "draft" || task.status === "needs_rework");
+    hasApprovalRole &&
+    (task.status === "draft" ||
+      task.status === "needs_rework" ||
+      canRunPostApprovalRevalidation);
   const canApprove =
-    (user?.role === "ADMIN" || user?.role === "ANALYST") &&
-    task.status === "awaiting_approval";
-  const canReviewProposals = user?.role === "ADMIN" || user?.role === "ANALYST";
+    hasApprovalRole && task.status === "awaiting_approval";
+  const canReviewProposals = hasApprovalRole;
   const canCommitTask =
     canEditTask && task.status !== "validating" && task.embeddings_stale;
   const needsManualCommit =
@@ -629,8 +646,10 @@ export default function TaskWorkspacePage({ mode }: Props) {
             <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
               <InspectorCard eyebrow="Workflow" title="Проверка требования">
                 <ValidationPanel
+                  blockedReason={validationBlockedReason}
                   canValidate={canValidate}
                   onValidate={handleValidate}
+                  requiresRevalidation={task.requires_revalidation}
                   result={task.validation_result}
                   validating={validating}
                 />

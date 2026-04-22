@@ -33,15 +33,6 @@ class ValidationQuestionService:
         await QdrantService.delete_project_questions_for_task(task_id=task_id)
 
     @staticmethod
-    async def _clear_synced_validation_rows(task_id: str, db: AsyncSession) -> None:
-        await db.execute(
-            delete(ValidationQuestion).where(
-                ValidationQuestion.task_id == task_id,
-                ValidationQuestion.validated_at.is_not(None),
-            )
-        )
-
-    @staticmethod
     def _normalize_question_text(question_text: str) -> str:
         normalized = question_text.strip()
         if not normalized:
@@ -55,6 +46,7 @@ class ValidationQuestionService:
                 await db.execute(
                     select(ValidationQuestion)
                     .where(ValidationQuestion.task_id == task.id)
+                    .where(ValidationQuestion.source == "chat")
                     .order_by(ValidationQuestion.sort_order.asc(), ValidationQuestion.created_at.asc())
                 )
             )
@@ -74,55 +66,6 @@ class ValidationQuestionService:
                 for row in rows
             ],
         )
-
-    @staticmethod
-    async def sync_for_task(task: Task, db: AsyncSession) -> None:
-        await ValidationQuestionService._clear_synced_validation_rows(task.id, db)
-
-        validation_result = task.validation_result or {}
-        questions = [
-            ValidationQuestionService._normalize_question_text(str(item))
-            for item in list(validation_result.get("questions", []))
-            if ValidationQuestionService._normalize_question_text(str(item))
-        ]
-        if not questions:
-            return
-
-        verdict = str(validation_result.get("verdict", "needs_rework"))
-        validated_at = ValidationQuestionService._parse_validated_at(
-            validation_result.get("validated_at")
-        )
-        existing_rows = {
-            row.question_text: row
-            for row in (
-                await db.execute(
-                    select(ValidationQuestion).where(
-                        ValidationQuestion.task_id == task.id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        }
-
-        for index, question in enumerate(questions):
-            existing_row = existing_rows.get(question)
-            if existing_row is not None:
-                existing_row.validation_verdict = verdict
-                existing_row.validated_at = validated_at
-                existing_row.sort_order = index
-                continue
-            db.add(
-                ValidationQuestion(
-                    task_id=task.id,
-                    question_text=question,
-                    validation_verdict=verdict,
-                    validated_at=validated_at,
-                    sort_order=index,
-                )
-            )
-        await db.flush()
-        await ValidationQuestionService._sync_project_questions_index(task, db)
 
     @staticmethod
     async def record_chat_question(
@@ -147,9 +90,6 @@ class ValidationQuestionService:
 
         validation_result = dict(task.validation_result or {})
         verdict = str(validation_result.get("verdict", "needs_rework"))
-        validated_at = ValidationQuestionService._parse_validated_at(
-            validation_result.get("validated_at")
-        )
         sort_order = int(
             (
                 await db.execute(
@@ -174,9 +114,10 @@ class ValidationQuestionService:
 
         question = ValidationQuestion(
             task_id=task.id,
+            source="chat",
             question_text=normalized_question,
             validation_verdict=verdict,
-            validated_at=None if task.validation_result is None else validated_at,
+            validated_at=None,
             sort_order=sort_order,
         )
         db.add(question)
@@ -200,6 +141,7 @@ class ValidationQuestionService:
             select(ValidationQuestion, Task, Project)
             .join(Task, Task.id == ValidationQuestion.task_id)
             .join(Project, Project.id == Task.project_id)
+            .where(ValidationQuestion.source == "chat")
         )
 
         if project_id:
