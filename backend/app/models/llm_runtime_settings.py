@@ -18,7 +18,11 @@ class LLMRuntimeSettings(Base):
         ForeignKey("llm_provider_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    prompt_log_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="metadata_only")
+    prompt_log_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="full",
+    )
     updated_by: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

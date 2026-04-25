@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 ProviderKind = Literal["openai", "ollama", "openrouter", "gigachat", "openai_compatible"]
+PromptLogMode = Literal["disabled", "metadata_only", "full"]
 
 
 class ProviderConfigPayload(BaseModel):
@@ -64,6 +65,14 @@ class RuntimeDefaultProviderUpdate(BaseModel):
     provider_config_id: str
 
 
+class RuntimeSettingsRead(BaseModel):
+    prompt_log_mode: PromptLogMode
+
+
+class RuntimeSettingsUpdate(BaseModel):
+    prompt_log_mode: PromptLogMode
+
+
 class AgentOverrideUpdate(BaseModel):
     provider_config_id: str
     enabled: bool = True
@@ -80,7 +89,7 @@ class AgentOverrideRead(BaseModel):
 
 class RuntimeOverviewRead(BaseModel):
     default_provider_config_id: str | None
-    prompt_log_mode: str
+    prompt_log_mode: PromptLogMode
     providers: list[ProviderConfigRead]
     overrides: list[AgentOverrideRead]
 
@@ -92,3 +101,40 @@ class AgentDirectoryRead(BaseModel):
     aliases: list[str]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AgentPromptConfigRead(BaseModel):
+    prompt_key: str
+    agent_key: str
+    name: str
+    aliases: list[str]
+    default_description: str
+    default_system_prompt: str
+    effective_description: str
+    effective_system_prompt: str
+    override_description: str | None
+    override_system_prompt: str | None
+    override_enabled: bool
+    revision: int | None
+    updated_at: datetime | None
+
+
+class AgentPromptUpdate(BaseModel):
+    description: str = Field(min_length=3, max_length=4096)
+    system_prompt: str = Field(min_length=20, max_length=20000)
+    enabled: bool = True
+
+
+class AgentPromptVersionRead(BaseModel):
+    id: str
+    prompt_key: str
+    agent_key: str
+    description: str
+    system_prompt: str
+    enabled: bool
+    revision: int
+    created_at: datetime
+
+
+class AgentPromptRestorePayload(BaseModel):
+    version_id: str

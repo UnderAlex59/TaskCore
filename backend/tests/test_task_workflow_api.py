@@ -215,8 +215,7 @@ async def test_task_lifecycle_uses_task_team_and_chat_access_rules(client: Async
     assert developer_chat_response.status_code == 200
     developer_messages = developer_chat_response.json()
     assert any(
-        "Команда задачи сформирована" in message["content"]
-        for message in developer_messages
+        "Команда задачи сформирована" in message["content"] for message in developer_messages
     )
 
     send_message_response = await client.post(
@@ -431,7 +430,10 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
     )
     assert approve_response.status_code == 200
 
-    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+    async def fake_invoke_chat(
+        *args,
+        **kwargs,
+    ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
         if kwargs["agent_key"] == "qa-planner":
             return LLMInvocationResult(
                 ok=True,
@@ -484,8 +486,7 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
         headers=developer_headers,
         json={
             "content": (
-                "Какие статусы считаются терминальными и кто запускает "
-                "повторную синхронизацию?"
+                "Какие статусы считаются терминальными и кто запускает повторную синхронизацию?"
             )
         },
     )
@@ -498,9 +499,7 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
     )
     assert messages_response.status_code == 200
     qa_message = next(
-        message
-        for message in messages_response.json()
-        if message["agent_name"] == "QAAgent"
+        message for message in messages_response.json() if message["agent_name"] == "QAAgent"
     )
     assert qa_message["source_ref"]["validation_backlog_saved"] is True
     assert qa_message["source_ref"]["answer_confidence"] == "low"
@@ -659,7 +658,10 @@ async def test_llm_validation_open_questions_do_not_enter_chat_question_pool(
     assert create_task_response.status_code == 201
     task_id = create_task_response.json()["id"]
 
-    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+    async def fake_invoke_chat(
+        *args,
+        **kwargs,
+    ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
         assert kwargs["agent_key"] == "task-validation"
         return LLMInvocationResult(
             ok=True,
@@ -847,3 +849,172 @@ async def test_task_can_be_edited_after_approval_and_requires_explicit_embedding
     assert revalidated_task["status"] == "ready_for_dev"
     assert revalidated_task["embeddings_stale"] is False
     assert revalidated_task["requires_revalidation"] is False
+
+
+async def test_image_attachment_upload_generates_alt_text_and_indexes_it(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register_user(client, email="admin-image@example.com", full_name="Alice Admin")
+    await register_user(client, email="analyst-image@example.com", full_name="Nina Analyst")
+
+    admin_token = await login_user(client, email="admin-image@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    analyst_id = next(
+        user["id"] for user in users_response.json() if user["email"] == "analyst-image@example.com"
+    )
+    role_response = await client.patch(
+        f"/users/{analyst_id}",
+        headers=admin_headers,
+        json={"role": "ANALYST"},
+    )
+    assert role_response.status_code == 200
+
+    analyst_token = await login_user(client, email="analyst-image@example.com")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Image RAG", "description": "Vision alt text"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    create_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "Login mockup",
+            "content": "Нужно проверить макет формы входа.",
+            "tags": [],
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    async def fake_invoke_vision(
+        *args,
+        **kwargs,
+    ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text="Макет формы входа: поле email, поле пароль и кнопка продолжить.",
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o",
+            latency_ms=25,
+            prompt_tokens=12,
+            completion_tokens=12,
+            total_tokens=24,
+            estimated_cost_usd=None,
+        )
+
+    captured_chunks: list[dict] = []
+
+    async def fake_replace_task_knowledge(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        captured_chunks.extend(kwargs["chunks"])
+        return True
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_vision",
+        fake_invoke_vision,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.replace_task_knowledge",
+        fake_replace_task_knowledge,
+    )
+
+    upload_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/attachments",
+        headers=analyst_headers,
+        files={"file": ("mockup.png", b"fake image bytes", "image/png")},
+    )
+
+    assert upload_response.status_code == 201
+    assert upload_response.json()["alt_text"] == (
+        "Макет формы входа: поле email, поле пароль и кнопка продолжить."
+    )
+    assert any(
+        chunk["source_type"] == "attachment_image_alt_text"
+        and "Макет формы входа" in chunk["content"]
+        for chunk in captured_chunks
+    )
+
+
+async def test_image_attachment_upload_does_not_fail_when_vision_fails(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register_user(client, email="admin-image-fail@example.com", full_name="Alice Admin")
+    await register_user(client, email="analyst-image-fail@example.com", full_name="Nina Analyst")
+
+    admin_token = await login_user(client, email="admin-image-fail@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    analyst_id = next(
+        user["id"]
+        for user in users_response.json()
+        if user["email"] == "analyst-image-fail@example.com"
+    )
+    role_response = await client.patch(
+        f"/users/{analyst_id}",
+        headers=admin_headers,
+        json={"role": "ANALYST"},
+    )
+    assert role_response.status_code == 200
+
+    analyst_token = await login_user(client, email="analyst-image-fail@example.com")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Image RAG failure", "description": "Optional Vision"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    create_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "Broken mockup provider",
+            "content": "Загрузка изображения не должна падать без Vision.",
+            "tags": [],
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    async def fake_invoke_vision(
+        *args,
+        **kwargs,
+    ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        raise RuntimeError("vision provider unavailable")
+
+    captured_chunks: list[dict] = []
+
+    async def fake_replace_task_knowledge(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        captured_chunks.extend(kwargs["chunks"])
+        return True
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_vision",
+        fake_invoke_vision,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.replace_task_knowledge",
+        fake_replace_task_knowledge,
+    )
+
+    upload_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/attachments",
+        headers=analyst_headers,
+        files={"file": ("mockup.png", b"fake image bytes", "image/png")},
+    )
+
+    assert upload_response.status_code == 201
+    assert upload_response.json()["alt_text"] is None
+    assert any(chunk["source_type"] == "attachment_metadata" for chunk in captured_chunks)

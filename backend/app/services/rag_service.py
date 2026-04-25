@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.rag_pipeline import run_rag_pipeline
 from app.models.task import Task, TaskAttachment
+from app.services.attachment_content_service import AttachmentContentService
 from app.services.qdrant_service import QdrantService
 
 
@@ -41,24 +41,25 @@ class RagService:
 
     @staticmethod
     async def index_task_context(
+        db: AsyncSession,
         task: Task,
         attachments: list[TaskAttachment],
         *,
+        actor_user_id: str | None = None,
         validation_result: dict | None = None,
     ) -> list[str]:
+        attachment_payloads = await AttachmentContentService.build_attachment_payloads(
+            db,
+            task,
+            attachments,
+            actor_user_id=actor_user_id,
+        )
         rag_index = await run_rag_pipeline(
             task_id=task.id,
             title=task.title,
             content=task.content,
             tags=task.tags,
-            attachments=[
-                {
-                    "filename": item.filename,
-                    "content_type": item.content_type,
-                    "basename": Path(item.storage_path).name,
-                }
-                for item in attachments
-            ],
+            attachments=attachment_payloads,
             validation_result=validation_result,
         )
         indexed = await QdrantService.replace_task_knowledge(
@@ -69,5 +70,5 @@ class RagService:
             tags=list(task.tags),
             chunks=list(rag_index.get("chunks", [])),
         )
-        task.indexed_at = datetime.now(timezone.utc) if indexed else None
+        task.indexed_at = datetime.now(UTC) if indexed else None
         return list(rag_index.get("chunk_ids", [])) if indexed else []

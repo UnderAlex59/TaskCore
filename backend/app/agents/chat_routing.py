@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 
+from app.agents.system_prompts import CHAT_ROUTING_SYSTEM_PROMPT
+
 _TASK_CONTEXT_HINTS = (
     "задач",
     "требован",
@@ -165,12 +167,7 @@ async def analyze_task_context_relevance(
         actor_user_id=actor_user_id,
         task_id=task_id,
         project_id=project_id,
-        system_prompt=(
-            "Ты определяешь, требует ли сообщение аналитического ответа по текущей задаче. "
-            "Считай task_related=true только если пользователь спрашивает о требованиях, контексте, критериях, поведении системы, рисках или изменениях именно этой задачи. "
-            "Если это small talk, организационное сообщение, приветствие или вопрос вне предмета задачи, верни task_related=false. "
-            "Верни строго JSON c ключами task_related и reason. Не добавляй текст вне JSON."
-        ),
+        system_prompt=CHAT_ROUTING_SYSTEM_PROMPT,
         user_prompt=(
             "Название задачи:\n"
             f"{task_title.strip()}\n\n"
@@ -179,6 +176,7 @@ async def analyze_task_context_relevance(
             "Сообщение пользователя:\n"
             f"{message_content.strip()}"
         ),
+        prompt_key=CHAT_ROUTING_AGENT_KEY,
     )
     payload = _extract_json_payload(result.text or "") if result.ok and result.text else None
     if payload is None:

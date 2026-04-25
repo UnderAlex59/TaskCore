@@ -9,6 +9,8 @@ export type ProviderKind =
   | "gigachat"
   | "openai_compatible";
 export type MonitoringRange = "24h" | "7d" | "30d" | "90d";
+export type PromptLogMode = "disabled" | "metadata_only" | "full";
+export type LLMRequestStatus = "success" | "error";
 
 export interface ProviderConfigRead {
   id: string;
@@ -62,6 +64,33 @@ export interface AgentDirectoryRead {
   name: string;
   description: string;
   aliases: string[];
+}
+
+export interface AgentPromptConfigRead {
+  prompt_key: string;
+  agent_key: string;
+  name: string;
+  aliases: string[];
+  default_description: string;
+  default_system_prompt: string;
+  effective_description: string;
+  effective_system_prompt: string;
+  override_description: string | null;
+  override_system_prompt: string | null;
+  override_enabled: boolean;
+  revision: number | null;
+  updated_at: string | null;
+}
+
+export interface AgentPromptVersionRead {
+  id: string;
+  prompt_key: string;
+  agent_key: string;
+  description: string;
+  system_prompt: string;
+  enabled: boolean;
+  revision: number;
+  created_at: string;
 }
 
 export interface MonitoringSummaryRead {
@@ -134,6 +163,37 @@ export interface MonitoringLLMRead {
     actor_name: string;
     provider_kind: string;
     model: string;
+    error_message: string | null;
+  }>;
+}
+
+export interface LLMRuntimeSettingsRead {
+  prompt_log_mode: PromptLogMode;
+}
+
+export interface LLMRequestLogPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  prompt_log_mode: PromptLogMode;
+  items: Array<{
+    id: string;
+    created_at: string;
+    request_kind: string;
+    actor_name: string;
+    task_id: string | null;
+    project_id: string | null;
+    agent_key: string | null;
+    provider_kind: string;
+    model: string;
+    status: LLMRequestStatus;
+    latency_ms: number | null;
+    prompt_tokens: number | null;
+    completion_tokens: number | null;
+    total_tokens: number | null;
+    estimated_cost_usd: number | string | null;
+    request_messages: Array<Record<string, unknown>> | null;
+    response_text: string | null;
     error_message: string | null;
   }>;
 }
@@ -226,6 +286,16 @@ export const adminApi = {
         },
       )
     ).data,
+  getLlmRuntimeSettings: async () =>
+    (await apiClient.get<LLMRuntimeSettingsRead>("/admin/llm/runtime/settings"))
+      .data,
+  updateLlmRuntimeSettings: async (promptLogMode: PromptLogMode) =>
+    (
+      await apiClient.patch<LLMRuntimeSettingsRead>(
+        "/admin/llm/runtime/settings",
+        { prompt_log_mode: promptLogMode },
+      )
+    ).data,
   listOverrides: async () =>
     (await apiClient.get<AgentOverrideRead[]>("/admin/llm/overrides")).data,
   listAvailableAgents: async () =>
@@ -242,6 +312,32 @@ export const adminApi = {
           provider_config_id: providerConfigId,
           enabled,
         },
+      )
+    ).data,
+  listPromptConfigs: async () =>
+    (await apiClient.get<AgentPromptConfigRead[]>("/admin/llm/prompt-configs"))
+      .data,
+  updatePromptConfig: async (
+    promptKey: string,
+    payload: { description: string; enabled: boolean; system_prompt: string },
+  ) =>
+    (
+      await apiClient.patch<AgentPromptConfigRead>(
+        `/admin/llm/prompt-configs/${promptKey}`,
+        payload,
+      )
+    ).data,
+  listPromptVersions: async (promptKey: string) =>
+    (
+      await apiClient.get<AgentPromptVersionRead[]>(
+        `/admin/llm/prompt-configs/${promptKey}/versions`,
+      )
+    ).data,
+  restorePromptVersion: async (promptKey: string, versionId: string) =>
+    (
+      await apiClient.post<AgentPromptConfigRead>(
+        `/admin/llm/prompt-configs/${promptKey}/restore`,
+        { version_id: versionId },
       )
     ).data,
   getMonitoringSummary: async (range: MonitoringRange) =>
@@ -262,6 +358,19 @@ export const adminApi = {
       await apiClient.get<MonitoringLLMRead>("/admin/monitoring/llm", {
         params: { range },
       })
+    ).data,
+  getLlmRequestLogs: async (
+    range: MonitoringRange,
+    page = 1,
+    status?: LLMRequestStatus,
+  ) =>
+    (
+      await apiClient.get<LLMRequestLogPageRead>(
+        "/admin/monitoring/llm/requests",
+        {
+          params: { range, page, status },
+        },
+      )
     ).data,
   getAudit: async (range: MonitoringRange, page = 1) =>
     (

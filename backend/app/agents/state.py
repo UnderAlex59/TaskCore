@@ -29,6 +29,12 @@ class RagIndexState(TypedDict, total=False):
     chunks: list[dict[str, Any]]
 
 
+class VisionAltTextState(TypedDict, total=False):
+    task_id: str | None
+    project_id: str | None
+    alt_text: str | None
+
+
 class ProviderTestState(TypedDict, total=False):
     provider_id: str
     actor_user_id: str | None

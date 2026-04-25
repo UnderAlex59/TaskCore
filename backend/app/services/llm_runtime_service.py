@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
 import hashlib
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from time import perf_counter
 from typing import Any
@@ -13,14 +13,12 @@ from typing import Any
 import httpx
 from cryptography.fernet import Fernet
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.chat_agents.llm import (
     ChatAgentLLMProfile,
     build_chat_model,
-    get_default_llm_profile,
-    resolve_agent_llm_profile,
 )
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -36,6 +34,10 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "gigachat": "https://gigachat.devices.sberbank.ru/api/v1",
 }
 GIGACHAT_TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+PROMPT_LOG_MODE_DISABLED = "disabled"
+PROMPT_LOG_MODE_FULL = "full"
+MAX_LOG_TEXT_CHARS = 50_000
+TRUNCATED_SUFFIX = "\n...[truncated]"
 
 
 @dataclass(slots=True)
@@ -70,7 +72,7 @@ class LLMRuntimeService:
         if base_url:
             return base_url.rstrip("/")
         if normalized == "openai_compatible":
-            raise ValueError("Для провайдера openai_compatible необходимо указать base_url")
+            raise ValueError("Р”Р»СЏ РїСЂРѕРІР°Р№РґРµСЂР° openai_compatible РЅРµРѕР±С…РѕРґРёРјРѕ СѓРєР°Р·Р°С‚СЊ base_url")
         return DEFAULT_BASE_URLS.get(normalized, DEFAULT_BASE_URLS["openai"])
 
     @staticmethod
@@ -104,164 +106,19 @@ class LLMRuntimeService:
     @classmethod
     async def ensure_bootstrap(cls) -> None:
         async with cls._bootstrap_lock, AsyncSessionLocal() as db:
-            provider_count = await db.scalar(
-                select(func.count()).select_from(LLMProviderConfig)
-            )
             runtime_settings = await db.get(LLMRuntimeSettings, 1)
-            if provider_count and runtime_settings is not None:
+            if runtime_settings is not None:
                 return
 
-            if not provider_count:
-                await cls._bootstrap_provider_data(db)
-                provider_count = await db.scalar(
-                    select(func.count()).select_from(LLMProviderConfig)
+            db.add(
+                LLMRuntimeSettings(
+                    id=1,
+                    default_provider_config_id=None,
+                    prompt_log_mode=PROMPT_LOG_MODE_FULL,
                 )
-                runtime_settings = await db.get(LLMRuntimeSettings, 1)
-
-            if runtime_settings is None:
-                default_provider_id = await db.scalar(
-                    select(LLMProviderConfig.id)
-                    .where(LLMProviderConfig.enabled.is_(True))
-                    .order_by(LLMProviderConfig.created_at.asc())
-                    .limit(1)
-                )
-                db.add(
-                    LLMRuntimeSettings(
-                        id=1,
-                        default_provider_config_id=default_provider_id,
-                        prompt_log_mode="metadata_only",
-                    )
-                )
+            )
 
             await db.commit()
-
-    @classmethod
-    async def _bootstrap_provider_data(cls, db: AsyncSession) -> None:
-        from app.agents.subgraph_registry import (
-            get_agent_subgraphs,
-            reset_agent_subgraph_registry,
-        )
-
-        settings = get_settings()
-        default_profile = get_default_llm_profile()
-        default_provider = await cls._create_provider_config(
-            db,
-            name="Автоматически созданный профиль по умолчанию",
-            provider_kind=default_profile.provider,
-            base_url=default_profile.base_url,
-            model=default_profile.model,
-            temperature=default_profile.temperature,
-            enabled=True,
-            secret=default_profile.api_key,
-            created_by=None,
-        )
-        db.add(
-            LLMRuntimeSettings(
-                id=1,
-                default_provider_config_id=default_provider.id,
-                prompt_log_mode="metadata_only",
-            )
-        )
-
-        reset_agent_subgraph_registry()
-        default_signature = cls._profile_signature(default_profile)
-        for spec in get_agent_subgraphs():
-            if spec.llm_profile is None:
-                continue
-            effective_profile = resolve_agent_llm_profile(
-                spec.metadata.key,
-                spec.llm_profile,
-            )
-            if cls._profile_signature(effective_profile) == default_signature:
-                continue
-            provider = await cls._create_provider_config(
-                db,
-                name=f"Автоматически созданный профиль для агента {spec.metadata.key}",
-                provider_kind=effective_profile.provider,
-                base_url=effective_profile.base_url,
-                model=effective_profile.model,
-                temperature=effective_profile.temperature,
-                enabled=True,
-                secret=effective_profile.api_key,
-                created_by=None,
-            )
-            db.add(
-                LLMAgentOverride(
-                    agent_key=spec.metadata.key,
-                    provider_config_id=provider.id,
-                    enabled=True,
-                )
-            )
-
-        # Preserve env overrides that target agents without a static llm_profile.
-        for agent_key, override in settings.CHAT_AGENT_LLM_OVERRIDES.items():
-            if override.provider is None and override.model is None and override.base_url is None:
-                continue
-            existing = await db.get(LLMAgentOverride, agent_key)
-            if existing is not None:
-                continue
-            effective_profile = resolve_agent_llm_profile(agent_key, default_profile)
-            if cls._profile_signature(effective_profile) == default_signature:
-                continue
-            provider = await cls._create_provider_config(
-                db,
-                name=f"Автоматически созданный профиль из переменных окружения для {agent_key}",
-                provider_kind=effective_profile.provider,
-                base_url=effective_profile.base_url,
-                model=effective_profile.model,
-                temperature=effective_profile.temperature,
-                enabled=True,
-                secret=effective_profile.api_key,
-                created_by=None,
-            )
-            db.add(
-                LLMAgentOverride(
-                    agent_key=agent_key,
-                    provider_config_id=provider.id,
-                    enabled=True,
-                )
-            )
-
-    @classmethod
-    async def _create_provider_config(
-        cls,
-        db: AsyncSession,
-        *,
-        name: str,
-        provider_kind: str,
-        base_url: str | None,
-        model: str,
-        temperature: float,
-        enabled: bool,
-        secret: str | None,
-        created_by: str | None,
-    ) -> LLMProviderConfig:
-        encrypted_secret, masked_secret = cls.encrypt_secret(secret)
-        provider = LLMProviderConfig(
-            name=name,
-            provider_kind=provider_kind,
-            base_url=cls.normalize_base_url(provider_kind, base_url),
-            model=model,
-            temperature=Decimal(str(temperature)),
-            enabled=enabled,
-            encrypted_secret=encrypted_secret,
-            masked_secret=masked_secret,
-            created_by=created_by,
-            updated_by=created_by,
-        )
-        db.add(provider)
-        await db.flush()
-        return provider
-
-    @staticmethod
-    def _profile_signature(profile: ChatAgentLLMProfile) -> tuple[Any, ...]:
-        return (
-            profile.provider,
-            profile.model,
-            profile.temperature,
-            profile.base_url or "",
-            profile.api_key or "",
-        )
 
     @classmethod
     async def resolve_provider(
@@ -304,16 +161,9 @@ class LLMRuntimeService:
                     selected = None
 
         if selected is None:
-            fallback_stmt = (
-                select(LLMProviderConfig)
-                .where(LLMProviderConfig.enabled.is_(True))
-                .order_by(LLMProviderConfig.created_at.asc())
-                .limit(1)
+            raise RuntimeError(
+                "РќРµ РЅР°СЃС‚СЂРѕРµРЅ LLM-РїСЂРѕРІР°Р№РґРµСЂ. Р”РѕР±Р°РІСЊС‚Рµ РїСЂРѕС„РёР»СЊ Рё РІС‹Р±РµСЂРёС‚Рµ РїСЂРѕС„РёР»СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РІ Р°РґРјРёРЅ-РїР°РЅРµР»Рё."
             )
-            selected = (await db.execute(fallback_stmt)).scalar_one_or_none()
-
-        if selected is None:
-            raise RuntimeError("Нет доступной включённой конфигурации LLM-провайдера")
 
         profile = await cls._build_profile(selected)
         return ResolvedLLMProvider(config=selected, profile=profile)
@@ -326,7 +176,7 @@ class LLMRuntimeService:
             secret = cls.decrypt_secret(config.encrypted_secret)
             if provider_kind == "gigachat":
                 if not secret:
-                    raise ValueError("Для GigaChat не настроен ключ авторизации")
+                    raise ValueError("Р”Р»СЏ GigaChat РЅРµ РЅР°СЃС‚СЂРѕРµРЅ РєР»СЋС‡ Р°РІС‚РѕСЂРёР·Р°С†РёРё")
                 api_key = await cls._get_gigachat_access_token(config.id, secret)
             else:
                 api_key = secret
@@ -341,7 +191,7 @@ class LLMRuntimeService:
 
     @classmethod
     async def _get_gigachat_access_token(cls, cache_key: str, authorization_key: str) -> str:
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         cached = cls._gigachat_token_cache.get(cache_key)
         if cached is not None and cached[1] > now + timedelta(minutes=2):
             return cached[0]
@@ -381,8 +231,16 @@ class LLMRuntimeService:
         project_id: str | None,
         system_prompt: str,
         user_prompt: str,
+        prompt_key: str | None = None,
     ) -> LLMInvocationResult:
         resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        from app.services.llm_prompt_service import LLMPromptService
+
+        effective_system_prompt = await LLMPromptService.resolve_system_prompt(
+            db,
+            prompt_key=prompt_key or agent_key,
+            default_system_prompt=system_prompt,
+        )
         return await cls._execute_prompt(
             db,
             config=resolved.config,
@@ -392,8 +250,48 @@ class LLMRuntimeService:
             project_id=project_id,
             agent_key=agent_key,
             request_kind="chat",
-            system_prompt=system_prompt,
+            system_prompt=effective_system_prompt,
             user_prompt=user_prompt,
+        )
+
+    @classmethod
+    async def invoke_vision(
+        cls,
+        db: AsyncSession,
+        *,
+        agent_key: str | None,
+        actor_user_id: str | None,
+        task_id: str | None,
+        project_id: str | None,
+        image_bytes: bytes,
+        content_type: str,
+        prompt: str,
+    ) -> LLMInvocationResult:
+        resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        return await cls._execute_messages(
+            db,
+            config=resolved.config,
+            profile=resolved.profile,
+            actor_user_id=actor_user_id,
+            task_id=task_id,
+            project_id=project_id,
+            agent_key=agent_key,
+            request_kind="vision_alt_text",
+            messages=[
+                SystemMessage(
+                    content=(
+                        "РўС‹ РїСЂРµРѕР±СЂР°Р·СѓРµС€СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ РёР· С‚СЂРµР±РѕРІР°РЅРёР№ РІ С‚РµРєСЃС‚, "
+                        "РїСЂРёРіРѕРґРЅС‹Р№ РґР»СЏ СЃРµРјР°РЅС‚РёС‡РµСЃРєРѕРіРѕ РїРѕРёСЃРєР°."
+                    )
+                ),
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ]
+                ),
+            ],
         )
 
     @classmethod
@@ -414,8 +312,8 @@ class LLMRuntimeService:
             project_id=None,
             agent_key=None,
             request_kind="provider_test",
-            system_prompt="Ты выполняешь проверку подключения к LLM-провайдеру.",
-            user_prompt="Кратко подтверди на русском языке, что соединение работает.",
+            system_prompt="РўС‹ РІС‹РїРѕР»РЅСЏРµС€СЊ РїСЂРѕРІРµСЂРєСѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє LLM-РїСЂРѕРІР°Р№РґРµСЂСѓ.",
+            user_prompt="РљСЂР°С‚РєРѕ РїРѕРґС‚РІРµСЂРґРё РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ, С‡С‚Рѕ СЃРѕРµРґРёРЅРµРЅРёРµ СЂР°Р±РѕС‚Р°РµС‚.",
         )
 
     @classmethod
@@ -433,12 +331,98 @@ class LLMRuntimeService:
         system_prompt: str,
         user_prompt: str,
     ) -> LLMInvocationResult:
+        return await cls._execute_messages(
+            db,
+            config=config,
+            profile=profile,
+            actor_user_id=actor_user_id,
+            task_id=task_id,
+            project_id=project_id,
+            agent_key=agent_key,
+            request_kind=request_kind,
+            messages=[SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+        )
+
+    @staticmethod
+    async def _get_prompt_log_mode(db: AsyncSession) -> str:
+        runtime = await db.get(LLMRuntimeSettings, 1)
+        return runtime.prompt_log_mode if runtime is not None else PROMPT_LOG_MODE_FULL
+
+    @staticmethod
+    def _add_request_log(
+        db: AsyncSession,
+        *,
+        prompt_log_mode: str,
+        request_kind: str,
+        actor_user_id: str | None,
+        task_id: str | None,
+        project_id: str | None,
+        agent_key: str | None,
+        config: LLMProviderConfig,
+        status: str,
+        latency_ms: int | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        total_tokens: int | None,
+        estimated_cost_usd: Decimal | None,
+        request_messages: list[dict[str, Any]] | None,
+        response_text: str | None,
+        error_message: str | None,
+    ) -> None:
+        if prompt_log_mode == PROMPT_LOG_MODE_DISABLED:
+            return
+
+        should_store_payload = prompt_log_mode == PROMPT_LOG_MODE_FULL
+        db.add(
+            LLMRequestLog(
+                request_kind=request_kind,
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                provider_config_id=config.id,
+                provider_kind=config.provider_kind,
+                model=config.model,
+                status=status,
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=estimated_cost_usd,
+                request_messages=request_messages if should_store_payload else None,
+                response_text=(
+                    LLMRuntimeService._limit_log_text(response_text)
+                    if should_store_payload
+                    else None
+                ),
+                error_message=error_message,
+            )
+        )
+
+    @classmethod
+    async def _execute_messages(
+        cls,
+        db: AsyncSession,
+        *,
+        config: LLMProviderConfig,
+        profile: ChatAgentLLMProfile,
+        actor_user_id: str | None,
+        task_id: str | None,
+        project_id: str | None,
+        agent_key: str | None,
+        request_kind: str,
+        messages: list[Any],
+    ) -> LLMInvocationResult:
         started = perf_counter()
+        prompt_log_mode = await cls._get_prompt_log_mode(db)
+        request_messages = (
+            cls._serialize_messages(messages)
+            if prompt_log_mode == PROMPT_LOG_MODE_FULL
+            else None
+        )
         try:
             model = build_chat_model(profile)
-            response = await model.ainvoke(
-                [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
-            )
+            response = await model.ainvoke(messages)
             latency_ms = int((perf_counter() - started) * 1000)
             prompt_tokens, completion_tokens, total_tokens = cls._extract_usage(response)
             estimated_cost = cls._estimate_cost(
@@ -447,23 +431,24 @@ class LLMRuntimeService:
                 completion_tokens=completion_tokens,
             )
             text = cls._stringify_content(getattr(response, "content", ""))
-            db.add(
-                LLMRequestLog(
-                    request_kind=request_kind,
-                    actor_user_id=actor_user_id,
-                    task_id=task_id,
-                    project_id=project_id,
-                    agent_key=agent_key,
-                    provider_config_id=config.id,
-                    provider_kind=config.provider_kind,
-                    model=config.model,
-                    status="success",
-                    latency_ms=latency_ms,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                    estimated_cost_usd=estimated_cost,
-                )
+            cls._add_request_log(
+                db,
+                prompt_log_mode=prompt_log_mode,
+                request_kind=request_kind,
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                config=config,
+                status="success",
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=estimated_cost,
+                request_messages=request_messages,
+                response_text=text,
+                error_message=None,
             )
             return LLMInvocationResult(
                 ok=True,
@@ -479,20 +464,24 @@ class LLMRuntimeService:
             )
         except Exception as exc:  # noqa: BLE001
             latency_ms = int((perf_counter() - started) * 1000)
-            db.add(
-                LLMRequestLog(
-                    request_kind=request_kind,
-                    actor_user_id=actor_user_id,
-                    task_id=task_id,
-                    project_id=project_id,
-                    agent_key=agent_key,
-                    provider_config_id=config.id,
-                    provider_kind=config.provider_kind,
-                    model=config.model,
-                    status="error",
-                    latency_ms=latency_ms,
-                    error_message=str(exc)[:1000],
-                )
+            cls._add_request_log(
+                db,
+                prompt_log_mode=prompt_log_mode,
+                request_kind=request_kind,
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                config=config,
+                status="error",
+                latency_ms=latency_ms,
+                prompt_tokens=None,
+                completion_tokens=None,
+                total_tokens=None,
+                estimated_cost_usd=None,
+                request_messages=request_messages,
+                response_text=None,
+                error_message=str(exc)[:1000],
             )
             return LLMInvocationResult(
                 ok=False,
@@ -507,6 +496,72 @@ class LLMRuntimeService:
                 estimated_cost_usd=None,
                 error_message=str(exc),
             )
+
+    @classmethod
+    def _serialize_messages(cls, messages: list[Any]) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": cls._message_role(message),
+                "content": cls._serialize_log_content(
+                    getattr(message, "content", message)
+                ),
+            }
+            for message in messages
+        ]
+
+    @staticmethod
+    def _message_role(message: Any) -> str:
+        message_type = getattr(message, "type", None)
+        if isinstance(message_type, str) and message_type:
+            return message_type
+        return message.__class__.__name__.removesuffix("Message").lower()
+
+    @classmethod
+    def _serialize_log_content(cls, content: Any) -> Any:
+        if isinstance(content, str):
+            return cls._limit_log_text(content)
+        if isinstance(content, list):
+            return [cls._serialize_log_content(item) for item in content]
+        if isinstance(content, dict):
+            if content.get("type") == "image_url":
+                return cls._serialize_image_part(content)
+            return {
+                str(key): cls._serialize_log_content(value)
+                for key, value in content.items()
+            }
+        return content
+
+    @classmethod
+    def _serialize_image_part(cls, content: dict[Any, Any]) -> dict[str, Any]:
+        image_url = content.get("image_url")
+        if isinstance(image_url, dict):
+            url = image_url.get("url")
+            media_type = cls._data_url_media_type(url) if isinstance(url, str) else None
+            return {
+                "type": "image_url",
+                "image_url": {
+                    **{
+                        str(key): value
+                        for key, value in image_url.items()
+                        if key != "url"
+                    },
+                    "url": "[image data omitted]",
+                    "media_type": media_type,
+                },
+            }
+        return {"type": "image_url", "image_url": "[image data omitted]"}
+
+    @staticmethod
+    def _data_url_media_type(value: str) -> str | None:
+        if not value.startswith("data:") or ";base64," not in value:
+            return None
+        return value.removeprefix("data:").split(";base64,", maxsplit=1)[0] or None
+
+    @staticmethod
+    def _limit_log_text(value: str | None) -> str | None:
+        if value is None or len(value) <= MAX_LOG_TEXT_CHARS:
+            return value
+        return f"{value[:MAX_LOG_TEXT_CHARS]}{TRUNCATED_SUFFIX}"
 
     @staticmethod
     def _extract_usage(response: Any) -> tuple[int | None, int | None, int | None]:
@@ -523,9 +578,7 @@ class LLMRuntimeService:
 
         response_metadata = getattr(response, "response_metadata", None)
         token_usage = (
-            response_metadata.get("token_usage")
-            if isinstance(response_metadata, dict)
-            else None
+            response_metadata.get("token_usage") if isinstance(response_metadata, dict) else None
         )
         if isinstance(token_usage, dict):
             prompt_tokens = token_usage.get("prompt_tokens")
@@ -553,13 +606,13 @@ class LLMRuntimeService:
 
         cost = Decimal("0")
         if prompt_tokens is not None and config.input_cost_per_1k_tokens is not None:
-            cost += (
-                Decimal(prompt_tokens) / Decimal("1000")
-            ) * Decimal(config.input_cost_per_1k_tokens)
+            cost += (Decimal(prompt_tokens) / Decimal("1000")) * Decimal(
+                config.input_cost_per_1k_tokens
+            )
         if completion_tokens is not None and config.output_cost_per_1k_tokens is not None:
-            cost += (
-                Decimal(completion_tokens) / Decimal("1000")
-            ) * Decimal(config.output_cost_per_1k_tokens)
+            cost += (Decimal(completion_tokens) / Decimal("1000")) * Decimal(
+                config.output_cost_per_1k_tokens
+            )
         return cost
 
     @staticmethod

@@ -138,7 +138,7 @@ register_agent_subgraph(
 - дефолтный provider;
 - provider configs из админки;
 - agent overrides;
-- `CHAT_AGENT_LLM_OVERRIDES`;
+- provider default из админ-панели;
 - параметры модели и температуры.
 
 Это позволяет переключать агенты между OpenAI, Ollama, OpenRouter, GigaChat и OpenAI-compatible API без переписывания графов.

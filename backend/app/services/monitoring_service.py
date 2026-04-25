@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 from sqlalchemy import Select, case, desc, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +11,12 @@ from sqlalchemy.orm import aliased
 from app.models.audit_event import AuditEvent
 from app.models.change_proposal import ChangeProposal
 from app.models.llm_request_log import LLMRequestLog
+from app.models.llm_runtime_settings import LLMRuntimeSettings
 from app.models.message import Message
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
+from app.schemas.admin_llm import PromptLogMode
 from app.schemas.admin_monitoring import (
     ActivityBucketRead,
     AuditEventRead,
@@ -21,6 +24,9 @@ from app.schemas.admin_monitoring import (
     LLMProviderBreakdownRead,
     LLMDailyUsageRead,
     LLMRecentFailureRead,
+    LLMRequestLogPageRead,
+    LLMRequestLogRead,
+    LLMRequestStatus,
     MonitoringActivityRead,
     MonitoringAllTimeTotals,
     MonitoringLLMRead,
@@ -263,6 +269,67 @@ class MonitoringService:
                     error_message=log.error_message,
                 )
                 for log, full_name in (await db.execute(failure_stmt)).all()
+            ],
+        )
+
+    @staticmethod
+    async def get_llm_request_page(
+        db: AsyncSession,
+        *,
+        range_value: MonitoringRange,
+        request_status: LLMRequestStatus | None,
+        page: int,
+        page_size: int = 20,
+    ) -> LLMRequestLogPageRead:
+        window_start = MonitoringService._window_start(range_value)
+        conditions = [LLMRequestLog.created_at >= window_start]
+        if request_status is not None:
+            conditions.append(LLMRequestLog.status == request_status)
+
+        runtime_settings = await db.get(LLMRuntimeSettings, 1)
+        prompt_log_mode = (
+            runtime_settings.prompt_log_mode if runtime_settings is not None else "full"
+        )
+        actor = aliased(User)
+        total = await db.scalar(
+            select(func.count()).select_from(LLMRequestLog).where(*conditions)
+        )
+        stmt: Select[tuple[LLMRequestLog, str | None]] = (
+            select(LLMRequestLog, actor.full_name)
+            .outerjoin(actor, actor.id == LLMRequestLog.actor_user_id)
+            .where(*conditions)
+            .order_by(LLMRequestLog.created_at.desc())
+            .offset(max(page - 1, 0) * page_size)
+            .limit(page_size)
+        )
+        rows = list((await db.execute(stmt)).all())
+        return LLMRequestLogPageRead(
+            page=page,
+            page_size=page_size,
+            total=int(total or 0),
+            prompt_log_mode=cast(PromptLogMode, prompt_log_mode),
+            items=[
+                LLMRequestLogRead(
+                    id=log.id,
+                    created_at=log.created_at,
+                    request_kind=log.request_kind,
+                    actor_name=full_name or "Система",
+                    task_id=log.task_id,
+                    project_id=log.project_id,
+                    agent_key=log.agent_key,
+                    provider_kind=log.provider_kind,
+                    model=log.model,
+                    status=cast(LLMRequestStatus, log.status),
+                    latency_ms=log.latency_ms,
+                    prompt_tokens=log.prompt_tokens,
+                    completion_tokens=log.completion_tokens,
+                    total_tokens=log.total_tokens,
+                    estimated_cost_usd=log.estimated_cost_usd,
+                    request_messages=log.request_messages,
+                    response_text=log.response_text,
+                    error_message=log.error_message,
+                )
+                for log, full_name in rows
             ],
         )
 

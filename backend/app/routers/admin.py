@@ -11,14 +11,22 @@ from app.schemas.admin_llm import (
     AgentDirectoryRead,
     AgentOverrideRead,
     AgentOverrideUpdate,
+    AgentPromptConfigRead,
+    AgentPromptRestorePayload,
+    AgentPromptUpdate,
+    AgentPromptVersionRead,
     ProviderConfigPayload,
     ProviderConfigRead,
     ProviderConfigUpdate,
     ProviderTestResult,
     RuntimeDefaultProviderUpdate,
+    RuntimeSettingsRead,
+    RuntimeSettingsUpdate,
 )
 from app.schemas.admin_monitoring import (
     AuditPageRead,
+    LLMRequestLogPageRead,
+    LLMRequestStatus,
     MonitoringActivityRead,
     MonitoringLLMRead,
     MonitoringRange,
@@ -27,6 +35,7 @@ from app.schemas.admin_monitoring import (
 from app.schemas.admin_validation import ValidationQuestionPageRead
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
+from app.services.llm_prompt_service import LLMPromptService
 from app.services.monitoring_service import MonitoringService
 from app.services.task_tag_service import TaskTagService
 from app.services.validation_question_service import ValidationQuestionService
@@ -80,6 +89,23 @@ async def set_default_llm_provider(
     return await AdminLLMService.set_default_provider(payload.provider_config_id, current_user, db)
 
 
+@router.get("/llm/runtime/settings", response_model=RuntimeSettingsRead)
+async def get_llm_runtime_settings(
+    _: AdminUser,
+    db: DBSession,
+) -> RuntimeSettingsRead:
+    return await AdminLLMService.get_runtime_settings(db)
+
+
+@router.patch("/llm/runtime/settings", response_model=RuntimeSettingsRead)
+async def update_llm_runtime_settings(
+    payload: RuntimeSettingsUpdate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> RuntimeSettingsRead:
+    return await AdminLLMService.update_runtime_settings(payload, current_user, db)
+
+
 @router.get("/llm/overrides", response_model=list[AgentOverrideRead])
 async def list_llm_overrides(
     _: AdminUser,
@@ -103,6 +129,51 @@ async def update_llm_override(
     db: DBSession,
 ) -> AgentOverrideRead:
     return await AdminLLMService.upsert_agent_override(agent_key, payload, current_user, db)
+
+
+@router.get("/llm/prompt-configs", response_model=list[AgentPromptConfigRead])
+async def list_llm_prompt_configs(
+    _: AdminUser,
+    db: DBSession,
+) -> list[AgentPromptConfigRead]:
+    return await LLMPromptService.list_prompt_configs(db)
+
+
+@router.patch("/llm/prompt-configs/{prompt_key}", response_model=AgentPromptConfigRead)
+async def update_llm_prompt_config(
+    prompt_key: str,
+    payload: AgentPromptUpdate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AgentPromptConfigRead:
+    return await LLMPromptService.update_prompt_config(prompt_key, payload, current_user, db)
+
+
+@router.get(
+    "/llm/prompt-configs/{prompt_key}/versions",
+    response_model=list[AgentPromptVersionRead],
+)
+async def list_llm_prompt_versions(
+    prompt_key: str,
+    _: AdminUser,
+    db: DBSession,
+) -> list[AgentPromptVersionRead]:
+    return await LLMPromptService.list_prompt_versions(prompt_key, db)
+
+
+@router.post("/llm/prompt-configs/{prompt_key}/restore", response_model=AgentPromptConfigRead)
+async def restore_llm_prompt_version(
+    prompt_key: str,
+    payload: AgentPromptRestorePayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AgentPromptConfigRead:
+    return await LLMPromptService.restore_prompt_version(
+        prompt_key,
+        payload.version_id,
+        current_user,
+        db,
+    )
 
 
 @router.get("/monitoring/summary", response_model=MonitoringSummaryRead)
@@ -130,6 +201,24 @@ async def monitoring_llm(
     range_value: MonitoringRange = Query(default="7d", alias="range"),
 ) -> MonitoringLLMRead:
     return await MonitoringService.get_llm_metrics(db, range_value=range_value)
+
+
+@router.get("/monitoring/llm/requests", response_model=LLMRequestLogPageRead)
+async def monitoring_llm_requests(
+    _: AdminUser,
+    db: DBSession,
+    range_value: MonitoringRange = Query(default="7d", alias="range"),
+    request_status: LLMRequestStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=50),
+) -> LLMRequestLogPageRead:
+    return await MonitoringService.get_llm_request_page(
+        db,
+        range_value=range_value,
+        request_status=request_status,
+        page=page,
+        page_size=size,
+    )
 
 
 @router.get("/audit", response_model=AuditPageRead)

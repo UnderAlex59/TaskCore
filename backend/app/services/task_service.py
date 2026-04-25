@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -143,6 +143,14 @@ class TaskService:
         )
 
     @staticmethod
+    def _ensure_index_is_synced(task: Task, *, detail: str) -> None:
+        if TaskService._has_stale_embeddings(task):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            )
+
+    @staticmethod
     def _mark_requires_revalidation(task: Task) -> None:
         validation_result = dict(task.validation_result or {})
         validation_result[TaskService.revalidation_flag] = True
@@ -217,7 +225,9 @@ class TaskService:
         attachments_map = {
             task.id: await TaskService._get_attachments(task.id, db) for task in tasks
         }
-        return [TaskService._serialize_task(task, attachments_map.get(task.id, [])) for task in tasks]
+        return [
+            TaskService._serialize_task(task, attachments_map.get(task.id, [])) for task in tasks
+        ]
 
     @staticmethod
     async def create_task(
@@ -257,7 +267,12 @@ class TaskService:
         return TaskService._serialize_task(task, [])
 
     @staticmethod
-    async def get_task(project_id: str, task_id: str, current_user: User, db: AsyncSession) -> TaskRead:
+    async def get_task(
+        project_id: str,
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
         await ProjectService.ensure_project_access(project_id, current_user, db)
         task = await TaskService.get_task_or_404(project_id, task_id, db)
         attachments = await TaskService._get_attachments(task.id, db)
@@ -300,7 +315,7 @@ class TaskService:
         for field_name, value in updates.items():
             setattr(task, field_name, value)
 
-        update_timestamp = datetime.now(timezone.utc)
+        update_timestamp = datetime.now(UTC)
         task.updated_at = update_timestamp
         attachments = await TaskService._get_attachments(task.id, db)
         audit_metadata: dict[str, bool | str] = {}
@@ -310,7 +325,13 @@ class TaskService:
             if status_before_update == TaskStatus.AWAITING_APPROVAL:
                 task.status = TaskStatus.NEEDS_REWORK
             await ValidationQuestionService.clear_for_task(task.id, db)
-            await RagService.index_task_context(task, attachments, validation_result=None)
+            await RagService.index_task_context(
+                db,
+                task,
+                attachments,
+                actor_user_id=current_user.id,
+                validation_result=None,
+            )
             audit_metadata["embeddings_reindexed"] = task.indexed_at is not None
         else:
             TaskService._mark_requires_revalidation(task)
@@ -355,12 +376,21 @@ class TaskService:
 
         attachments = await TaskService._get_attachments(task.id, db)
         stale_before_commit = TaskService._has_stale_embeddings(task)
-        current_timestamp = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(UTC)
         task.updated_at = current_timestamp
         await RagService.index_task_context(
+            db,
             task,
             attachments,
+            actor_user_id=current_user.id,
             validation_result=task.validation_result,
+        )
+        TaskService._ensure_index_is_synced(
+            task,
+            detail=(
+                "Не удалось опубликовать изменения в семантический индекс. "
+                "Commit не был сохранен."
+            ),
         )
         AuditService.record(
             db,
@@ -400,10 +430,20 @@ class TaskService:
                 detail="Разработчик и тестировщик должны быть разными пользователями",
             )
 
-        await TaskService._get_project_member_or_422(task.project_id, payload.developer_id, UserRole.DEVELOPER, db)
-        await TaskService._get_project_member_or_422(task.project_id, payload.tester_id, UserRole.TESTER, db)
+        await TaskService._get_project_member_or_422(
+            task.project_id,
+            payload.developer_id,
+            UserRole.DEVELOPER,
+            db,
+        )
+        await TaskService._get_project_member_or_422(
+            task.project_id,
+            payload.tester_id,
+            UserRole.TESTER,
+            db,
+        )
 
-        current_timestamp = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(UTC)
         task.developer_id = payload.developer_id
         task.tester_id = payload.tester_id
         task.status = TaskStatus.READY_FOR_DEV
@@ -446,8 +486,10 @@ class TaskService:
 
         attachments = await TaskService._get_attachments(task.id, db)
         await RagService.index_task_context(
+            db,
             task,
             attachments,
+            actor_user_id=current_user.id,
             validation_result=task.validation_result,
         )
         await db.commit()
@@ -482,7 +524,12 @@ class TaskService:
         return TaskService._serialize_task(task, attachments)
 
     @staticmethod
-    async def delete_task(project_id: str, task_id: str, current_user: User, db: AsyncSession) -> None:
+    async def delete_task(
+        project_id: str,
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> None:
         await ProjectService.ensure_project_access(project_id, current_user, db)
         if current_user.role not in TaskService.approval_roles:
             raise HTTPException(
@@ -531,19 +578,21 @@ class TaskService:
             filename=original_name,
             content_type=file.content_type or "application/octet-stream",
             storage_path=str(target_path),
-            alt_text=f"Загруженный файл: {original_name}",
+            alt_text=None,
         )
         db.add(attachment)
         await db.flush()
 
         attachments = await TaskService._get_attachments(task.id, db)
-        current_timestamp = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(UTC)
         task.updated_at = current_timestamp
         if task.status in TaskService.post_approval_editable_statuses:
             TaskService._mark_requires_revalidation(task)
         await RagService.index_task_context(
+            db,
             task,
             attachments,
+            actor_user_id=current_user.id,
             validation_result=task.validation_result,
         )
         AuditService.record(
@@ -625,11 +674,10 @@ class TaskService:
         validation_result = ValidationResult(
             verdict=str(validation_state["verdict"]),
             issues=[
-                ValidationIssue.model_validate(item)
-                for item in validation_state.get("issues", [])
+                ValidationIssue.model_validate(item) for item in validation_state.get("issues", [])
             ],
             questions=list(validation_state.get("questions", [])),
-            validated_at=datetime.now(timezone.utc),
+            validated_at=datetime.now(UTC),
         )
 
         task.validation_result = validation_result.model_dump(mode="json")
@@ -641,11 +689,13 @@ class TaskService:
                 if validation_result.verdict == "approved"
                 else TaskStatus.NEEDS_REWORK
             )
-        current_timestamp = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(UTC)
         task.updated_at = current_timestamp
         chunk_ids = await RagService.index_task_context(
+            db,
             task,
             attachments,
+            actor_user_id=current_user.id,
             validation_result=task.validation_result,
         )
         db.add(

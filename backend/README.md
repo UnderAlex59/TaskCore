@@ -105,8 +105,8 @@ DATABASE_URL=postgresql+asyncpg://app_user:app_pass@localhost:5432/taskplatform
 JWT_SECRET_KEY=replace_with_a_long_random_secret
 ALLOWED_ORIGINS=["http://localhost:5173"]
 QDRANT_URL=http://localhost:6333
-LLM_PROVIDER=openai
-OPENAI_API_KEY=
+EMBEDDING_PROVIDER=ollama
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 UPLOAD_DIR=/var/lib/task-platform/uploads
 ```
 

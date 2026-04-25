@@ -4,9 +4,11 @@ import { AuthProvider } from "@/auth/AuthProvider";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { RoleGuard } from "@/auth/RoleGuard";
 import LoginPage from "@/auth/pages/LoginPage";
+import AgentPromptsPage from "@/features/admin/AgentPromptsPage";
 import AdminLayout from "@/features/admin/AdminLayout";
 import RegisterPage from "@/auth/pages/RegisterPage";
 import CustomRulesEditor from "@/features/admin/CustomRulesEditor";
+import LLMRequestLogsPage from "@/features/admin/LLMRequestLogsPage";
 import MonitoringPage from "@/features/admin/MonitoringPage";
 import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 import TaskTagsPage from "@/features/admin/TaskTagsPage";
@@ -57,12 +59,14 @@ export default function App() {
                     element={<Navigate to="/admin/monitoring" replace />}
                   />
                   <Route path="monitoring" element={<MonitoringPage />} />
+                  <Route path="llm-requests" element={<LLMRequestLogsPage />} />
                   <Route
                     path="validation-questions"
                     element={<ValidationQuestionsPage />}
                   />
                   <Route path="task-tags" element={<TaskTagsPage />} />
                   <Route path="providers" element={<ProviderSettingsPage />} />
+                  <Route path="agent-prompts" element={<AgentPromptsPage />} />
                   <Route path="users" element={<UserList />} />
                   <Route
                     path="projects/:projectId/rules"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.services.llm_runtime_service import LLMRuntimeService
@@ -39,3 +41,24 @@ async def test_gigachat_token_exchange_is_cached(monkeypatch: pytest.MonkeyPatch
     assert first == "gigachat-access-token"
     assert second == "gigachat-access-token"
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_requires_admin_configured_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_ensure_bootstrap() -> None:
+        return None
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            if getattr(model, "__name__", "") == "LLMRuntimeSettings":
+                return SimpleNamespace(default_provider_config_id=None)
+            return None
+
+    monkeypatch.setattr(LLMRuntimeService, "ensure_bootstrap", fake_ensure_bootstrap)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await LLMRuntimeService.resolve_provider(FakeDB(), agent_key=None)  # type: ignore[arg-type]
+
+    assert "LLM" in str(exc_info.value)

@@ -9,7 +9,6 @@ from app.agents.change_tracker_agent_graph import (
 )
 
 from .base import BaseChatAgent, ChatAgentContext, ChatAgentMetadata, ChatAgentResult
-from .llm import ChatAgentLLMProfile
 from .registry import register_chat_agent
 
 
@@ -21,11 +20,6 @@ class ChangeTrackerAgent(BaseChatAgent):
         description=CHANGE_TRACKER_AGENT_DESCRIPTION,
         aliases=CHANGE_TRACKER_AGENT_ALIASES,
         priority=30,
-    )
-    llm_profile = ChatAgentLLMProfile(
-        provider="openai",
-        model="gpt-4o-mini",
-        temperature=0.0,
     )
 
     async def can_handle(self, context: ChatAgentContext) -> bool:

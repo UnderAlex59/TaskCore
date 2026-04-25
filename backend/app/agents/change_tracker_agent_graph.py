@@ -7,6 +7,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
+from app.agents.system_prompts import CHANGE_TRACKER_SYSTEM_PROMPT
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -48,13 +49,7 @@ def _fallback_acknowledgement() -> str:
 
 def _prepare_change_request(state: ChangeTrackerGraphState) -> ChangeTrackerGraphState:
     return {
-        "system_prompt": (
-            "Ты нормализуешь запросы на изменение требований. "
-            "Верни строгий JSON с ключами proposal_text и acknowledgement. "
-            "proposal_text должен содержать чёткое, выполнимое изменение требования. "
-            "acknowledgement должен быть одной короткой фразой для пользователя. "
-            "Отвечай только на русском языке."
-        ),
+        "system_prompt": CHANGE_TRACKER_SYSTEM_PROMPT,
         "user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Статус задачи: {state.get('task_status', '')}\n"
@@ -83,6 +78,7 @@ async def _invoke_change_tracker_llm(state: ChangeTrackerGraphState) -> ChangeTr
         project_id=state.get("project_id"),
         system_prompt=str(state.get("system_prompt", "")),
         user_prompt=str(state.get("user_prompt", "")),
+        prompt_key=CHANGE_TRACKER_AGENT_KEY,
     )
     return {
         "llm_ok": bool(result.ok),

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from httpx import AsyncClient
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import text
 
-from app.core.database import engine
+from app.core.database import AsyncSessionLocal, engine
+from app.services.llm_prompt_service import LLMPromptService
 from app.services.llm_runtime_service import LLMInvocationResult
 
 pytestmark = pytest.mark.requires_db
@@ -52,8 +54,7 @@ async def test_admin_provider_list_bootstraps_runtime(client: AsyncClient) -> No
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload) >= 1
-    assert sum(1 for item in payload if item["is_default"]) == 1
+    assert payload == []
 
 
 @pytest.mark.asyncio
@@ -88,7 +89,10 @@ async def test_admin_can_create_test_and_override_provider(
         full_name="Admin User",
     )
 
-    async def fake_test_provider(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+    async def fake_test_provider(
+        *args: object,  # noqa: ARG001
+        **kwargs: object,  # noqa: ARG001
+    ) -> LLMInvocationResult:
         return LLMInvocationResult(
             ok=True,
             text="Connectivity OK",
@@ -102,7 +106,10 @@ async def test_admin_can_create_test_and_override_provider(
             estimated_cost_usd=None,
         )
 
-    monkeypatch.setattr("app.services.admin_llm_service.LLMRuntimeService.test_provider", fake_test_provider)
+    monkeypatch.setattr(
+        "app.services.admin_llm_service.LLMRuntimeService.test_provider",
+        fake_test_provider,
+    )
 
     create_response = await client.post(
         "/admin/llm/providers",
@@ -144,6 +151,15 @@ async def test_admin_can_create_test_and_override_provider(
     assert override_response.json()["agent_key"] == "task-validation"
     assert override_response.json()["provider_config_id"] == provider_id
 
+    vision_override_response = await client.put(
+        "/admin/llm/overrides/rag-vision",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"provider_config_id": provider_id, "enabled": True},
+    )
+    assert vision_override_response.status_code == 200
+    assert vision_override_response.json()["agent_key"] == "rag-vision"
+    assert vision_override_response.json()["provider_config_id"] == provider_id
+
 
 @pytest.mark.asyncio
 async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
@@ -167,8 +183,87 @@ async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
         "qa-verifier",
         "change-tracker",
         "chat-routing",
+        "rag-vision",
         "task-validation",
     } <= keys
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_and_restore_agent_prompt_config(
+    client: AsyncClient,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-prompts@example.com",
+        full_name="Admin User",
+    )
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    list_response = await client.get("/admin/llm/prompt-configs", headers=headers)
+    assert list_response.status_code == 200
+    prompt_configs = list_response.json()
+    prompt_keys = {item["prompt_key"] for item in prompt_configs}
+    assert {"change-tracker", "task-validation-core"} <= prompt_keys
+
+    updated_description = "Редакция агента для нормализации изменений требований."
+    updated_system_prompt = (
+        "Ты превращаешь пользовательский запрос в строгую редакцию требования. "
+        "Верни JSON с ключами proposal_text и acknowledgement. "
+        "Не добавляй текст вне JSON."
+    )
+    patch_response = await client.patch(
+        "/admin/llm/prompt-configs/change-tracker",
+        headers=headers,
+        json={
+            "description": updated_description,
+            "system_prompt": updated_system_prompt,
+            "enabled": True,
+        },
+    )
+    assert patch_response.status_code == 200
+    payload = patch_response.json()
+    assert payload["override_enabled"] is True
+    assert payload["effective_description"] == updated_description
+    assert payload["effective_system_prompt"] == updated_system_prompt
+    assert payload["revision"] == 1
+
+    async with AsyncSessionLocal() as db:
+        resolved_prompt = await LLMPromptService.resolve_system_prompt(
+            db,
+            prompt_key="change-tracker",
+            default_system_prompt="default prompt",
+        )
+    assert resolved_prompt == updated_system_prompt
+
+    disabled_response = await client.patch(
+        "/admin/llm/prompt-configs/change-tracker",
+        headers=headers,
+        json={
+            "description": updated_description,
+            "system_prompt": updated_system_prompt,
+            "enabled": False,
+        },
+    )
+    assert disabled_response.status_code == 200
+    assert disabled_response.json()["override_enabled"] is False
+    assert disabled_response.json()["effective_system_prompt"] != updated_system_prompt
+
+    versions_response = await client.get(
+        "/admin/llm/prompt-configs/change-tracker/versions",
+        headers=headers,
+    )
+    assert versions_response.status_code == 200
+    versions = versions_response.json()
+    assert [item["revision"] for item in versions] == [2, 1]
+
+    restore_response = await client.post(
+        "/admin/llm/prompt-configs/change-tracker/restore",
+        headers=headers,
+        json={"version_id": versions[-1]["id"]},
+    )
+    assert restore_response.status_code == 200
+    assert restore_response.json()["revision"] == 3
+    assert restore_response.json()["effective_system_prompt"] == updated_system_prompt
 
 
 @pytest.mark.asyncio
@@ -259,7 +354,7 @@ async def test_monitoring_llm_endpoint_returns_grouped_usage(client: AsyncClient
                 "completion_tokens": 5,
                 "total_tokens": 15,
                 "estimated_cost_usd": 0.001,
-                "created_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(UTC),
             },
         )
 
@@ -278,6 +373,121 @@ async def test_monitoring_llm_endpoint_returns_grouped_usage(client: AsyncClient
     assert len(payload["daily"]) == 1
     assert payload["daily"][0]["total"] == 1
     assert payload["daily"][0]["providers"] == {"openrouter": 1}
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_llm_monitoring_mode(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    get_response = await client.get("/admin/llm/runtime/settings", headers=headers)
+    assert get_response.status_code == 200
+    assert get_response.json()["prompt_log_mode"] == "full"
+
+    patch_response = await client.patch(
+        "/admin/llm/runtime/settings",
+        headers=headers,
+        json={"prompt_log_mode": "disabled"},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["prompt_log_mode"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_monitoring_llm_requests_endpoint_returns_prompt_and_response(
+    client: AsyncClient,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin@example.com",
+        full_name="Admin User",
+    )
+    request_messages = [
+        {"role": "system", "content": "Проверь требование."},
+        {"role": "human", "content": "Нужно добавить аудит."},
+    ]
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO llm_request_logs (
+                    id,
+                    request_kind,
+                    actor_user_id,
+                    task_id,
+                    project_id,
+                    agent_key,
+                    provider_config_id,
+                    provider_kind,
+                    model,
+                    status,
+                    latency_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    request_messages,
+                    response_text,
+                    error_message,
+                    created_at
+                ) VALUES (
+                    :id,
+                    :request_kind,
+                    NULL,
+                    NULL,
+                    NULL,
+                    :agent_key,
+                    NULL,
+                    :provider_kind,
+                    :model,
+                    :status,
+                    :latency_ms,
+                    :prompt_tokens,
+                    :completion_tokens,
+                    :total_tokens,
+                    :estimated_cost_usd,
+                    CAST(:request_messages AS JSONB),
+                    :response_text,
+                    NULL,
+                    :created_at
+                )
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "request_kind": "chat",
+                "agent_key": "task-validation",
+                "provider_kind": "openai",
+                "model": "gpt-4o-mini",
+                "status": "success",
+                "latency_ms": 120,
+                "prompt_tokens": 20,
+                "completion_tokens": 8,
+                "total_tokens": 28,
+                "estimated_cost_usd": 0.002,
+                "request_messages": json.dumps(request_messages, ensure_ascii=False),
+                "response_text": "Ответ модели",
+                "created_at": datetime.now(UTC),
+            },
+        )
+
+    response = await client.get(
+        "/admin/monitoring/llm/requests",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"range": "7d", "page": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["prompt_log_mode"] == "full"
+    assert payload["total"] == 1
+    assert payload["items"][0]["request_messages"] == request_messages
+    assert payload["items"][0]["response_text"] == "Ответ модели"
 
 
 @pytest.mark.asyncio

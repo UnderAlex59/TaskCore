@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from app.agents.attachment_vision_graph import (
+    VISION_AGENT_ALIASES,
+    VISION_AGENT_DESCRIPTION,
+    VISION_AGENT_KEY,
+    VISION_AGENT_NAME,
+)
 from app.agents.change_tracker_agent_graph import (
     CHANGE_TRACKER_AGENT_ALIASES,
     CHANGE_TRACKER_AGENT_DESCRIPTION,
@@ -81,5 +87,12 @@ def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
             description=VALIDATION_AGENT_DESCRIPTION,
             aliases=VALIDATION_AGENT_ALIASES,
             priority=70,
+        ),
+        ChatAgentMetadata(
+            key=VISION_AGENT_KEY,
+            name=VISION_AGENT_NAME,
+            description=VISION_AGENT_DESCRIPTION,
+            aliases=VISION_AGENT_ALIASES,
+            priority=80,
         ),
     )

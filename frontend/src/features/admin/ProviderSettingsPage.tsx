@@ -58,8 +58,8 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderKind, string>> = {
 const EMPTY_FORM: ProviderFormState = {
   name: "",
   provider_kind: "openai",
-  base_url: DEFAULT_BASE_URLS.openai ?? "",
-  model: DEFAULT_MODELS.openai,
+  base_url: "",
+  model: "",
   temperature: "0.2",
   enabled: false,
   input_cost_per_1k_tokens: "",
@@ -357,6 +357,7 @@ export default function ProviderSettingsPage() {
                       DEFAULT_BASE_URLS[provider_kind] ||
                       "",
                     model:
+                      !current.model ||
                       current.model === DEFAULT_MODELS[current.provider_kind]
                         ? DEFAULT_MODELS[provider_kind]
                         : current.model,
@@ -538,6 +539,12 @@ export default function ProviderSettingsPage() {
             </p>
           </div>
 
+          {providers.length === 0 ? (
+            <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/70">
+              Сначала создайте хотя бы один профиль провайдера и назначьте его профилем по умолчанию. После этого здесь можно настраивать маршрутизацию отдельных агентов.
+            </p>
+          ) : null}
+
           {availableAgents.map((agent) => {
             const draft = overrideDrafts[agent.key];
             return (
@@ -623,6 +630,11 @@ export default function ProviderSettingsPage() {
       </div>
 
       <div className="space-y-4">
+        {providers.length === 0 ? (
+          <p className="glass-panel rounded-[28px] border border-black/10 px-5 py-4 text-sm text-ink/70 shadow-panel">
+            В системе пока нет LLM-профилей. Агентные модели больше не подхватываются из `.env`: добавьте провайдер через админ-панель и назначьте его по умолчанию.
+          </p>
+        ) : null}
         {providers.map((provider) => (
           <article
             key={provider.id}

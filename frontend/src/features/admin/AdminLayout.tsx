@@ -2,9 +2,11 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const adminNavItems = [
   { href: "/admin/monitoring", label: "Мониторинг" },
+  { href: "/admin/llm-requests", label: "LLM-запросы" },
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },
   { href: "/admin/providers", label: "Модельные профили" },
+  { href: "/admin/agent-prompts", label: "Промпты агентов" },
   { href: "/admin/users", label: "Пользователи" },
 ];
 

@@ -122,4 +122,16 @@ describe("ProviderSettingsPage", () => {
     });
     expect(makeDefaultButton).toBeDisabled();
   });
+  it("shows empty state when no providers are configured", async () => {
+    adminApiMock.listProviders.mockResolvedValueOnce([]);
+    adminApiMock.listOverrides.mockResolvedValueOnce([]);
+
+    render(<ProviderSettingsPage />);
+
+    expect(
+      await screen.findByText(
+        "В системе пока нет LLM-профилей. Агентные модели больше не подхватываются из `.env`: добавьте провайдер через админ-панель и назначьте его по умолчанию.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

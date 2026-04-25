@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import Select, select
@@ -16,10 +17,13 @@ from app.schemas.admin_llm import (
     AgentDirectoryRead,
     AgentOverrideRead,
     AgentOverrideUpdate,
+    PromptLogMode,
     ProviderConfigPayload,
     ProviderConfigRead,
     ProviderConfigUpdate,
     ProviderTestResult,
+    RuntimeSettingsRead,
+    RuntimeSettingsUpdate,
 )
 from app.services.audit_service import AuditService
 from app.services.llm_agent_registry import list_llm_agents
@@ -190,7 +194,7 @@ class AdminLLMService:
             runtime = LLMRuntimeSettings(
                 id=1,
                 default_provider_config_id=provider.id,
-                prompt_log_mode="metadata_only",
+                prompt_log_mode="full",
                 updated_by=actor.id,
             )
             db.add(runtime)
@@ -209,6 +213,47 @@ class AdminLLMService:
         await db.commit()
         await db.refresh(provider)
         return await AdminLLMService.get_provider_config(provider.id, db)
+
+    @staticmethod
+    async def get_runtime_settings(db: AsyncSession) -> RuntimeSettingsRead:
+        await LLMRuntimeService.ensure_bootstrap()
+        runtime = await db.get(LLMRuntimeSettings, 1)
+        return RuntimeSettingsRead(
+            prompt_log_mode=cast(
+                PromptLogMode,
+                runtime.prompt_log_mode if runtime is not None else "full",
+            ),
+        )
+
+    @staticmethod
+    async def update_runtime_settings(
+        payload: RuntimeSettingsUpdate,
+        actor: User,
+        db: AsyncSession,
+    ) -> RuntimeSettingsRead:
+        await LLMRuntimeService.ensure_bootstrap()
+        runtime = await db.get(LLMRuntimeSettings, 1)
+        if runtime is None:
+            runtime = LLMRuntimeSettings(
+                id=1,
+                prompt_log_mode=payload.prompt_log_mode,
+                updated_by=actor.id,
+            )
+            db.add(runtime)
+        else:
+            runtime.prompt_log_mode = payload.prompt_log_mode
+            runtime.updated_by = actor.id
+
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="admin.llm_monitoring.updated",
+            entity_type="llm_runtime_settings",
+            entity_id="1",
+            metadata={"prompt_log_mode": payload.prompt_log_mode},
+        )
+        await db.commit()
+        return RuntimeSettingsRead(prompt_log_mode=payload.prompt_log_mode)
 
     @staticmethod
     async def list_agent_overrides(db: AsyncSession) -> list[AgentOverrideRead]:

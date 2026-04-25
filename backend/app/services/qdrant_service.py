@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
+from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
+from langchain_ollama import OllamaEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
@@ -21,11 +24,37 @@ _VECTOR_SIZE_BY_MODEL = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,
+    "nomic-embed-text": 768,
+    "mxbai-embed-large": 1024,
 }
 _DUPLICATE_PROPOSAL_SCORE_THRESHOLD = 0.92
+_POINT_ID_NAMESPACE = uuid.UUID("a1fc4b4f-8c2d-4dcb-8a77-0f7a52465b62")
 
 
 class QdrantService:
+    @staticmethod
+    def _normalize_point_id(collection_name: str, raw_id: object) -> int | str:
+        if isinstance(raw_id, bool):
+            raw_id = str(raw_id)
+        if isinstance(raw_id, int) and raw_id >= 0:
+            return raw_id
+
+        text = str(raw_id).strip()
+        if not text:
+            return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection_name}:<empty>"))
+
+        try:
+            return str(uuid.UUID(text))
+        except ValueError:
+            pass
+
+        if text.isascii() and text.isdigit():
+            numeric_id = int(text)
+            if numeric_id >= 0:
+                return numeric_id
+
+        return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection_name}:{text}"))
+
     @staticmethod
     @lru_cache
     def _get_client() -> QdrantClient:
@@ -37,17 +66,30 @@ class QdrantService:
         )
 
     @staticmethod
-    @lru_cache
-    def _get_embeddings() -> OpenAIEmbeddings:
+    def _resolve_embedding_provider() -> Literal["openai", "ollama"]:
         settings = get_settings()
+        provider = settings.EMBEDDING_PROVIDER
+        if provider is None:
+            raise RuntimeError("EMBEDDING_PROVIDER must be explicitly configured in .env")
+        provider = provider.casefold()
+        if provider in {"openai", "ollama"}:
+            return provider
+        raise RuntimeError(f"Unsupported embedding provider: {settings.EMBEDDING_PROVIDER!r}")
+
+    @staticmethod
+    def _get_openai_embeddings() -> OpenAIEmbeddings:
+        settings = get_settings()
+        model = settings.EMBEDDING_MODEL
+        if not model:
+            raise RuntimeError("EMBEDDING_MODEL must be configured in .env for OpenAI embeddings")
         api_key = settings.OPENAI_API_KEY
         if not api_key and settings.OPENAI_BASE_URL:
             api_key = "local"
         if not api_key:
-            raise RuntimeError("Embeddings provider is not configured")
+            raise RuntimeError("OpenAI embeddings provider is not configured")
 
         kwargs: dict[str, Any] = {
-            "model": settings.EMBEDDING_MODEL,
+            "model": model,
             "api_key": api_key,
         }
         if settings.OPENAI_BASE_URL:
@@ -55,17 +97,103 @@ class QdrantService:
         return OpenAIEmbeddings(**kwargs)
 
     @staticmethod
+    def _get_ollama_embeddings() -> OllamaEmbeddings:
+        settings = get_settings()
+        model = settings.OLLAMA_EMBEDDING_MODEL
+        if not model:
+            raise RuntimeError(
+                "OLLAMA_EMBEDDING_MODEL must be configured in .env for Ollama embeddings"
+            )
+        return OllamaEmbeddings(
+            model=model,
+            base_url=settings.OLLAMA_BASE_URL,
+        )
+
+    @staticmethod
+    def _get_active_embedding_model() -> str:
+        settings = get_settings()
+        provider = QdrantService._resolve_embedding_provider()
+        if provider == "ollama":
+            if not settings.OLLAMA_EMBEDDING_MODEL:
+                raise RuntimeError(
+                    "OLLAMA_EMBEDDING_MODEL must be configured in .env for Ollama embeddings"
+                )
+            return settings.OLLAMA_EMBEDDING_MODEL
+        if not settings.EMBEDDING_MODEL:
+            raise RuntimeError("EMBEDDING_MODEL must be configured in .env for OpenAI embeddings")
+        return settings.EMBEDDING_MODEL
+
+    @staticmethod
+    def _get_embedding_metadata() -> dict[str, str]:
+        provider = QdrantService._resolve_embedding_provider()
+        return {
+            "embedding_provider": provider,
+            "embedding_model": QdrantService._get_active_embedding_model(),
+        }
+
+    @staticmethod
+    @lru_cache
+    def _get_embeddings() -> Embeddings:
+        provider = QdrantService._resolve_embedding_provider()
+        model_name = QdrantService._get_active_embedding_model()
+        logger.info("Using %s embeddings model %s", provider, model_name)
+        if provider == "ollama":
+            return QdrantService._get_ollama_embeddings()
+        return QdrantService._get_openai_embeddings()
+
+    @staticmethod
     def _get_vector_size() -> int:
         settings = get_settings()
         if settings.EMBEDDING_DIMENSION is not None:
             return settings.EMBEDDING_DIMENSION
 
-        vector_size = _VECTOR_SIZE_BY_MODEL.get(settings.EMBEDDING_MODEL)
+        vector_size = _VECTOR_SIZE_BY_MODEL.get(QdrantService._get_active_embedding_model())
         if vector_size is not None:
             return vector_size
 
         embeddings = QdrantService._get_embeddings()
         return len(embeddings.embed_query("dimension probe"))
+
+    @staticmethod
+    def _extract_vector_size(collection_info: models.CollectionInfo) -> int | None:
+        vectors = collection_info.config.params.vectors
+        if isinstance(vectors, models.VectorParams):
+            return int(vectors.size)
+        if isinstance(vectors, dict):
+            for vector_params in vectors.values():
+                if isinstance(vector_params, models.VectorParams):
+                    return int(vector_params.size)
+        return None
+
+    @staticmethod
+    def _collection_matches_active_embeddings(
+        collection_info: models.CollectionInfo,
+        *,
+        expected_vector_size: int,
+    ) -> bool:
+        metadata = collection_info.config.metadata or {}
+        expected_metadata = QdrantService._get_embedding_metadata()
+        return (
+            QdrantService._extract_vector_size(collection_info) == expected_vector_size
+            and metadata.get("embedding_provider") == expected_metadata["embedding_provider"]
+            and metadata.get("embedding_model") == expected_metadata["embedding_model"]
+        )
+
+    @staticmethod
+    def _create_collection(
+        client: QdrantClient,
+        *,
+        collection_name: str,
+        vector_size: int,
+    ) -> None:
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
+            metadata=QdrantService._get_embedding_metadata(),
+        )
 
     @staticmethod
     def _get_store(collection_name: str) -> QdrantVectorStore:
@@ -92,13 +220,21 @@ class QdrantService:
 
             for collection_name in collections:
                 if client.collection_exists(collection_name):
-                    continue
-                client.create_collection(
+                    collection_info = client.get_collection(collection_name)
+                    if QdrantService._collection_matches_active_embeddings(
+                        collection_info,
+                        expected_vector_size=vector_size,
+                    ):
+                        continue
+                    logger.warning(
+                        "Recreating Qdrant collection %s due to embedding configuration change",
+                        collection_name,
+                    )
+                    client.delete_collection(collection_name=collection_name)
+                QdrantService._create_collection(
+                    client,
                     collection_name=collection_name,
-                    vectors_config=models.VectorParams(
-                        size=vector_size,
-                        distance=models.Distance.COSINE,
-                    ),
+                    vector_size=vector_size,
                 )
             return True
         except Exception:
@@ -138,28 +274,42 @@ class QdrantService:
                 wait=True,
             )
 
-            documents = [
-                Document(
-                    page_content=str(chunk.get("content", "")),
-                    metadata={
-                        "chunk_id": str(chunk["chunk_id"]),
-                        "chunk_kind": str(chunk.get("chunk_kind", "task")),
-                        "task_id": task_id,
-                        "project_id": project_id,
-                        "task_title": task_title,
-                        "task_status": task_status,
-                        "tags": list(tags),
-                    },
+            documents: list[Document] = []
+            ids: list[int | str] = []
+            for chunk in chunks:
+                content = str(chunk.get("content", "")).strip()
+                if not content:
+                    continue
+
+                metadata: dict[str, Any] = {
+                    "chunk_id": str(chunk["chunk_id"]),
+                    "chunk_index": int(chunk.get("chunk_index", 0)),
+                    "chunk_kind": str(chunk.get("chunk_kind", "task")),
+                    "project_id": project_id,
+                    "source_id": str(chunk.get("source_id", task_id)),
+                    "source_total_chunks": int(chunk.get("source_total_chunks", 1)),
+                    "source_type": str(chunk.get("source_type", chunk.get("chunk_kind", "task"))),
+                    "tags": list(tags),
+                    "task_id": task_id,
+                    "task_status": task_status,
+                    "task_title": task_title,
+                }
+                if chunk.get("filename") is not None:
+                    metadata["filename"] = str(chunk["filename"])
+
+                documents.append(Document(page_content=content, metadata=metadata))
+                ids.append(
+                    QdrantService._normalize_point_id(
+                        TASK_KNOWLEDGE_COLLECTION,
+                        chunk["chunk_id"],
+                    )
                 )
-                for chunk in chunks
-                if str(chunk.get("content", "")).strip()
-            ]
             if not documents:
                 return True
 
             await QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION).aadd_documents(
                 documents=documents,
-                ids=[str(chunk["chunk_id"]) for chunk in chunks if str(chunk.get("content", "")).strip()],
+                ids=ids,
             )
             return True
         except Exception:
@@ -228,7 +378,8 @@ class QdrantService:
             if not await QdrantService.ensure_collections():
                 return []
 
-            hits = await QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION).asimilarity_search_with_score(
+            store = QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION)
+            hits = await store.asimilarity_search_with_score(
                 query_text,
                 k=max(limit * 6, 12),
                 filter=models.Filter(
@@ -312,9 +463,17 @@ class QdrantService:
             if not documents:
                 return True
 
+            ids = [
+                QdrantService._normalize_point_id(
+                    PROJECT_QUESTIONS_COLLECTION,
+                    item["question_id"],
+                )
+                for item in questions
+                if str(item.get("question_text", "")).strip()
+            ]
             await QdrantService._get_store(PROJECT_QUESTIONS_COLLECTION).aadd_documents(
                 documents=documents,
-                ids=[str(item["question_id"]) for item in questions if str(item.get("question_text", "")).strip()],
+                ids=ids,
             )
             return True
         except Exception:
@@ -389,7 +548,8 @@ class QdrantService:
             if not await QdrantService.ensure_collections():
                 return None
 
-            hits = await QdrantService._get_store(TASK_PROPOSALS_COLLECTION).asimilarity_search_with_score(
+            store = QdrantService._get_store(TASK_PROPOSALS_COLLECTION)
+            hits = await store.asimilarity_search_with_score(
                 proposal_text,
                 k=3,
                 filter=models.Filter(
@@ -447,7 +607,12 @@ class QdrantService:
                         },
                     )
                 ],
-                ids=[proposal_id],
+                ids=[
+                    QdrantService._normalize_point_id(
+                        TASK_PROPOSALS_COLLECTION,
+                        proposal_id,
+                    )
+                ],
             )
             return True
         except Exception:

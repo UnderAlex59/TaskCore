@@ -20,6 +20,33 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=http://127.0.0.1:11434 ollama list > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  ollama-init:
+    image: ollama/ollama:latest
+    env_file:
+      - ./backend/.env
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      [
+        "provider=\"$${EMBEDDING_PROVIDER:-}\"; if [ \"$$provider\" != \"ollama\" ]; then echo 'Skipping local Ollama embedding pull'; exit 0; fi; if [ -z \"$${OLLAMA_EMBEDDING_MODEL}\" ]; then echo 'OLLAMA_EMBEDDING_MODEL is required when EMBEDDING_PROVIDER=ollama' >&2; exit 1; fi; until ollama list > /dev/null 2>&1; do sleep 2; done; ollama pull \"$${OLLAMA_EMBEDDING_MODEL}\"",
+      ]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
   migrate:
     build:
       context: ./backend
@@ -29,6 +56,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://app_user:app_pass@postgres:5432/taskplatform
       QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE_URL: http://ollama:11434
       UPLOAD_DIR: /var/lib/task-platform/uploads
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -36,6 +64,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
       - uploads:/var/lib/task-platform/uploads
 
@@ -49,6 +79,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://app_user:app_pass@postgres:5432/taskplatform
       QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE_URL: http://ollama:11434
       UPLOAD_DIR: /var/lib/task-platform/uploads
       LANGGRAPH_IMAGES_DIR: /var/lib/task-platform/langgraph_graphs
       UVICORN_WORKERS: 1
@@ -57,6 +88,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
     volumes:
@@ -97,4 +130,5 @@ services:
 volumes:
   pgdata:
   qdrant_data:
+  ollama_data:
   uploads:

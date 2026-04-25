@@ -8,6 +8,14 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ValidationState
+from app.agents.system_prompts import (
+    VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
+    VALIDATION_CONTEXT_QUESTIONS_SYSTEM_PROMPT,
+    VALIDATION_CORE_PROMPT_KEY,
+    VALIDATION_CORE_SYSTEM_PROMPT,
+    VALIDATION_CUSTOM_RULES_PROMPT_KEY,
+    VALIDATION_CUSTOM_RULES_SYSTEM_PROMPT,
+)
 from app.core.validation_settings import normalize_validation_node_settings
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
@@ -258,6 +266,7 @@ def _fallback_context_questions(state: ValidationGraphState) -> list[str]:
 async def _invoke_validation_llm(
     state: ValidationGraphState,
     *,
+    prompt_key: str,
     system_prompt_key: str,
     user_prompt_key: str,
 ) -> dict[str, object] | None:
@@ -273,6 +282,7 @@ async def _invoke_validation_llm(
         project_id=state.get("project_id"),
         system_prompt=str(state.get(system_prompt_key, "")),
         user_prompt=str(state.get(user_prompt_key, "")),
+        prompt_key=prompt_key,
     )
     if not result.ok or not result.text:
         return None
@@ -282,15 +292,7 @@ async def _invoke_validation_llm(
 def _prepare_core_rules_request(state: ValidationGraphState) -> ValidationGraphState:
     settings = state.get("validation_node_settings", {})
     return {
-        "core_system_prompt": (
-            "Ты проверяешь задачу по базовым требованиям качества постановки в духе IEEE. "
-            "Оцени полноту, однозначность, тестируемость, наличие критериев приёмки, явных ограничений и пригодность текста к разработке. "
-            "Верни строго JSON с ключами issues и questions. "
-            "issues — массив объектов с полями code, severity, message. "
-            "questions — массив уточняющих вопросов. "
-            "Если нарушений нет, верни пустой массив issues. "
-            "Не добавляй текст вне JSON."
-        ),
+        "core_system_prompt": VALIDATION_CORE_SYSTEM_PROMPT,
         "core_user_prompt": (
             "Настройка core_rules:\n"
             f"{json.dumps({'core_rules': settings.get('core_rules', True)}, ensure_ascii=False)}\n\n"
@@ -313,6 +315,7 @@ async def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphSt
 
     payload = await _invoke_validation_llm(
         state,
+        prompt_key=VALIDATION_CORE_PROMPT_KEY,
         system_prompt_key="core_system_prompt",
         user_prompt_key="core_user_prompt",
     )
@@ -337,14 +340,7 @@ def _prepare_custom_rules_request(state: ValidationGraphState) -> ValidationGrap
         for rule in list(state.get("custom_rules", []))
     ]
     return {
-        "custom_rules_system_prompt": (
-            "Ты проверяешь, соответствует ли задача пользовательским правилам проекта. "
-            "Используй смысловой анализ, а не буквальный поиск отдельных слов. "
-            "Верни строго JSON с ключом issues. "
-            "issues — массив объектов с полями code, severity, message. "
-            "Если нарушений нет, верни пустой массив. "
-            "Не добавляй текст вне JSON."
-        ),
+        "custom_rules_system_prompt": VALIDATION_CUSTOM_RULES_SYSTEM_PROMPT,
         "custom_rules_user_prompt": (
             "Название задачи:\n"
             f"{state.get('normalized_title', '')}\n\n"
@@ -365,6 +361,7 @@ async def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraph
 
     payload = await _invoke_validation_llm(
         state,
+        prompt_key=VALIDATION_CUSTOM_RULES_PROMPT_KEY,
         system_prompt_key="custom_rules_system_prompt",
         user_prompt_key="custom_rules_user_prompt",
     )
@@ -409,13 +406,7 @@ def _prepare_context_questions_request(state: ValidationGraphState) -> Validatio
         if str(item.get("title", "")).strip()
     ]
     return {
-        "context_system_prompt": (
-            "Ты формируешь только уточняющие вопросы по задаче. "
-            "Не ищи нарушения базовых правил и не выноси вердикт. "
-            "Нужно выделить недостающий контекст, важные артефакты, уточнения по зависимостям и вопросы по похожим задачам. "
-            "Верни строго JSON с ключом questions, где questions — массив строк. "
-            "Не добавляй текст вне JSON."
-        ),
+        "context_system_prompt": VALIDATION_CONTEXT_QUESTIONS_SYSTEM_PROMPT,
         "context_user_prompt": (
             "Название задачи:\n"
             f"{state.get('normalized_title', '')}\n\n"
@@ -440,6 +431,7 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
 
     payload = await _invoke_validation_llm(
         state,
+        prompt_key=VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
         system_prompt_key="context_system_prompt",
         user_prompt_key="context_user_prompt",
     )

@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 from app.agents.chat_agents.base import ChatAgentContext, ChatAgentMetadata
-from app.agents.chat_agents.llm import ChatAgentLLMProfile
 from app.agents.chat_routing import analyze_task_context_relevance
 from app.agents.state import ChatState
 from app.core.config import get_settings
@@ -161,11 +160,7 @@ def _register_builtin_subgraphs() -> None:
             can_handle=qa_can_handle,
             runner=run_qa,
             graph_factory=get_qa_agent_graph,
-            llm_profile=ChatAgentLLMProfile(
-                provider="openai",
-                model="gpt-4o-mini",
-                temperature=0.2,
-            ),
+            llm_profile=None,
         )
     )
     register_agent_subgraph(
@@ -180,11 +175,7 @@ def _register_builtin_subgraphs() -> None:
             can_handle=change_tracker_can_handle,
             runner=run_change_tracker,
             graph_factory=get_change_tracker_agent_graph,
-            llm_profile=ChatAgentLLMProfile(
-                provider="openai",
-                model="gpt-4o-mini",
-                temperature=0.0,
-            ),
+            llm_profile=None,
         )
     )
     register_agent_subgraph(
@@ -253,8 +244,17 @@ async def run_agent_subgraph(
 ) -> ChatState:
     result = await spec.runner(context, routing_mode)
     source_ref = dict(result.get("source_ref", {}))
+    agent_description = spec.metadata.description
+    if context.db is not None:
+        from app.services.llm_prompt_service import LLMPromptService
+
+        agent_description = await LLMPromptService.resolve_description(
+            context.db,
+            prompt_key=spec.metadata.key,
+            default_description=agent_description,
+        )
     source_ref.setdefault("agent_key", spec.metadata.key)
-    source_ref.setdefault("agent_description", spec.metadata.description)
+    source_ref["agent_description"] = agent_description
     source_ref.setdefault("routing_mode", routing_mode)
 
     state: ChatState = {

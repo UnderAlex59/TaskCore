@@ -5,18 +5,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-
-
-class ChatAgentLLMOverrideSettings(BaseModel):
-    provider: Literal["openai", "ollama", "openrouter", "gigachat", "openai_compatible"] | None = None
-    model: str | None = None
-    temperature: float | None = None
-    api_key: str | None = None
-    base_url: str | None = None
 
 
 class Settings(BaseSettings):
@@ -43,16 +35,18 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str | None = None
-    OPENAI_MODEL: str | None = None
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str | None = None
-    LLM_PROVIDER: str = "openai"
-    LLM_MODEL: str = "gpt-4o"
-    LLM_TEMPERATURE: float = 0.2
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_PROVIDER: Literal["openai", "ollama"] | None = None
+    EMBEDDING_MODEL: str | None = None
+    OLLAMA_EMBEDDING_MODEL: str | None = None
     EMBEDDING_DIMENSION: int | None = None
-    CHAT_AGENT_LLM_OVERRIDES: dict[str, ChatAgentLLMOverrideSettings] = Field(default_factory=dict)
     LLM_SETTINGS_ENCRYPTION_KEY: str | None = None
+
+    RAG_CHUNK_TARGET_TOKENS: int = 450
+    RAG_CHUNK_OVERLAP_TOKENS: int = 50
+    RAG_ATTACHMENT_MAX_TEXT_CHARS: int = 20000
+    RAG_VISION_ENABLED: bool = True
+    RAG_VISION_MAX_IMAGE_BYTES: int = 5242880
 
     UPLOAD_DIR: str = "/tmp/uploads"
     LANGGRAPH_IMAGES_DIR: str = str(PROJECT_ROOT / "langgraph_graphs")
@@ -63,9 +57,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("COOKIE_DOMAIN", mode="before")
+    @field_validator(
+        "COOKIE_DOMAIN",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "OLLAMA_EMBEDDING_MODEL",
+        "LLM_SETTINGS_ENCRYPTION_KEY",
+        mode="before",
+    )
     @classmethod
-    def empty_cookie_domain_to_none(cls, value: str | None) -> str | None:
+    def empty_optional_setting_to_none(cls, value: str | None) -> str | None:
         if value in (None, ""):
             return None
         return value
@@ -79,17 +82,6 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [item.strip() for item in value.split(",") if item.strip()]
         return value
-
-    @field_validator("CHAT_AGENT_LLM_OVERRIDES", mode="before")
-    @classmethod
-    def parse_agent_llm_overrides(cls, value: object) -> object:
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return {}
-        return value
-
 
 @lru_cache
 def get_settings() -> Settings:

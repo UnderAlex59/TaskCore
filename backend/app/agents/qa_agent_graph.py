@@ -8,6 +8,11 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
+from app.agents.system_prompts import (
+    QA_ANSWER_SYSTEM_PROMPT,
+    QA_PLANNER_SYSTEM_PROMPT,
+    QA_VERIFIER_SYSTEM_PROMPT,
+)
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -195,19 +200,7 @@ def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
         "related_titles": related_titles,
         "issues": issues,
         "questions": questions,
-        "planner_system_prompt": (
-            "Ты планируешь аналитический ответ по задаче. "
-            "Реши, нужен ли только прямой ответ из текущего описания или глубокий разбор с RAG-контекстом и отдельной проверкой groundedness. "
-            "Верни строго JSON с ключами: "
-            "analysis_mode (direct|deep), "
-            "needs_rag (boolean), "
-            "needs_verification (boolean), "
-            "retrieval_query (string|null), "
-            "retrieval_limit (integer), "
-            "focus_points (array of strings), "
-            "canonical_question_hint (string|null). "
-            "Не добавляй текст вне JSON."
-        ),
+        "planner_system_prompt": QA_PLANNER_SYSTEM_PROMPT,
         "planner_user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Статус задачи: {state.get('task_status', '')}\n"
@@ -251,6 +244,7 @@ async def _invoke_qa_planner(state: QAAgentGraphState) -> QAAgentGraphState:
         project_id=state.get("project_id"),
         system_prompt=str(state.get("planner_system_prompt", "")),
         user_prompt=str(state.get("planner_user_prompt", "")),
+        prompt_key=QA_PLANNER_AGENT_KEY,
     )
     payload = _extract_json_payload(result.text or "") if result.ok and result.text else None
     analysis_mode = _normalize_analysis_mode(
@@ -329,16 +323,7 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
     return {
         "rag_snippets": rag_snippets,
         "rag_chunk_ids": rag_chunk_ids,
-        "answer_system_prompt": (
-            "Ты опытный продуктовый аналитик. "
-            "Ответь на вопрос пользователя только на русском языке. "
-            "Используй только доступный контекст задачи, результаты проверки, связанные задачи и RAG-контекст. "
-            "Не придумывай факты. "
-            "Верни строго JSON с ключами answer, confidence, canonical_question. "
-            "confidence=high только если ответ опирается на явные данные в контексте. "
-            "Если данных недостаточно, верни confidence=low, явно укажи пробелы в answer и заполни canonical_question. "
-            "Если данных хватает, canonical_question верни null."
-        ),
+        "answer_system_prompt": QA_ANSWER_SYSTEM_PROMPT,
         "answer_user_prompt": (
             f"Режим анализа: {state.get('analysis_mode', 'direct')}\n"
             f"Фокус анализа: {focus_points or 'не задан'}\n"
@@ -375,6 +360,7 @@ async def _invoke_qa_answer(state: QAAgentGraphState) -> QAAgentGraphState:
         project_id=state.get("project_id"),
         system_prompt=str(state.get("answer_system_prompt", "")),
         user_prompt=str(state.get("answer_user_prompt", "")),
+        prompt_key=QA_ANSWER_AGENT_KEY,
     )
     return {
         "answer_ok": bool(result.ok),
@@ -418,15 +404,7 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
     validation_result = state.get("validation_result") or {}
 
     return {
-        "verify_system_prompt": (
-            "Ты проверяешь groundedness аналитического ответа. "
-            "Оцени, подтверждается ли draft_answer текущим контекстом задачи без домыслов. "
-            "Верни строго JSON с ключами final_answer, confidence, grounded, canonical_question. "
-            "Если answer подтверждается, grounded=true и confidence может быть high. "
-            "Если данных недостаточно, grounded=false, confidence=low, "
-            "в final_answer явно укажи, чего не хватает, а в canonical_question задай канонический вопрос для бэклога валидации. "
-            "Не добавляй текст вне JSON."
-        ),
+        "verify_system_prompt": QA_VERIFIER_SYSTEM_PROMPT,
         "verify_user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Описание задачи:\n{state.get('task_content', '')}\n\n"
@@ -458,6 +436,7 @@ async def _invoke_qa_verifier(state: QAAgentGraphState) -> QAAgentGraphState:
         project_id=state.get("project_id"),
         system_prompt=str(state.get("verify_system_prompt", "")),
         user_prompt=str(state.get("verify_user_prompt", "")),
+        prompt_key=QA_VERIFIER_AGENT_KEY,
     )
     return {
         "verify_ok": bool(result.ok),

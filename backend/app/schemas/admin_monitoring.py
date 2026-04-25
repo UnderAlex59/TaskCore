@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from app.schemas.admin_llm import PromptLogMode
+
 
 MonitoringRange = Literal["24h", "7d", "30d", "90d"]
+LLMRequestStatus = Literal["success", "error"]
 
 
 class MonitoringAllTimeTotals(BaseModel):
@@ -98,6 +101,35 @@ class MonitoringLLMRead(BaseModel):
     provider_breakdown: list[LLMProviderBreakdownRead]
     daily: list[LLMDailyUsageRead]
     recent_failures: list[LLMRecentFailureRead]
+
+
+class LLMRequestLogRead(BaseModel):
+    id: str
+    created_at: datetime
+    request_kind: str
+    actor_name: str
+    task_id: str | None
+    project_id: str | None
+    agent_key: str | None
+    provider_kind: str
+    model: str
+    status: LLMRequestStatus
+    latency_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    estimated_cost_usd: Decimal | None
+    request_messages: list[dict[str, Any]] | None
+    response_text: str | None
+    error_message: str | None
+
+
+class LLMRequestLogPageRead(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    prompt_log_mode: PromptLogMode
+    items: list[LLMRequestLogRead]
 
 
 class AuditEventRead(BaseModel):

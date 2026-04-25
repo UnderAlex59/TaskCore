@@ -9,7 +9,6 @@ from app.agents.qa_agent_graph import (
 )
 
 from .base import BaseChatAgent, ChatAgentContext, ChatAgentMetadata, ChatAgentResult
-from .llm import ChatAgentLLMProfile
 from .registry import register_chat_agent
 
 
@@ -21,11 +20,6 @@ class QuestionAgent(BaseChatAgent):
         description=QA_AGENT_DESCRIPTION,
         aliases=QA_AGENT_ALIASES,
         priority=20,
-    )
-    llm_profile = ChatAgentLLMProfile(
-        provider="openai",
-        model="gpt-4o-mini",
-        temperature=0.2,
     )
 
     async def can_handle(self, context: ChatAgentContext) -> bool:
