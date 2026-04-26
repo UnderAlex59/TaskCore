@@ -9,6 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.provider_test_graph import run_provider_test_graph
+from app.agents.vision_test_graph import run_vision_test_graph
+from app.core.config import get_settings
 from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_runtime_settings import LLMRuntimeSettings
@@ -24,7 +26,9 @@ from app.schemas.admin_llm import (
     ProviderTestResult,
     RuntimeSettingsRead,
     RuntimeSettingsUpdate,
+    VisionTestResult,
 )
+from app.services.attachment_content_service import AttachmentContentService
 from app.services.audit_service import AuditService
 from app.services.llm_agent_registry import list_llm_agents
 from app.services.llm_runtime_service import LLMRuntimeService
@@ -173,6 +177,72 @@ class AdminLLMService:
             model=result["model"],
             latency_ms=result["latency_ms"],
             message=result["message"],
+        )
+
+    @staticmethod
+    async def test_vision_payload(
+        *,
+        filename: str,
+        content_type: str | None,
+        image_bytes: bytes,
+        prompt: str,
+        actor: User,
+        db: AsyncSession,
+    ) -> VisionTestResult:
+        normalized_content_type = (content_type or "").split(";", maxsplit=1)[0].strip()
+        if not AttachmentContentService.is_image(normalized_content_type):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для Vision-теста требуется изображение.",
+            )
+
+        settings = get_settings()
+        if len(image_bytes) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Файл пустой.",
+            )
+        if len(image_bytes) > settings.RAG_VISION_MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Файл превышает допустимый размер для Vision-теста. "
+                    f"Лимит: {settings.RAG_VISION_MAX_IMAGE_BYTES} байт."
+                ),
+            )
+
+        result = await run_vision_test_graph(
+            db=db,
+            actor_user_id=actor.id,
+            image_bytes=image_bytes,
+            content_type=normalized_content_type or "application/octet-stream",
+            prompt=prompt.strip(),
+        )
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="admin.llm_vision.tested",
+            entity_type="llm_vision_test",
+            metadata={
+                "filename": filename,
+                "content_type": normalized_content_type or "application/octet-stream",
+                "ok": bool(result["ok"]),
+                "provider_kind": result["provider_kind"],
+                "model": result["model"],
+            },
+        )
+        await db.commit()
+        return VisionTestResult(
+            ok=bool(result["ok"]),
+            provider_config_id=result.get("provider_config_id"),
+            provider_kind=str(result["provider_kind"]),
+            provider_name=result.get("provider_name"),
+            model=str(result["model"]),
+            latency_ms=result.get("latency_ms"),
+            content_type=str(result["content_type"]),
+            prompt=str(result["prompt"]),
+            result_text=result.get("result_text"),
+            message=str(result["message"]),
         )
 
     @staticmethod

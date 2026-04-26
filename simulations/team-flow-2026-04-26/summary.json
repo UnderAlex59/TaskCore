@@ -1,0 +1,216 @@
+{
+  "started_at": "2026-04-26T13:33:35+05:00",
+  "api_base_url": "http://127.0.0.1:8080/api",
+  "accounts": [
+    {
+      "alias": "admin",
+      "email": "admin@example.com",
+      "full_name": "Администратор системы",
+      "role": "ADMIN",
+      "password": "Password1"
+    },
+    {
+      "alias": "analyst",
+      "email": "analyst@example.com",
+      "full_name": "Анна Аналитик",
+      "role": "ANALYST",
+      "password": "Password1"
+    },
+    {
+      "alias": "developer",
+      "email": "developer@example.com",
+      "full_name": "Дмитрий Разработчик",
+      "role": "DEVELOPER",
+      "password": "Password1"
+    },
+    {
+      "alias": "tester",
+      "email": "tester@example.com",
+      "full_name": "Татьяна Тестировщик",
+      "role": "TESTER",
+      "password": "Password1"
+    }
+  ],
+  "tags": [
+    "workflow",
+    "roles",
+    "forms",
+    "attachments",
+    "validation",
+    "notifications",
+    "import",
+    "reports",
+    "integration",
+    "audit",
+    "dashboard",
+    "security"
+  ],
+  "llm": {
+    "providers_before_reset": [
+      {
+        "id": "2f8adcf9-1d8b-47e0-a58a-1ac5028cda2b",
+        "name": "Автоматически созданный профиль по умолчанию",
+        "provider_kind": "openai",
+        "model": "gpt-4o",
+        "enabled": true,
+        "has_secret": true
+      },
+      {
+        "id": "96203de2-0560-4b05-b1ae-f36a1f0e2e3c",
+        "name": "Автоматически созданный профиль для агента qa",
+        "provider_kind": "openai",
+        "model": "gpt-4o-mini",
+        "enabled": true,
+        "has_secret": false
+      },
+      {
+        "id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "name": "Автоматически созданный профиль для агента change-tracker",
+        "provider_kind": "openrouter",
+        "model": "minimax/minimax-m2.5:free",
+        "enabled": true,
+        "has_secret": true
+      }
+    ],
+    "overrides_before_reset": [
+      {
+        "agent_key": "change-tracker",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "chat-routing",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "qa",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "qa-answer",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "qa-planner",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "qa-verifier",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      },
+      {
+        "agent_key": "task-validation",
+        "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "enabled": true
+      }
+    ],
+    "runtime_before_reset": {
+      "id": 1,
+      "default_provider_config_id": "2f8adcf9-1d8b-47e0-a58a-1ac5028cda2b",
+      "prompt_log_mode": "full"
+    },
+    "task_validation_mode": {
+      "mode": "live",
+      "provider_config_id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+      "provider_name": "Автоматически созданный профиль для агента change-tracker",
+      "provider_kind": "openrouter",
+      "model": "minimax/minimax-m2.5:free"
+    },
+    "provider_checks_after_bootstrap": [
+      {
+        "id": "2f8adcf9-1d8b-47e0-a58a-1ac5028cda2b",
+        "name": "Автоматически созданный профиль по умолчанию",
+        "provider_kind": "openai",
+        "model": "gpt-4o",
+        "required_for_simulation": false,
+        "is_runtime_default": true,
+        "result": null
+      },
+      {
+        "id": "96203de2-0560-4b05-b1ae-f36a1f0e2e3c",
+        "name": "Автоматически созданный профиль для агента qa",
+        "provider_kind": "openai",
+        "model": "gpt-4o-mini",
+        "required_for_simulation": false,
+        "is_runtime_default": false,
+        "result": null
+      },
+      {
+        "id": "64955ecf-bcb8-4eb9-90f2-7deb0a6f2342",
+        "name": "Автоматически созданный профиль для агента change-tracker",
+        "provider_kind": "openrouter",
+        "model": "minimax/minimax-m2.5:free",
+        "required_for_simulation": true,
+        "is_runtime_default": false,
+        "result": {
+          "ok": true,
+          "provider_kind": "openrouter",
+          "model": "minimax/minimax-m2.5:free",
+          "latency_ms": 7414,
+          "message": "РЎРѕРµРґРёРЅРµРЅРёРµ СЃ LLM-РїСЃРµРІРґРµСЃРµРјРѕРј СѓСЃРїРµС€РЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ. РЇ РіРѕС‚РѕРІ Рє СЃРѕС‚СЃСѓРґРЅРёС‡РµСЃС‚РІРёСЋ."
+        }
+      }
+    ],
+    "optional_provider_ids": [
+      "2f8adcf9-1d8b-47e0-a58a-1ac5028cda2b"
+    ]
+  },
+  "project": {
+    "id": "ccb4f80b-e8cb-41d3-a1d7-0005a5d273ce",
+    "name": "Командная эмуляция магистерской 2026-04-26",
+    "description": "Связный backlog корпоративной системы заявок и согласований для проверки валидации, RAG-контекста, чатов задач, change proposals и post-approval revalidation.",
+    "created_by": "9efaabce-f8e4-4399-903d-ac25caed28f8",
+    "created_at": "2026-04-26T08:33:55.715879Z",
+    "updated_at": "2026-04-26T08:33:55.715879Z",
+    "validation_node_settings": {
+      "core_rules": true,
+      "custom_rules": true,
+      "context_questions": true
+    }
+  },
+  "tasks": [],
+  "issues": [
+    {
+      "at": "2026-04-26T13:41:24+05:00",
+      "type": "RuntimeError",
+      "message": "Не удалось довести задачу 0a2860b3-1915-4eff-bd24-4960dc1e2a50 до approved за 3 попытки."
+    }
+  ],
+  "preflight": {
+    "backend": {
+      "state": "running",
+      "health": "healthy"
+    },
+    "frontend": {
+      "state": "running",
+      "health": "healthy"
+    },
+    "ollama": {
+      "state": "running",
+      "health": "healthy"
+    },
+    "postgres": {
+      "state": "running",
+      "health": "healthy"
+    },
+    "qdrant": {
+      "state": "running",
+      "health": ""
+    }
+  },
+  "reset_counts_after": {
+    "users_count": 0,
+    "projects_count": 0,
+    "tasks_count": 0,
+    "messages_count": 0,
+    "proposals_count": 0,
+    "validation_questions_count": 0,
+    "audit_events_count": 0,
+    "task_tags_count": 0
+  }
+}

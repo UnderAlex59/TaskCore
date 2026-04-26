@@ -6,6 +6,7 @@ const adminNavItems = [
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },
   { href: "/admin/providers", label: "Модельные профили" },
+  { href: "/admin/vision-test", label: "Тест Vision" },
   { href: "/admin/agent-prompts", label: "Промпты агентов" },
   { href: "/admin/users", label: "Пользователи" },
 ];

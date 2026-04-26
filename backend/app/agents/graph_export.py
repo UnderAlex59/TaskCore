@@ -15,6 +15,7 @@ from app.agents.provider_test_graph import get_provider_test_graph
 from app.agents.rag_pipeline import get_rag_pipeline_graph
 from app.agents.subgraph_registry import get_exportable_agent_subgraphs
 from app.agents.validation_graph import get_validation_graph
+from app.agents.vision_test_graph import get_vision_test_graph
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ def _static_graph_export_specs() -> tuple[GraphExportSpec, ...]:
         GraphExportSpec(name="validation_graph", factory=get_validation_graph),
         GraphExportSpec(name="rag_pipeline", factory=get_rag_pipeline_graph),
         GraphExportSpec(name="provider_test_graph", factory=get_provider_test_graph),
+        GraphExportSpec(name="vision_test_graph", factory=get_vision_test_graph),
     )
 
 

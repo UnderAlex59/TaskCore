@@ -524,6 +524,9 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
         headers=analyst_headers,
     )
     assert task_response.status_code == 200
+    task_payload = task_response.json()
+    assert task_payload["embeddings_stale"] is False
+    assert task_payload["requires_revalidation"] is False
     assert (
         "Какие статусы считаются терминальными и кто инициирует повторную синхронизацию?"
         in task_response.json()["validation_result"]["questions"]

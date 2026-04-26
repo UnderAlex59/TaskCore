@@ -11,7 +11,7 @@ from time import perf_counter
 from typing import Any
 
 import httpx
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,7 +101,33 @@ class LLMRuntimeService:
     def decrypt_secret(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return None
-        return cls._fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+        try:
+            return cls._fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+        except InvalidToken as exc:
+            raise ValueError(
+                "Не удалось расшифровать секрет LLM-провайдера. Обновите секрет в админ-панели."
+            ) from exc
+
+    @staticmethod
+    def _build_unavailable_result(
+        *,
+        provider_kind: str = "unknown",
+        model: str = "",
+        error_message: str,
+    ) -> LLMInvocationResult:
+        return LLMInvocationResult(
+            ok=False,
+            text=None,
+            provider_config_id=None,
+            provider_kind=provider_kind,
+            model=model,
+            latency_ms=None,
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
+            estimated_cost_usd=None,
+            error_message=error_message,
+        )
 
     @classmethod
     async def ensure_bootstrap(cls) -> None:
@@ -233,7 +259,10 @@ class LLMRuntimeService:
         user_prompt: str,
         prompt_key: str | None = None,
     ) -> LLMInvocationResult:
-        resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        try:
+            resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        except Exception as exc:  # noqa: BLE001
+            return cls._build_unavailable_result(error_message=str(exc))
         from app.services.llm_prompt_service import LLMPromptService
 
         effective_system_prompt = await LLMPromptService.resolve_system_prompt(
@@ -267,7 +296,10 @@ class LLMRuntimeService:
         content_type: str,
         prompt: str,
     ) -> LLMInvocationResult:
-        resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        try:
+            resolved = await cls.resolve_provider(db, agent_key=agent_key)
+        except Exception as exc:  # noqa: BLE001
+            return cls._build_unavailable_result(error_message=str(exc))
         data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
         return await cls._execute_messages(
             db,
@@ -302,7 +334,14 @@ class LLMRuntimeService:
         config: LLMProviderConfig,
         actor_user_id: str | None,
     ) -> LLMInvocationResult:
-        profile = await cls._build_profile(config)
+        try:
+            profile = await cls._build_profile(config)
+        except Exception as exc:  # noqa: BLE001
+            return cls._build_unavailable_result(
+                provider_kind=config.provider_kind,
+                model=config.model,
+                error_message=str(exc),
+            )
         return await cls._execute_prompt(
             db,
             config=config,

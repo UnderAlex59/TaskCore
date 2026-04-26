@@ -13,6 +13,7 @@ import MonitoringPage from "@/features/admin/MonitoringPage";
 import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 import TaskTagsPage from "@/features/admin/TaskTagsPage";
 import ValidationQuestionsPage from "@/features/admin/ValidationQuestionsPage";
+import VisionTestPage from "@/features/admin/VisionTestPage";
 import ProfilePage from "@/features/profile/ProfilePage";
 import UserList from "@/features/admin/UserList";
 import LandingPage from "@/features/landing/LandingPage";
@@ -66,6 +67,7 @@ export default function App() {
                   />
                   <Route path="task-tags" element={<TaskTagsPage />} />
                   <Route path="providers" element={<ProviderSettingsPage />} />
+                  <Route path="vision-test" element={<VisionTestPage />} />
                   <Route path="agent-prompts" element={<AgentPromptsPage />} />
                   <Route path="users" element={<UserList />} />
                   <Route

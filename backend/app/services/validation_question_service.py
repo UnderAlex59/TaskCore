@@ -8,12 +8,13 @@ from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
-from app.models.task import Task, TaskStatus
+from app.models.task import Task, TaskAttachment, TaskStatus
 from app.models.user import User
 from app.models.validation_question import ValidationQuestion
 from app.schemas.admin_validation import ValidationQuestionPageRead, ValidationQuestionRead
 from app.services.audit_service import AuditService
 from app.services.qdrant_service import QdrantService
+from app.services.rag_service import RagService
 
 ValidationVerdict = Literal["approved", "needs_rework"]
 
@@ -68,10 +69,38 @@ class ValidationQuestionService:
         )
 
     @staticmethod
+    async def _sync_task_context_index(
+        task: Task,
+        db: AsyncSession,
+        *,
+        actor_user_id: str | None,
+    ) -> None:
+        attachments = list(
+            (
+                await db.execute(
+                    select(TaskAttachment)
+                    .where(TaskAttachment.task_id == task.id)
+                    .order_by(TaskAttachment.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await RagService.index_task_context(
+            db,
+            task,
+            attachments,
+            actor_user_id=actor_user_id,
+            validation_result=task.validation_result,
+        )
+
+    @staticmethod
     async def record_chat_question(
         task: Task,
         question_text: str,
         db: AsyncSession,
+        *,
+        actor_user_id: str | None = None,
     ) -> ValidationQuestion | None:
         normalized_question = ValidationQuestionService._normalize_question_text(question_text)
         if not normalized_question:
@@ -101,6 +130,7 @@ class ValidationQuestionService:
             or -1
         ) + 1
 
+        task_context_updated = False
         if validation_result:
             current_questions = [
                 ValidationQuestionService._normalize_question_text(str(item))
@@ -111,6 +141,7 @@ class ValidationQuestionService:
                     question for question in current_questions if question
                 ] + [normalized_question]
                 task.validation_result = validation_result
+                task_context_updated = True
 
         question = ValidationQuestion(
             task_id=task.id,
@@ -123,6 +154,12 @@ class ValidationQuestionService:
         db.add(question)
         await db.flush()
         await ValidationQuestionService._sync_project_questions_index(task, db)
+        if task_context_updated:
+            await ValidationQuestionService._sync_task_context_index(
+                task,
+                db,
+                actor_user_id=actor_user_id,
+            )
         return question
 
     @staticmethod

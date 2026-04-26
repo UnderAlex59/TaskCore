@@ -189,6 +189,70 @@ async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_can_run_vision_test_with_uploaded_image(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-vision-test@example.com",
+        full_name="Admin Vision",
+    )
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    create_response = await client.post(
+        "/admin/llm/providers",
+        headers=headers,
+        json={
+            "name": "Vision provider",
+            "provider_kind": "openai",
+            "base_url": "",
+            "model": "gpt-4o",
+            "temperature": 0.2,
+            "enabled": True,
+            "secret": "vision-secret",
+        },
+    )
+    assert create_response.status_code == 201
+    provider_id = create_response.json()["id"]
+
+    async def fake_invoke_vision(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text="Счет №42\nИтого: 15 000 ₽",
+            provider_config_id=provider_id,
+            provider_kind="openai",
+            model="gpt-4o",
+            latency_ms=64,
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_vision",
+        fake_invoke_vision,
+    )
+
+    response = await client.post(
+        "/admin/llm/vision-test",
+        headers=headers,
+        data={"prompt": "Извлеки текст без пояснений."},
+        files={"file": ("scan.png", b"fake image bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["provider_config_id"] == provider_id
+    assert payload["provider_name"] == "Vision provider"
+    assert payload["provider_kind"] == "openai"
+    assert payload["model"] == "gpt-4o"
+    assert payload["result_text"] == "Счет №42\nИтого: 15 000 ₽"
+
+
+@pytest.mark.asyncio
 async def test_admin_can_update_and_restore_agent_prompt_config(
     client: AsyncClient,
 ) -> None:

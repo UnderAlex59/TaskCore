@@ -205,6 +205,7 @@ async def _persist_chat_artifacts(state: ChatGraphState) -> ChatGraphState:
                 task,
                 validation_backlog_question,
                 db,
+                actor_user_id=str(actor_user_id) if actor_user_id is not None else None,
             )
             if saved_question is not None:
                 source_ref["validation_backlog_saved"] = True

@@ -43,3 +43,17 @@ class ProviderTestState(TypedDict, total=False):
     model: str
     latency_ms: int | None
     message: str
+
+
+class VisionTestState(TypedDict, total=False):
+    actor_user_id: str | None
+    content_type: str
+    ok: bool
+    provider_config_id: str | None
+    provider_kind: str
+    provider_name: str | None
+    model: str
+    latency_ms: int | None
+    prompt: str
+    result_text: str | None
+    message: str

@@ -50,6 +50,19 @@ export interface ProviderTestResult {
   message: string;
 }
 
+export interface VisionTestResult {
+  ok: boolean;
+  provider_config_id: string | null;
+  provider_kind: string;
+  provider_name: string | null;
+  model: string;
+  latency_ms: number | null;
+  content_type: string;
+  prompt: string;
+  result_text: string | null;
+  message: string;
+}
+
 export interface AgentOverrideRead {
   agent_key: string;
   provider_config_id: string;
@@ -277,6 +290,16 @@ export const adminApi = {
         `/admin/llm/providers/${providerId}/test`,
       )
     ).data,
+  testVision: async (file: File, prompt: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("prompt", prompt);
+    return (
+      await apiClient.post<VisionTestResult>("/admin/llm/vision-test", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+    ).data;
+  },
   setDefaultProvider: async (providerConfigId: string) =>
     (
       await apiClient.post<ProviderConfigRead>(

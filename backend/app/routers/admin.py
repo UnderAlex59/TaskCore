@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.core.dependencies import DBSession, require_role
 from app.models.task import TaskStatus
@@ -22,6 +22,7 @@ from app.schemas.admin_llm import (
     RuntimeDefaultProviderUpdate,
     RuntimeSettingsRead,
     RuntimeSettingsUpdate,
+    VisionTestResult,
 )
 from app.schemas.admin_monitoring import (
     AuditPageRead,
@@ -78,6 +79,23 @@ async def test_llm_provider(
     db: DBSession,
 ) -> ProviderTestResult:
     return await AdminLLMService.test_provider_config(provider_id, current_user, db)
+
+
+@router.post("/llm/vision-test", response_model=VisionTestResult)
+async def test_llm_vision(
+    current_user: AdminUser,
+    db: DBSession,
+    file: UploadFile = File(...),
+    prompt: str = Form(...),
+) -> VisionTestResult:
+    return await AdminLLMService.test_vision_payload(
+        filename=file.filename or "attachment",
+        content_type=file.content_type,
+        image_bytes=await file.read(),
+        prompt=prompt,
+        actor=current_user,
+        db=db,
+    )
 
 
 @router.post("/llm/runtime/default-provider", response_model=ProviderConfigRead)

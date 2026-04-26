@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 
 from app.services.llm_runtime_service import LLMRuntimeService
 
@@ -14,6 +15,15 @@ def test_secret_round_trip_and_masking() -> None:
     assert masked is not None
     assert masked.startswith("supe")
     assert LLMRuntimeService.decrypt_secret(encrypted) == "super-secret-token"
+
+
+def test_decrypt_secret_invalid_token_raises_readable_error() -> None:
+    foreign_token = Fernet(Fernet.generate_key()).encrypt(b"foreign-secret").decode("utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        LLMRuntimeService.decrypt_secret(foreign_token)
+
+    assert "расшифровать" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -62,3 +72,26 @@ async def test_resolve_provider_requires_admin_configured_default(
         await LLMRuntimeService.resolve_provider(FakeDB(), agent_key=None)  # type: ignore[arg-type]
 
     assert "LLM" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_invoke_chat_returns_error_result_when_provider_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_resolve_provider(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise ValueError("provider secret is invalid")
+
+    monkeypatch.setattr(LLMRuntimeService, "resolve_provider", fake_resolve_provider)
+
+    result = await LLMRuntimeService.invoke_chat(  # type: ignore[arg-type]
+        db=object(),
+        agent_key="task-validation",
+        actor_user_id=None,
+        task_id=None,
+        project_id=None,
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result.ok is False
+    assert result.error_message == "provider secret is invalid"

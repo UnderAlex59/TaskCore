@@ -61,6 +61,19 @@ class ProviderTestResult(BaseModel):
     message: str
 
 
+class VisionTestResult(BaseModel):
+    ok: bool
+    provider_config_id: str | None
+    provider_kind: str
+    provider_name: str | None
+    model: str
+    latency_ms: int | None
+    content_type: str
+    prompt: str
+    result_text: str | None
+    message: str
+
+
 class RuntimeDefaultProviderUpdate(BaseModel):
     provider_config_id: str
 
