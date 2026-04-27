@@ -48,7 +48,10 @@ class ValidationQuestionService:
                     select(ValidationQuestion)
                     .where(ValidationQuestion.task_id == task.id)
                     .where(ValidationQuestion.source == "chat")
-                    .order_by(ValidationQuestion.sort_order.asc(), ValidationQuestion.created_at.asc())
+                    .order_by(
+                        ValidationQuestion.sort_order.asc(),
+                        ValidationQuestion.created_at.asc(),
+                    )
                 )
             )
             .scalars()
@@ -67,6 +70,10 @@ class ValidationQuestionService:
                 for row in rows
             ],
         )
+
+    @staticmethod
+    async def sync_project_questions_index(task: Task, db: AsyncSession) -> None:
+        await ValidationQuestionService._sync_project_questions_index(task, db)
 
     @staticmethod
     async def _sync_task_context_index(

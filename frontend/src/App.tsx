@@ -6,6 +6,7 @@ import { RoleGuard } from "@/auth/RoleGuard";
 import LoginPage from "@/auth/pages/LoginPage";
 import AgentPromptsPage from "@/features/admin/AgentPromptsPage";
 import AdminLayout from "@/features/admin/AdminLayout";
+import QdrantAdminPage from "@/features/admin/QdrantAdminPage";
 import RegisterPage from "@/auth/pages/RegisterPage";
 import CustomRulesEditor from "@/features/admin/CustomRulesEditor";
 import LLMRequestLogsPage from "@/features/admin/LLMRequestLogsPage";
@@ -60,6 +61,7 @@ export default function App() {
                     element={<Navigate to="/admin/monitoring" replace />}
                   />
                   <Route path="monitoring" element={<MonitoringPage />} />
+                  <Route path="qdrant" element={<QdrantAdminPage />} />
                   <Route path="llm-requests" element={<LLMRequestLogsPage />} />
                   <Route
                     path="validation-questions"

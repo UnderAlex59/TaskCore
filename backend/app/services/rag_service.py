@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,14 +47,18 @@ class RagService:
         attachments: list[TaskAttachment],
         *,
         actor_user_id: str | None = None,
+        attachment_payloads: list[dict[str, Any]] | None = None,
+        allow_vision: bool = True,
         validation_result: dict | None = None,
     ) -> list[str]:
-        attachment_payloads = await AttachmentContentService.build_attachment_payloads(
-            db,
-            task,
-            attachments,
-            actor_user_id=actor_user_id,
-        )
+        if attachment_payloads is None:
+            attachment_payloads = await AttachmentContentService.build_attachment_payloads(
+                db,
+                task,
+                attachments,
+                actor_user_id=actor_user_id,
+                allow_vision=allow_vision,
+            )
         rag_index = await run_rag_pipeline(
             task_id=task.id,
             title=task.title,

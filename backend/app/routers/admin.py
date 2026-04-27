@@ -33,9 +33,19 @@ from app.schemas.admin_monitoring import (
     MonitoringRange,
     MonitoringSummaryRead,
 )
+from app.schemas.admin_qdrant import (
+    QdrantDuplicateProposalProbePayload,
+    QdrantOverviewRead,
+    QdrantProjectCoverageRead,
+    QdrantProjectQuestionsProbePayload,
+    QdrantRelatedTasksProbePayload,
+    QdrantScenarioProbeRead,
+    QdrantTaskResyncRead,
+)
 from app.schemas.admin_validation import ValidationQuestionPageRead
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
+from app.services.admin_qdrant_service import AdminQdrantService
 from app.services.llm_prompt_service import LLMPromptService
 from app.services.monitoring_service import MonitoringService
 from app.services.task_tag_service import TaskTagService
@@ -219,6 +229,57 @@ async def monitoring_llm(
     range_value: MonitoringRange = Query(default="7d", alias="range"),
 ) -> MonitoringLLMRead:
     return await MonitoringService.get_llm_metrics(db, range_value=range_value)
+
+
+@router.get("/qdrant/overview", response_model=QdrantOverviewRead)
+async def qdrant_overview(_: AdminUser) -> QdrantOverviewRead:
+    return await AdminQdrantService.get_overview()
+
+
+@router.get("/qdrant/projects/{project_id}/coverage", response_model=QdrantProjectCoverageRead)
+async def qdrant_project_coverage(
+    project_id: str,
+    _: AdminUser,
+    db: DBSession,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> QdrantProjectCoverageRead:
+    return await AdminQdrantService.get_project_coverage(project_id, db, limit=limit)
+
+
+@router.post("/qdrant/scenarios/related-tasks", response_model=QdrantScenarioProbeRead)
+async def qdrant_probe_related_tasks(
+    payload: QdrantRelatedTasksProbePayload,
+    _: AdminUser,
+    db: DBSession,
+) -> QdrantScenarioProbeRead:
+    return await AdminQdrantService.probe_related_tasks(payload, db)
+
+
+@router.post("/qdrant/scenarios/project-questions", response_model=QdrantScenarioProbeRead)
+async def qdrant_probe_project_questions(
+    payload: QdrantProjectQuestionsProbePayload,
+    _: AdminUser,
+    db: DBSession,
+) -> QdrantScenarioProbeRead:
+    return await AdminQdrantService.probe_project_questions(payload, db)
+
+
+@router.post("/qdrant/scenarios/duplicate-proposal", response_model=QdrantScenarioProbeRead)
+async def qdrant_probe_duplicate_proposal(
+    payload: QdrantDuplicateProposalProbePayload,
+    _: AdminUser,
+    db: DBSession,
+) -> QdrantScenarioProbeRead:
+    return await AdminQdrantService.probe_duplicate_proposal(payload, db)
+
+
+@router.post("/qdrant/tasks/{task_id}/resync", response_model=QdrantTaskResyncRead)
+async def qdrant_resync_task(
+    task_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> QdrantTaskResyncRead:
+    return await AdminQdrantService.resync_task(task_id, current_user, db)
 
 
 @router.get("/monitoring/llm/requests", response_model=LLMRequestLogPageRead)

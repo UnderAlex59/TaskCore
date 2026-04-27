@@ -5,8 +5,8 @@ import uuid
 from functools import lru_cache
 from typing import Any, Literal
 
-from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
@@ -32,6 +32,18 @@ _POINT_ID_NAMESPACE = uuid.UUID("a1fc4b4f-8c2d-4dcb-8a77-0f7a52465b62")
 
 
 class QdrantService:
+    @staticmethod
+    def get_collection_names() -> tuple[str, str, str]:
+        return (
+            PROJECT_QUESTIONS_COLLECTION,
+            TASK_KNOWLEDGE_COLLECTION,
+            TASK_PROPOSALS_COLLECTION,
+        )
+
+    @staticmethod
+    def get_duplicate_proposal_threshold() -> float:
+        return _DUPLICATE_PROPOSAL_SCORE_THRESHOLD
+
     @staticmethod
     def _normalize_point_id(collection_name: str, raw_id: object) -> int | str:
         if isinstance(raw_id, bool):
@@ -155,6 +167,29 @@ class QdrantService:
         return len(embeddings.embed_query("dimension probe"))
 
     @staticmethod
+    def get_embedding_configuration() -> dict[str, object | None]:
+        settings = get_settings()
+        provider = settings.EMBEDDING_PROVIDER.casefold() if settings.EMBEDDING_PROVIDER else None
+        model: str | None
+        if provider == "ollama":
+            model = settings.OLLAMA_EMBEDDING_MODEL
+        elif provider == "openai":
+            model = settings.EMBEDDING_MODEL
+        else:
+            model = None
+
+        vector_size = settings.EMBEDDING_DIMENSION
+        if vector_size is None and model:
+            vector_size = _VECTOR_SIZE_BY_MODEL.get(model)
+
+        return {
+            "provider": provider,
+            "model": model,
+            "vector_size": vector_size,
+            "qdrant_url": settings.QDRANT_URL,
+        }
+
+    @staticmethod
     def _extract_vector_size(collection_info: models.CollectionInfo) -> int | None:
         vectors = collection_info.config.params.vectors
         if isinstance(vectors, models.VectorParams):
@@ -206,6 +241,37 @@ class QdrantService:
     @staticmethod
     def _filter_selector(filter_: models.Filter) -> models.FilterSelector:
         return models.FilterSelector(filter=filter_)
+
+    @staticmethod
+    def count_points(
+        collection_name: str,
+        *,
+        filter_: models.Filter | None = None,
+    ) -> int:
+        result = QdrantService._get_client().count(
+            collection_name=collection_name,
+            count_filter=filter_,
+        )
+        return int(result.count)
+
+    @staticmethod
+    def get_sample_payload_keys(
+        collection_name: str,
+        *,
+        filter_: models.Filter | None = None,
+    ) -> list[str]:
+        points, _ = QdrantService._get_client().scroll(
+            collection_name=collection_name,
+            scroll_filter=filter_,
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not points:
+            return []
+
+        payload = points[0].payload or {}
+        return sorted(str(key) for key in payload)
 
     @staticmethod
     async def ensure_collections() -> bool:
@@ -581,6 +647,48 @@ class QdrantService:
         except Exception:
             logger.exception("Failed to search duplicate proposal in project %s", project_id)
             return None
+
+    @staticmethod
+    async def probe_duplicate_proposals(
+        *,
+        project_id: str,
+        proposal_text: str,
+        limit: int = 3,
+    ) -> list[dict[str, object]]:
+        try:
+            if not await QdrantService.ensure_collections():
+                return []
+
+            store = QdrantService._get_store(TASK_PROPOSALS_COLLECTION)
+            hits = await store.asimilarity_search_with_score(
+                proposal_text,
+                k=limit,
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="project_id",
+                            match=models.MatchValue(value=project_id),
+                        ),
+                        models.FieldCondition(
+                            key="status",
+                            match=models.MatchAny(any=["new", "accepted"]),
+                        ),
+                    ]
+                ),
+            )
+            return [
+                {
+                    "proposal_id": document.metadata.get("proposal_id"),
+                    "task_id": document.metadata.get("task_id"),
+                    "status": document.metadata.get("status"),
+                    "score": round(float(score), 4),
+                    "proposal_text": document.page_content,
+                }
+                for document, score in hits
+            ]
+        except Exception:
+            logger.exception("Failed to probe duplicate proposals in project %s", project_id)
+            return []
 
     @staticmethod
     async def upsert_proposal(

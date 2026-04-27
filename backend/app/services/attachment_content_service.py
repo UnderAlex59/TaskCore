@@ -134,6 +134,7 @@ class AttachmentContentService:
         attachments: list[TaskAttachment],
         *,
         actor_user_id: str | None,
+        allow_vision: bool = True,
     ) -> list[dict[str, Any]]:
         payloads: list[dict[str, Any]] = []
         for attachment in attachments:
@@ -142,11 +143,15 @@ class AttachmentContentService:
                 path,
                 attachment.content_type,
             )
-            alt_text = await AttachmentContentService.ensure_image_alt_text(
-                db,
-                task,
-                attachment,
-                actor_user_id=actor_user_id,
+            alt_text = (
+                await AttachmentContentService.ensure_image_alt_text(
+                    db,
+                    task,
+                    attachment,
+                    actor_user_id=actor_user_id,
+                )
+                if allow_vision
+                else AttachmentContentService._meaningful_alt_text(attachment.alt_text)
             )
             payloads.append(
                 {

@@ -279,6 +279,110 @@ export interface ValidationQuestionListParams {
   verdict?: ValidationResult["verdict"];
 }
 
+export type QdrantScenario = "related_tasks" | "project_questions" | "duplicate_proposal";
+export type QdrantHeuristicStatus = "ok" | "warning";
+export type QdrantMatchBand =
+  | "above_threshold"
+  | "near_threshold"
+  | "below_threshold";
+
+export interface QdrantCollectionDiagnosticRead {
+  collection_name: string;
+  exists: boolean;
+  status: string | null;
+  points_count: number | null;
+  vectors_count: number | null;
+  indexed_vectors_count: number | null;
+  segments_count: number | null;
+  vector_size: number | null;
+  distance: string | null;
+  metadata: Record<string, string>;
+  sample_payload_keys: string[];
+  provider_matches: boolean | null;
+  model_matches: boolean | null;
+  vector_size_matches: boolean | null;
+  metadata_matches_active_embeddings: boolean | null;
+  warnings: string[];
+  error: string | null;
+}
+
+export interface QdrantOverviewRead {
+  connected: boolean;
+  connection_error: string | null;
+  qdrant_url: string;
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  expected_vector_size: number | null;
+  generated_at: string;
+  collections: QdrantCollectionDiagnosticRead[];
+}
+
+export interface QdrantScenarioHeuristicRead {
+  code: string;
+  status: QdrantHeuristicStatus;
+  message: string;
+}
+
+export interface QdrantScenarioResultRead {
+  id: string;
+  task_id: string | null;
+  task_title: string | null;
+  task_status: string | null;
+  score: number | null;
+  snippet: string;
+  metadata: Record<string, unknown> | null;
+  match_band: QdrantMatchBand | null;
+}
+
+export interface QdrantScenarioProbeRead {
+  scenario: QdrantScenario;
+  project_id: string;
+  task_id: string | null;
+  query_text: string;
+  heuristic_status: QdrantHeuristicStatus;
+  heuristics: QdrantScenarioHeuristicRead[];
+  results: QdrantScenarioResultRead[];
+  raw_threshold: number | null;
+}
+
+export interface QdrantCoverageTaskRead {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  indexed_at: string | null;
+  updated_at: string;
+  embeddings_stale: boolean;
+  requires_revalidation: boolean;
+  validation_questions_total: number;
+  knowledge_points_count: number;
+  question_points_count: number;
+}
+
+export interface QdrantProjectCoverageRead {
+  project_id: string;
+  project_name: string;
+  generated_at: string;
+  summary: {
+    tasks_total: number;
+    indexed_tasks_total: number;
+    stale_tasks_total: number;
+    tasks_with_knowledge_total: number;
+    tasks_with_questions_total: number;
+  };
+  items: QdrantCoverageTaskRead[];
+}
+
+export interface QdrantTaskResyncRead {
+  task_id: string;
+  project_id: string;
+  indexed_at: string | null;
+  embeddings_stale: boolean;
+  knowledge_points_count: number;
+  question_points_count: number;
+  chunk_ids: string[];
+  warnings: string[];
+}
+
 export const adminApi = {
   listProviders: async () =>
     (await apiClient.get<ProviderConfigRead[]>("/admin/llm/providers")).data,
@@ -437,4 +541,56 @@ export const adminApi = {
   deleteTaskTag: async (tagId: string) => {
     await apiClient.delete(`/admin/task-tags/${tagId}`);
   },
+  getQdrantOverview: async () =>
+    (await apiClient.get<QdrantOverviewRead>("/admin/qdrant/overview")).data,
+  getQdrantProjectCoverage: async (projectId: string, limit = 20) =>
+    (
+      await apiClient.get<QdrantProjectCoverageRead>(
+        `/admin/qdrant/projects/${projectId}/coverage`,
+        { params: { limit } },
+      )
+    ).data,
+  probeQdrantRelatedTasks: async (payload: {
+    project_id: string;
+    task_id?: string;
+    query_text?: string;
+    exclude_task_id?: string;
+    limit?: number;
+  }) =>
+    (
+      await apiClient.post<QdrantScenarioProbeRead>(
+        "/admin/qdrant/scenarios/related-tasks",
+        payload,
+      )
+    ).data,
+  probeQdrantProjectQuestions: async (payload: {
+    project_id: string;
+    task_id?: string;
+    query_text?: string;
+    tags?: string[];
+    limit?: number;
+  }) =>
+    (
+      await apiClient.post<QdrantScenarioProbeRead>(
+        "/admin/qdrant/scenarios/project-questions",
+        payload,
+      )
+    ).data,
+  probeQdrantDuplicateProposal: async (payload: {
+    project_id: string;
+    proposal_text: string;
+    task_id?: string;
+  }) =>
+    (
+      await apiClient.post<QdrantScenarioProbeRead>(
+        "/admin/qdrant/scenarios/duplicate-proposal",
+        payload,
+      )
+    ).data,
+  resyncQdrantTask: async (taskId: string) =>
+    (
+      await apiClient.post<QdrantTaskResyncRead>(
+        `/admin/qdrant/tasks/${taskId}/resync`,
+      )
+    ).data,
 };

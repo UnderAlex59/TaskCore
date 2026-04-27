@@ -2,11 +2,12 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const adminNavItems = [
   { href: "/admin/monitoring", label: "Мониторинг" },
+  { href: "/admin/qdrant", label: "Qdrant и RAG" },
   { href: "/admin/llm-requests", label: "LLM-запросы" },
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },
   { href: "/admin/providers", label: "Модельные профили" },
-  { href: "/admin/vision-test", label: "Тест Vision" },
+  { href: "/admin/vision-test", label: "Vision-тест" },
   { href: "/admin/agent-prompts", label: "Промпты агентов" },
   { href: "/admin/users", label: "Пользователи" },
 ];
@@ -20,13 +21,10 @@ export default function AdminLayout() {
           Администрирование платформы
         </h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-[#44546f]">
-          Мониторинг, модельные профили, правила маршрутизации и справочники
-          платформы в одном рабочем пространстве.
+          Мониторинг, диагностика индексов, модельные профили и служебные
+          справочники платформы в одном рабочем пространстве.
         </p>
-        <nav
-          aria-label="Администрирование"
-          className="mt-6 flex flex-wrap gap-2"
-        >
+        <nav aria-label="Администрирование" className="mt-6 flex flex-wrap gap-2">
           {adminNavItems.map((item) => (
             <NavLink
               key={item.href}
