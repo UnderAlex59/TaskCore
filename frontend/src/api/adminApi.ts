@@ -11,6 +11,9 @@ export type ProviderKind =
 export type MonitoringRange = "24h" | "7d" | "30d" | "90d";
 export type PromptLogMode = "disabled" | "metadata_only" | "full";
 export type LLMRequestStatus = "success" | "error";
+export type VisionSystemPromptMode = "system_role" | "inline_user";
+export type VisionMessageOrder = "text_first" | "image_first";
+export type VisionDetail = "default" | "auto" | "low" | "high";
 
 export interface ProviderConfigRead {
   id: string;
@@ -22,6 +25,10 @@ export interface ProviderConfigRead {
   enabled: boolean;
   input_cost_per_1k_tokens: number | string | null;
   output_cost_per_1k_tokens: number | string | null;
+  vision_enabled: boolean;
+  vision_system_prompt_mode: VisionSystemPromptMode;
+  vision_message_order: VisionMessageOrder;
+  vision_detail: VisionDetail;
   secret_configured: boolean;
   masked_secret: string | null;
   is_default: boolean;
@@ -39,6 +46,10 @@ export interface ProviderConfigPayload {
   enabled: boolean;
   input_cost_per_1k_tokens: number | null;
   output_cost_per_1k_tokens: number | null;
+  vision_enabled: boolean;
+  vision_system_prompt_mode: VisionSystemPromptMode;
+  vision_message_order: VisionMessageOrder;
+  vision_detail: VisionDetail;
   secret?: string;
 }
 

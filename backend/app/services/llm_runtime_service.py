@@ -300,7 +300,17 @@ class LLMRuntimeService:
             resolved = await cls.resolve_provider(db, agent_key=agent_key)
         except Exception as exc:  # noqa: BLE001
             return cls._build_unavailable_result(error_message=str(exc))
+        if not resolved.config.vision_enabled:
+            return cls._build_unavailable_result(
+                provider_kind=resolved.config.provider_kind,
+                model=resolved.config.model,
+                error_message="Для выбранного профиля поддержка Vision отключена в настройках.",
+            )
         data_url = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        system_prompt = (
+            "Ты преобразуешь изображение из требований в текст, "
+            "пригодный для семантического поиска."
+        )
         return await cls._execute_messages(
             db,
             config=resolved.config,
@@ -310,20 +320,14 @@ class LLMRuntimeService:
             project_id=project_id,
             agent_key=agent_key,
             request_kind="vision_alt_text",
-            messages=[
-                SystemMessage(
-                    content=(
-                        "РўС‹ РїСЂРµРѕР±СЂР°Р·СѓРµС€СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ РёР· С‚СЂРµР±РѕРІР°РЅРёР№ РІ С‚РµРєСЃС‚, "
-                        "РїСЂРёРіРѕРґРЅС‹Р№ РґР»СЏ СЃРµРјР°РЅС‚РёС‡РµСЃРєРѕРіРѕ РїРѕРёСЃРєР°."
-                    )
-                ),
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ]
-                ),
-            ],
+            messages=cls._build_vision_messages(
+                data_url=data_url,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                vision_system_prompt_mode=resolved.config.vision_system_prompt_mode,
+                vision_message_order=resolved.config.vision_message_order,
+                vision_detail=resolved.config.vision_detail,
+            ),
         )
 
     @classmethod
@@ -454,14 +458,15 @@ class LLMRuntimeService:
     ) -> LLMInvocationResult:
         started = perf_counter()
         prompt_log_mode = await cls._get_prompt_log_mode(db)
+        normalized_messages = cls._normalize_messages_for_model(profile, messages)
         request_messages = (
-            cls._serialize_messages(messages)
+            cls._serialize_messages(normalized_messages)
             if prompt_log_mode == PROMPT_LOG_MODE_FULL
             else None
         )
         try:
             model = build_chat_model(profile)
-            response = await model.ainvoke(messages)
+            response = await model.ainvoke(normalized_messages)
             latency_ms = int((perf_counter() - started) * 1000)
             prompt_tokens, completion_tokens, total_tokens = cls._extract_usage(response)
             estimated_cost = cls._estimate_cost(
@@ -535,6 +540,100 @@ class LLMRuntimeService:
                 estimated_cost_usd=None,
                 error_message=str(exc),
             )
+
+    @classmethod
+    def _normalize_messages_for_model(
+        cls,
+        profile: ChatAgentLLMProfile,
+        messages: list[Any],
+    ) -> list[Any]:
+        if "gemma" not in profile.model.casefold():
+            return messages
+
+        pending_system: list[str] = []
+        normalized: list[Any] = []
+        for message in messages:
+            if cls._message_role(message) == "system":
+                content = cls._stringify_content(getattr(message, "content", ""))
+                if content.strip():
+                    pending_system.append(content.strip())
+                continue
+
+            if pending_system and cls._message_role(message) == "human":
+                normalized.append(
+                    cls._merge_system_prompt_into_human_message(
+                        message,
+                        "\n\n".join(pending_system),
+                    )
+                )
+                pending_system.clear()
+                continue
+
+            if pending_system:
+                normalized.append(HumanMessage(content="\n\n".join(pending_system)))
+                pending_system.clear()
+            normalized.append(message)
+
+        if pending_system:
+            normalized.append(HumanMessage(content="\n\n".join(pending_system)))
+        return normalized
+
+    @staticmethod
+    def _build_vision_messages(
+        *,
+        data_url: str,
+        prompt: str,
+        system_prompt: str,
+        vision_system_prompt_mode: str,
+        vision_message_order: str,
+        vision_detail: str,
+    ) -> list[Any]:
+        image_url: dict[str, Any] = {"url": data_url}
+        if vision_detail != "default":
+            image_url["detail"] = vision_detail
+
+        image_part = {"type": "image_url", "image_url": image_url}
+        text_value = prompt.strip()
+        if vision_system_prompt_mode == "inline_user":
+            text_value = f"{system_prompt}\n\n{text_value}".strip()
+        text_part = {"type": "text", "text": text_value}
+
+        content_parts = (
+            [image_part, text_part]
+            if vision_message_order == "image_first"
+            else [text_part, image_part]
+        )
+        messages: list[Any] = []
+        if vision_system_prompt_mode == "system_role":
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=content_parts))
+        return messages
+
+    @staticmethod
+    def _merge_system_prompt_into_human_message(message: Any, system_prompt: str) -> HumanMessage:
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            merged = f"{system_prompt}\n\n{content}".strip()
+            return HumanMessage(content=merged)
+
+        if isinstance(content, list):
+            parts = list(content)
+            for index, part in enumerate(parts):
+                if (
+                    isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ):
+                    parts[index] = {
+                        **part,
+                        "text": f"{system_prompt}\n\n{part['text']}".strip(),
+                    }
+                    return HumanMessage(content=parts)
+
+            parts.insert(0, {"type": "text", "text": system_prompt})
+            return HumanMessage(content=parts)
+
+        return HumanMessage(content=system_prompt)
 
     @classmethod
     def _serialize_messages(cls, messages: list[Any]) -> list[dict[str, Any]]:

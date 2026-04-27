@@ -7,6 +7,9 @@ import {
   type ProviderConfigPayload,
   type ProviderConfigRead,
   type ProviderKind,
+  type VisionDetail,
+  type VisionMessageOrder,
+  type VisionSystemPromptMode,
 } from "@/api/adminApi";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
@@ -22,6 +25,10 @@ type ProviderFormState = {
   provider_kind: ProviderKind;
   secret: string;
   temperature: string;
+  vision_detail: VisionDetail;
+  vision_enabled: boolean;
+  vision_message_order: VisionMessageOrder;
+  vision_system_prompt_mode: VisionSystemPromptMode;
 };
 
 type OverrideDraft = {
@@ -55,6 +62,41 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderKind, string>> = {
   gigachat: "https://gigachat.devices.sberbank.ru/api/v1",
 };
 
+const VISION_SYSTEM_PROMPT_OPTIONS: Array<{
+  description: string;
+  value: VisionSystemPromptMode;
+}> = [
+  {
+    value: "system_role",
+    description: "Отправлять системную инструкцию отдельным system/developer сообщением",
+  },
+  {
+    value: "inline_user",
+    description: "Встраивать системную инструкцию в первый текстовый фрагмент user-сообщения",
+  },
+];
+
+const VISION_MESSAGE_ORDER_OPTIONS: Array<{
+  description: string;
+  value: VisionMessageOrder;
+}> = [
+  {
+    value: "text_first",
+    description: "Сначала текстовая инструкция, затем изображение",
+  },
+  {
+    value: "image_first",
+    description: "Сначала изображение, затем текстовая инструкция",
+  },
+];
+
+const VISION_DETAIL_OPTIONS: Array<{ description: string; value: VisionDetail }> = [
+  { value: "default", description: "Не передавать detail, оставить поведение провайдера по умолчанию" },
+  { value: "auto", description: "Провайдер сам выбирает уровень детализации" },
+  { value: "low", description: "Быстрый и дешёвый режим для простых изображений" },
+  { value: "high", description: "Максимально подробный режим для OCR и сложных схем" },
+];
+
 const EMPTY_FORM: ProviderFormState = {
   name: "",
   provider_kind: "openai",
@@ -65,6 +107,10 @@ const EMPTY_FORM: ProviderFormState = {
   input_cost_per_1k_tokens: "",
   output_cost_per_1k_tokens: "",
   secret: "",
+  vision_enabled: true,
+  vision_system_prompt_mode: "system_role",
+  vision_message_order: "text_first",
+  vision_detail: "default",
 };
 
 function toNullableNumber(value: string) {
@@ -84,6 +130,10 @@ function toPayload(form: ProviderFormState): ProviderConfigPayload {
     enabled: form.enabled,
     input_cost_per_1k_tokens: toNullableNumber(form.input_cost_per_1k_tokens),
     output_cost_per_1k_tokens: toNullableNumber(form.output_cost_per_1k_tokens),
+    vision_enabled: form.vision_enabled,
+    vision_system_prompt_mode: form.vision_system_prompt_mode,
+    vision_message_order: form.vision_message_order,
+    vision_detail: form.vision_detail,
     ...(form.secret.trim() ? { secret: form.secret.trim() } : {}),
   };
 }
@@ -103,6 +153,10 @@ function toFormState(provider: ProviderConfigRead): ProviderFormState {
       ? String(provider.output_cost_per_1k_tokens)
       : "",
     secret: "",
+    vision_enabled: provider.vision_enabled,
+    vision_system_prompt_mode: provider.vision_system_prompt_mode,
+    vision_message_order: provider.vision_message_order,
+    vision_detail: provider.vision_detail,
   };
 }
 
@@ -507,6 +561,129 @@ export default function ProviderSettingsPage() {
             Включить этот профиль сразу после сохранения
           </label>
 
+          <div className="rounded-[24px] border border-black/10 bg-white/60 p-5">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-ember">
+                Vision
+              </p>
+              <h4 className="mt-2 text-xl font-extrabold text-ink">
+                Расширенные настройки multimodal-вызовов
+              </h4>
+              <p className="mt-2 text-sm leading-7 text-ink/65">
+                Эти параметры используются для OCR, alt-text и остальных вызовов
+                с изображениями. Здесь можно адаптировать профиль под требования
+                конкретной vision-модели без правок runtime.
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-[#f8fafc] px-4 py-3 text-sm text-ink">
+                <input
+                  checked={form.vision_enabled}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      vision_enabled: event.target.checked,
+                    }))
+                  }
+                  type="checkbox"
+                />
+                Разрешить использовать профиль для vision- и OCR-сценариев
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-ink/70">
+                    Системная инструкция
+                  </span>
+                  <select
+                    className="ui-field"
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        vision_system_prompt_mode:
+                          event.target.value as VisionSystemPromptMode,
+                      }))
+                    }
+                    value={form.vision_system_prompt_mode}
+                  >
+                    {VISION_SYSTEM_PROMPT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-2 block text-xs leading-5 text-ink/55">
+                    {
+                      VISION_SYSTEM_PROMPT_OPTIONS.find(
+                        (option) => option.value === form.vision_system_prompt_mode,
+                      )?.description
+                    }
+                  </span>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-ink/70">
+                    Порядок частей
+                  </span>
+                  <select
+                    className="ui-field"
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        vision_message_order:
+                          event.target.value as VisionMessageOrder,
+                      }))
+                    }
+                    value={form.vision_message_order}
+                  >
+                    {VISION_MESSAGE_ORDER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-2 block text-xs leading-5 text-ink/55">
+                    {
+                      VISION_MESSAGE_ORDER_OPTIONS.find(
+                        (option) => option.value === form.vision_message_order,
+                      )?.description
+                    }
+                  </span>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-ink/70">
+                    Detail
+                  </span>
+                  <select
+                    className="ui-field"
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        vision_detail: event.target.value as VisionDetail,
+                      }))
+                    }
+                    value={form.vision_detail}
+                  >
+                    {VISION_DETAIL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-2 block text-xs leading-5 text-ink/55">
+                    {
+                      VISION_DETAIL_OPTIONS.find(
+                        (option) => option.value === form.vision_detail,
+                      )?.description
+                    }
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-3">
             <button className="ui-button-primary" disabled={saving} type="submit">
               {saving
@@ -691,6 +868,15 @@ export default function ProviderSettingsPage() {
                     </dd>
                   </div>
                 </dl>
+                <div className="rounded-[20px] border border-black/10 bg-white/60 px-4 py-4 text-sm text-ink/70">
+                  <p className="font-semibold text-ink">Vision-профиль</p>
+                  <p className="mt-2">
+                    {provider.vision_enabled ? "Включен" : "Отключен"} / system:{" "}
+                    {provider.vision_system_prompt_mode} / order:{" "}
+                    {provider.vision_message_order} / detail:{" "}
+                    {provider.vision_detail}
+                  </p>
+                </div>
                 {testMessages[provider.id] ? (
                   <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/75">
                     {testMessages[provider.id]}

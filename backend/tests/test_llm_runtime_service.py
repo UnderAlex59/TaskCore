@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.agents.chat_agents.llm import ChatAgentLLMProfile
 from app.services.llm_runtime_service import LLMRuntimeService
 
 
@@ -95,3 +97,80 @@ async def test_invoke_chat_returns_error_result_when_provider_resolution_fails(
 
     assert result.ok is False
     assert result.error_message == "provider secret is invalid"
+
+
+def test_normalize_messages_for_gemma_moves_system_prompt_into_user_text() -> None:
+    profile = ChatAgentLLMProfile(provider="openai", model="models/gemma-3-12b-it")
+    normalized = LLMRuntimeService._normalize_messages_for_model(
+        profile,
+        [
+            SystemMessage(content="Извлеки текст без пояснений."),
+            HumanMessage(content="Что на картинке?"),
+        ],
+    )
+
+    assert len(normalized) == 1
+    assert isinstance(normalized[0], HumanMessage)
+    assert normalized[0].content == "Извлеки текст без пояснений.\n\nЧто на картинке?"
+
+
+def test_normalize_messages_for_gemma_moves_system_prompt_into_multimodal_user_message() -> None:
+    profile = ChatAgentLLMProfile(provider="openai", model="google/gemma-3-12b-it")
+    normalized = LLMRuntimeService._normalize_messages_for_model(
+        profile,
+        [
+            SystemMessage(content="Извлеки текст строго по порядку."),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "Распознай скан."},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+                ]
+            ),
+        ],
+    )
+
+    assert len(normalized) == 1
+    assert isinstance(normalized[0], HumanMessage)
+    assert normalized[0].content == [
+        {"type": "text", "text": "Извлеки текст строго по порядку.\n\nРаспознай скан."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]
+
+
+def test_normalize_messages_for_non_gemma_keeps_system_message() -> None:
+    profile = ChatAgentLLMProfile(provider="openai", model="gpt-4o")
+    original = [
+        SystemMessage(content="System prompt"),
+        HumanMessage(content="User prompt"),
+    ]
+
+    normalized = LLMRuntimeService._normalize_messages_for_model(profile, original)
+
+    assert normalized == original
+
+
+def test_build_vision_messages_can_inline_system_prompt_and_put_image_first() -> None:
+    messages = LLMRuntimeService._build_vision_messages(
+        data_url="data:image/png;base64,AAA",
+        prompt="Извлеки текст",
+        system_prompt="Не добавляй пояснения.",
+        vision_system_prompt_mode="inline_user",
+        vision_message_order="image_first",
+        vision_detail="high",
+    )
+
+    assert len(messages) == 1
+    assert isinstance(messages[0], HumanMessage)
+    assert messages[0].content == [
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": "data:image/png;base64,AAA",
+                "detail": "high",
+            },
+        },
+        {
+            "type": "text",
+            "text": "Не добавляй пояснения.\n\nИзвлеки текст",
+        },
+    ]

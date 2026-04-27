@@ -1,5 +1,5 @@
 {
-  "started_at": "2026-04-26T13:33:35+05:00",
+  "started_at": "2026-04-26T13:44:01+05:00",
   "api_base_url": "http://127.0.0.1:8080/api",
   "accounts": [
     {
@@ -151,8 +151,8 @@
           "ok": true,
           "provider_kind": "openrouter",
           "model": "minimax/minimax-m2.5:free",
-          "latency_ms": 7414,
-          "message": "РЎРѕРµРґРёРЅРµРЅРёРµ СЃ LLM-РїСЃРµРІРґРµСЃРµРјРѕРј СѓСЃРїРµС€РЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ. РЇ РіРѕС‚РѕРІ Рє СЃРѕС‚СЃСѓРґРЅРёС‡РµСЃС‚РІРёСЋ."
+          "latency_ms": 97360,
+          "message": "РЎРѕРµРґРёРЅРµРЅРёРµ СЃ LLM-РїСЃРµРІРґРµРЅРёРµРј СѓСЃРїРµС€РЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ. РЇ РіРѕС‚РѕРІ Рє СЃРѕС‚СЃСѓРґРЅРёС‡РµСЃС‚РІРёСЋ."
         }
       }
     ],
@@ -161,24 +161,240 @@
     ]
   },
   "project": {
-    "id": "ccb4f80b-e8cb-41d3-a1d7-0005a5d273ce",
+    "id": "2c64dafa-77bd-4e34-9137-8855897d51c9",
     "name": "Командная эмуляция магистерской 2026-04-26",
     "description": "Связный backlog корпоративной системы заявок и согласований для проверки валидации, RAG-контекста, чатов задач, change proposals и post-approval revalidation.",
-    "created_by": "9efaabce-f8e4-4399-903d-ac25caed28f8",
-    "created_at": "2026-04-26T08:33:55.715879Z",
-    "updated_at": "2026-04-26T08:33:55.715879Z",
+    "created_by": "40392544-e73f-4f90-8381-35b33c1fd355",
+    "created_at": "2026-04-26T08:44:21.673222Z",
+    "updated_at": "2026-04-26T08:44:21.673222Z",
     "validation_node_settings": {
       "core_rules": true,
       "custom_rules": true,
       "context_questions": true
     }
   },
-  "tasks": [],
+  "tasks": [
+    {
+      "index": 1,
+      "task_id": "b38a081b-d3f6-4880-b97c-88138ad75cdc",
+      "title": "Жизненный цикл заявки на закупку",
+      "tags": [
+        "workflow",
+        "validation",
+        "roles"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/01-task.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/01-task.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 7,
+      "qa_backlog_saved": [
+        "Что делать, если руководитель уже согласовал заявку, а после смены подразделения инициатора финансовый контролёр возвращает её на доработку?"
+      ],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": 2,
+      "task_id": "56ff55ca-19a6-4fa4-a119-3f9feded1d17",
+      "title": "Роли участников и ограничения переходов статусов",
+      "tags": [
+        "workflow",
+        "roles",
+        "validation"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/02-task.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/02-task.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 6,
+      "qa_backlog_saved": [
+        "Если временный заместитель подписал заявку в последний день делегирования, а основной руководитель вернулся через час, кто может отменить это решение?"
+      ],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": 3,
+      "task_id": "ed310ba2-1ec2-478d-be9f-e73ab4ee223e",
+      "title": "Динамическая форма заявки и обязательные поля",
+      "tags": [
+        "forms",
+        "workflow",
+        "validation"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/03-task.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/03-task.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": 4,
+      "task_id": "a2b510b8-34cf-4609-8d40-481480e069ee",
+      "title": "Вложения к заявке и правила допустимых файлов",
+      "tags": [
+        "attachments",
+        "validation",
+        "workflow"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/04-task.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/04-task.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 5,
+      "qa_backlog_saved": [
+        "Что делать со сканированным PDF без OCR, если по регламенту из него нельзя автоматически извлечь текст для последующей проверки?"
+      ],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": [
+        "04-attachment-policy.txt"
+      ]
+    },
+    {
+      "index": 5,
+      "task_id": "aa38bae2-e7d1-445c-856d-cac83b91c2be",
+      "title": "Уведомления о смене статуса и эскалациях",
+      "tags": [
+        "notifications",
+        "validation",
+        "workflow"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/05-task.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/05-task.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": 6,
+      "task_id": "3c4353e3-27ff-494a-a82b-8d69a79421a4",
+      "title": "Импорт заявителей из CSV",
+      "tags": [
+        "import",
+        "attachments",
+        "validation"
+      ],
+      "history_file": "simulations/team-flow-2026-04-26/history/06-csv.md",
+      "task_file": "simulations/team-flow-2026-04-26/tasks/06-csv.md",
+      "final_status": "ready_for_dev",
+      "messages_count": 6,
+      "qa_backlog_saved": [
+        "Что делать, если в CSV есть две строки без external_id, но с одинаковыми ФИО и разными подразделениями?"
+      ],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": [
+        "06-import-example.txt"
+      ]
+    },
+    {
+      "index": null,
+      "task_id": "3c4fdb74-c6d2-4119-b8b3-73c25261d2de",
+      "title": "Экспорт и архив согласованных заявок",
+      "tags": [
+        "security",
+        "integration",
+        "reports"
+      ],
+      "history_file": null,
+      "task_file": null,
+      "final_status": "needs_rework",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": null,
+      "task_id": "b5b26f77-3ee9-4414-95ac-fc865bb30c6d",
+      "title": "Дашборд SLA по просроченным заявкам",
+      "tags": [
+        "dashboard",
+        "reports",
+        "audit"
+      ],
+      "history_file": null,
+      "task_file": null,
+      "final_status": "needs_rework",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": null,
+      "task_id": "620106b6-3cee-4adc-9b63-e91372441432",
+      "title": "Аудит массовых изменений маршрута согласования",
+      "tags": [
+        "audit",
+        "integration",
+        "reports"
+      ],
+      "history_file": null,
+      "task_file": null,
+      "final_status": "needs_rework",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    },
+    {
+      "index": null,
+      "task_id": "e8c88e2e-66e0-413f-8866-8feee94973d2",
+      "title": "Синхронизация статусов с внешней CRM",
+      "tags": [
+        "integration",
+        "reports",
+        "audit"
+      ],
+      "history_file": null,
+      "task_file": null,
+      "final_status": "needs_rework",
+      "messages_count": 4,
+      "qa_backlog_saved": [],
+      "backlog_reuse": [],
+      "proposals": [],
+      "attachments": []
+    }
+  ],
   "issues": [
     {
-      "at": "2026-04-26T13:41:24+05:00",
+      "at": "2026-04-26T14:14:38+05:00",
       "type": "RuntimeError",
-      "message": "Не удалось довести задачу 0a2860b3-1915-4eff-bd24-4960dc1e2a50 до approved за 3 попытки."
+      "scenario_index": 7,
+      "scenario_title": "Синхронизация статусов с внешней CRM",
+      "message": "Не удалось довести задачу e8c88e2e-66e0-413f-8866-8feee94973d2 до approved за 3 попытки."
+    },
+    {
+      "at": "2026-04-26T14:23:54+05:00",
+      "type": "RuntimeError",
+      "scenario_index": 8,
+      "scenario_title": "Аудит массовых изменений маршрута согласования",
+      "message": "Не удалось довести задачу 620106b6-3cee-4adc-9b63-e91372441432 до approved за 3 попытки."
+    },
+    {
+      "at": "2026-04-26T14:33:47+05:00",
+      "type": "RuntimeError",
+      "scenario_index": 9,
+      "scenario_title": "Дашборд SLA по просроченным заявкам",
+      "message": "Не удалось довести задачу b5b26f77-3ee9-4414-95ac-fc865bb30c6d до approved за 3 попытки."
+    },
+    {
+      "at": "2026-04-26T14:46:09+05:00",
+      "type": "RuntimeError",
+      "scenario_index": 10,
+      "scenario_title": "Экспорт и архив согласованных заявок",
+      "message": "Не удалось довести задачу 3c4fdb74-c6d2-4119-b8b3-73c25261d2de до approved за 3 попытки."
     }
   ],
   "preflight": {
@@ -212,5 +428,6 @@
     "validation_questions_count": 0,
     "audit_events_count": 0,
     "task_tags_count": 0
-  }
+  },
+  "finished_at": "2026-04-26T14:46:09+05:00"
 }

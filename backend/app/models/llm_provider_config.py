@@ -25,6 +25,22 @@ class LLMProviderConfig(Base):
     masked_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_cost_per_1k_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     output_cost_per_1k_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    vision_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    vision_system_prompt_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="system_role",
+    )
+    vision_message_order: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="text_first",
+    )
+    vision_detail: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="default",
+    )
     created_by: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

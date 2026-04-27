@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProviderKind = Literal["openai", "ollama", "openrouter", "gigachat", "openai_compatible"]
 PromptLogMode = Literal["disabled", "metadata_only", "full"]
+VisionSystemPromptMode = Literal["system_role", "inline_user"]
+VisionMessageOrder = Literal["text_first", "image_first"]
+VisionDetail = Literal["default", "auto", "low", "high"]
 
 
 class ProviderConfigPayload(BaseModel):
@@ -21,6 +24,10 @@ class ProviderConfigPayload(BaseModel):
     input_cost_per_1k_tokens: Decimal | None = Field(default=None, ge=0)
     output_cost_per_1k_tokens: Decimal | None = Field(default=None, ge=0)
     secret: str | None = Field(default=None, min_length=1, max_length=4096)
+    vision_enabled: bool = True
+    vision_system_prompt_mode: VisionSystemPromptMode = "system_role"
+    vision_message_order: VisionMessageOrder = "text_first"
+    vision_detail: VisionDetail = "default"
 
 
 class ProviderConfigUpdate(BaseModel):
@@ -33,6 +40,10 @@ class ProviderConfigUpdate(BaseModel):
     input_cost_per_1k_tokens: Decimal | None = Field(default=None, ge=0)
     output_cost_per_1k_tokens: Decimal | None = Field(default=None, ge=0)
     secret: str | None = Field(default=None, min_length=1, max_length=4096)
+    vision_enabled: bool | None = None
+    vision_system_prompt_mode: VisionSystemPromptMode | None = None
+    vision_message_order: VisionMessageOrder | None = None
+    vision_detail: VisionDetail | None = None
 
 
 class ProviderConfigRead(BaseModel):
@@ -45,6 +56,10 @@ class ProviderConfigRead(BaseModel):
     enabled: bool
     input_cost_per_1k_tokens: Decimal | None
     output_cost_per_1k_tokens: Decimal | None
+    vision_enabled: bool
+    vision_system_prompt_mode: VisionSystemPromptMode
+    vision_message_order: VisionMessageOrder
+    vision_detail: VisionDetail
     secret_configured: bool
     masked_secret: str | None
     is_default: bool

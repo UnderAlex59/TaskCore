@@ -62,6 +62,10 @@ class AdminLLMService:
             masked_secret=masked_secret,
             input_cost_per_1k_tokens=payload.input_cost_per_1k_tokens,
             output_cost_per_1k_tokens=payload.output_cost_per_1k_tokens,
+            vision_enabled=payload.vision_enabled,
+            vision_system_prompt_mode=payload.vision_system_prompt_mode,
+            vision_message_order=payload.vision_message_order,
+            vision_detail=payload.vision_detail,
             created_by=actor.id,
             updated_by=actor.id,
         )
@@ -437,6 +441,10 @@ class AdminLLMService:
                 enabled=provider.enabled,
                 input_cost_per_1k_tokens=provider.input_cost_per_1k_tokens,
                 output_cost_per_1k_tokens=provider.output_cost_per_1k_tokens,
+                vision_enabled=provider.vision_enabled,
+                vision_system_prompt_mode=provider.vision_system_prompt_mode,  # type: ignore[arg-type]
+                vision_message_order=provider.vision_message_order,  # type: ignore[arg-type]
+                vision_detail=provider.vision_detail,  # type: ignore[arg-type]
                 secret_configured=provider.encrypted_secret is not None,
                 masked_secret=provider.masked_secret,
                 is_default=(
