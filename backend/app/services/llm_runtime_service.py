@@ -3,10 +3,12 @@
 import asyncio
 import base64
 import hashlib
+import ssl
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -130,6 +132,37 @@ class LLMRuntimeService:
         )
 
     @classmethod
+    def _get_gigachat_ssl_verify(cls) -> bool | ssl.SSLContext:
+        settings = get_settings()
+        if not settings.GIGACHAT_VERIFY_SSL:
+            return False
+        if not settings.GIGACHAT_CA_BUNDLE_FILE and not settings.GIGACHAT_CA_BUNDLE_PEM:
+            return True
+
+        context = ssl.create_default_context()
+        if settings.GIGACHAT_CA_BUNDLE_FILE:
+            ca_bundle_path = Path(settings.GIGACHAT_CA_BUNDLE_FILE).expanduser()
+            if not ca_bundle_path.is_file():
+                raise ValueError(
+                    f"Файл GIGACHAT_CA_BUNDLE_FILE не найден: {ca_bundle_path}"
+                )
+            context.load_verify_locations(cafile=str(ca_bundle_path))
+        if settings.GIGACHAT_CA_BUNDLE_PEM:
+            context.load_verify_locations(cadata=settings.GIGACHAT_CA_BUNDLE_PEM)
+        return context
+
+    @classmethod
+    def _build_gigachat_http_clients(
+        cls,
+        verify: bool | ssl.SSLContext,
+    ) -> tuple[httpx.Client, httpx.AsyncClient]:
+        timeout = httpx.Timeout(60.0, connect=20.0)
+        return (
+            httpx.Client(verify=verify, timeout=timeout),
+            httpx.AsyncClient(verify=verify, timeout=timeout),
+        )
+
+    @classmethod
     async def ensure_bootstrap(cls) -> None:
         async with cls._bootstrap_lock, AsyncSessionLocal() as db:
             runtime_settings = await db.get(LLMRuntimeSettings, 1)
@@ -198,12 +231,20 @@ class LLMRuntimeService:
     async def _build_profile(cls, config: LLMProviderConfig) -> ChatAgentLLMProfile:
         provider_kind = config.provider_kind
         api_key: str | None = None
+        http_client: httpx.Client | None = None
+        http_async_client: httpx.AsyncClient | None = None
         if provider_kind != "ollama":
             secret = cls.decrypt_secret(config.encrypted_secret)
             if provider_kind == "gigachat":
                 if not secret:
                     raise ValueError("Р”Р»СЏ GigaChat РЅРµ РЅР°СЃС‚СЂРѕРµРЅ РєР»СЋС‡ Р°РІС‚РѕСЂРёР·Р°С†РёРё")
-                api_key = await cls._get_gigachat_access_token(config.id, secret)
+                ssl_verify = cls._get_gigachat_ssl_verify()
+                api_key = await cls._get_gigachat_access_token(
+                    config.id,
+                    secret,
+                    verify=ssl_verify,
+                )
+                http_client, http_async_client = cls._build_gigachat_http_clients(ssl_verify)
             else:
                 api_key = secret
 
@@ -213,10 +254,18 @@ class LLMRuntimeService:
             temperature=float(config.temperature),
             api_key=api_key,
             base_url=config.base_url,
+            http_client=http_client,
+            http_async_client=http_async_client,
         )
 
     @classmethod
-    async def _get_gigachat_access_token(cls, cache_key: str, authorization_key: str) -> str:
+    async def _get_gigachat_access_token(
+        cls,
+        cache_key: str,
+        authorization_key: str,
+        *,
+        verify: bool | ssl.SSLContext | None = None,
+    ) -> str:
         now = datetime.now(timezone.utc)
         cached = cls._gigachat_token_cache.get(cache_key)
         if cached is not None and cached[1] > now + timedelta(minutes=2):
@@ -227,7 +276,8 @@ class LLMRuntimeService:
             if cached is not None and cached[1] > now + timedelta(minutes=2):
                 return cached[0]
 
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            ssl_verify = cls._get_gigachat_ssl_verify() if verify is None else verify
+            async with httpx.AsyncClient(timeout=20.0, verify=ssl_verify) as client:
                 response = await client.post(
                     GIGACHAT_TOKEN_URL,
                     headers={
@@ -443,6 +493,19 @@ class LLMRuntimeService:
         )
 
     @classmethod
+    async def _close_profile_clients(cls, profile: ChatAgentLLMProfile) -> None:
+        if isinstance(profile.http_async_client, httpx.AsyncClient):
+            try:
+                await profile.http_async_client.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+        if isinstance(profile.http_client, httpx.Client):
+            try:
+                profile.http_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    @classmethod
     async def _execute_messages(
         cls,
         db: AsyncSession,
@@ -540,6 +603,8 @@ class LLMRuntimeService:
                 estimated_cost_usd=None,
                 error_message=str(exc),
             )
+        finally:
+            await cls._close_profile_clients(profile)
 
     @classmethod
     def _normalize_messages_for_model(

@@ -78,6 +78,34 @@ def test_build_chat_model_supports_openai_compatible_endpoint() -> None:
     assert getattr(llm, "openai_api_base", None) == "http://127.0.0.1:1234/v1"
 
 
+def test_build_chat_model_forwards_custom_http_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs) -> None:
+            captured_kwargs.update(kwargs)
+
+    sync_client = object()
+    async_client = object()
+    monkeypatch.setattr("app.agents.chat_agents.llm.ChatOpenAI", FakeChatOpenAI)
+
+    llm = build_chat_model(
+        ChatAgentLLMProfile(
+            provider="gigachat",
+            model="GigaChat-Max",
+            api_key="gigachat-access-token",
+            base_url="https://gigachat.devices.sberbank.ru/api/v1",
+            temperature=0.0,
+            http_client=sync_client,
+            http_async_client=async_client,
+        )
+    )
+
+    assert isinstance(llm, FakeChatOpenAI)
+    assert captured_kwargs["http_client"] is sync_client
+    assert captured_kwargs["http_async_client"] is async_client
+
+
 @pytest.mark.asyncio
 async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
     llm_calls: list[str] = []

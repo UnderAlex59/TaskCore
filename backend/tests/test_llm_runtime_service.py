@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.chat_agents.llm import ChatAgentLLMProfile
+from app.core.config import get_settings
 from app.services.llm_runtime_service import LLMRuntimeService
 
 
@@ -53,6 +54,116 @@ async def test_gigachat_token_exchange_is_cached(monkeypatch: pytest.MonkeyPatch
     assert first == "gigachat-access-token"
     assert second == "gigachat-access-token"
     assert calls == 1
+
+
+def test_gigachat_ssl_verify_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIGACHAT_VERIFY_SSL", "false")
+    monkeypatch.delenv("GIGACHAT_CA_BUNDLE_FILE", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        assert LLMRuntimeService._get_gigachat_ssl_verify() is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_gigachat_ssl_verify_loads_custom_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_path = tmp_path / "russian-root.crt"
+    bundle_path.write_text("placeholder", encoding="utf-8")
+    loaded_paths: list[str] = []
+
+    class FakeSSLContext:
+        def load_verify_locations(self, cafile: str) -> None:
+            loaded_paths.append(cafile)
+
+    monkeypatch.setenv("GIGACHAT_VERIFY_SSL", "true")
+    monkeypatch.setenv("GIGACHAT_CA_BUNDLE_FILE", str(bundle_path))
+    monkeypatch.setattr("ssl.create_default_context", lambda: FakeSSLContext())
+    get_settings.cache_clear()
+
+    try:
+        context = LLMRuntimeService._get_gigachat_ssl_verify()
+    finally:
+        get_settings.cache_clear()
+
+    assert isinstance(context, FakeSSLContext)
+    assert loaded_paths == [str(bundle_path)]
+
+
+def test_gigachat_ssl_verify_loads_custom_ca_bundle_from_pem_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded_cadata: list[str] = []
+
+    class FakeSSLContext:
+        def load_verify_locations(self, cafile: str | None = None, cadata: str | None = None) -> None:
+            if cadata is not None:
+                loaded_cadata.append(cadata)
+
+    monkeypatch.setenv("GIGACHAT_VERIFY_SSL", "true")
+    monkeypatch.delenv("GIGACHAT_CA_BUNDLE_FILE", raising=False)
+    monkeypatch.setenv("GIGACHAT_CA_BUNDLE_PEM", "-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----")
+    monkeypatch.setattr("ssl.create_default_context", lambda: FakeSSLContext())
+    get_settings.cache_clear()
+
+    try:
+        context = LLMRuntimeService._get_gigachat_ssl_verify()
+    finally:
+        get_settings.cache_clear()
+
+    assert isinstance(context, FakeSSLContext)
+    assert loaded_cadata == ["-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----"]
+
+
+@pytest.mark.asyncio
+async def test_build_profile_creates_custom_clients_for_gigachat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_sync_kwargs: list[dict[str, object]] = []
+    captured_async_kwargs: list[dict[str, object]] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            captured_sync_kwargs.append(kwargs)
+
+        def close(self) -> None:
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs) -> None:
+            captured_async_kwargs.append(kwargs)
+
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_get_token(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return "gigachat-access-token"
+
+    monkeypatch.setattr(LLMRuntimeService, "decrypt_secret", lambda value: "encoded-auth-key")
+    monkeypatch.setattr(LLMRuntimeService, "_get_gigachat_ssl_verify", lambda: False)
+    monkeypatch.setattr(LLMRuntimeService, "_get_gigachat_access_token", fake_get_token)
+    monkeypatch.setattr("httpx.Client", FakeClient)
+    monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
+
+    profile = await LLMRuntimeService._build_profile(
+        SimpleNamespace(
+            id="provider-1",
+            provider_kind="gigachat",
+            encrypted_secret="encrypted",
+            model="GigaChat-Max",
+            temperature=0.2,
+            base_url="https://gigachat.devices.sberbank.ru/api/v1",
+        )
+    )
+
+    assert profile.api_key == "gigachat-access-token"
+    assert profile.http_client is not None
+    assert profile.http_async_client is not None
+    assert captured_sync_kwargs[0]["verify"] is False
+    assert captured_async_kwargs[0]["verify"] is False
 
 
 @pytest.mark.asyncio

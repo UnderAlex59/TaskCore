@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_ollama import ChatOllama
@@ -20,18 +20,25 @@ class ChatAgentLLMProfile:
     temperature: float = 0.2
     api_key: str | None = None
     base_url: str | None = None
+    http_client: Any | None = None
+    http_async_client: Any | None = None
 
 
 def build_chat_model(profile: ChatAgentLLMProfile) -> BaseChatModel:
     if profile.provider in {"openai", "openrouter", "gigachat", "openai_compatible"}:
         if not profile.api_key:
             raise ValueError("Для выбранного провайдера требуется API-ключ или токен доступа")
-        return ChatOpenAI(
-            model=profile.model,
-            api_key=SecretStr(profile.api_key),
-            base_url=profile.base_url,
-            temperature=profile.temperature,
-        )
+        kwargs: dict[str, Any] = {
+            "model": profile.model,
+            "api_key": SecretStr(profile.api_key),
+            "base_url": profile.base_url,
+            "temperature": profile.temperature,
+        }
+        if profile.http_client is not None:
+            kwargs["http_client"] = profile.http_client
+        if profile.http_async_client is not None:
+            kwargs["http_async_client"] = profile.http_async_client
+        return ChatOpenAI(**kwargs)
 
     return ChatOllama(
         model=profile.model,
