@@ -18,8 +18,10 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   needs_rework: "Нужна доработка",
   awaiting_approval: "Ожидает подтверждения",
   ready_for_dev: "Готово к разработке",
-  in_progress: "В работе",
-  done: "Готово",
+  in_progress: "Разработка",
+  ready_for_testing: "Готово к тестированию",
+  testing: "Тестирование",
+  done: "Задача выполнена",
 };
 
 const VERDICT_LABELS: Record<ValidationResult["verdict"], string> = {
@@ -81,9 +83,14 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   "rule.deleted": "Удалено правило",
   "rule.updated": "Правило обновлено",
   "task.approved": "Задача подтверждена и команда сформирована",
+  "task.completed": "Задача завершена после тестирования",
   "task.attachment_uploaded": "Загружено вложение",
   "task.created": "Создана задача",
+  "task.development_started": "Разработчик взял задачу в работу",
   "task.deleted": "Удалена задача",
+  "task.ready_for_testing": "Задача переведена в статус готово к тестированию",
+  "task.review_configured": "Настроено второе аналитическое ревью",
+  "task.testing_started": "Тестировщик начал проверку задачи",
   "task.updated": "Задача обновлена",
   "task.validated": "Задача проверена",
   "user.updated": "Профиль пользователя обновлен",

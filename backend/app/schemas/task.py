@@ -25,8 +25,9 @@ class TaskUpdate(BaseModel):
 
 
 class TaskApprove(BaseModel):
-    developer_id: str
-    tester_id: str
+    developer_id: str | None = None
+    tester_id: str | None = None
+    reviewer_analyst_id: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +42,25 @@ class TaskAttachmentRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TaskTagSuggestionRequest(BaseModel):
+    title: str = Field(min_length=3, max_length=500)
+    content: str = ""
+    current_tags: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TaskTagSuggestionItem(BaseModel):
+    tag: str
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(min_length=1, max_length=300)
+
+
+class TaskTagSuggestionResponse(BaseModel):
+    suggestions: list[TaskTagSuggestionItem] = Field(default_factory=list)
+    generated_at: datetime
 
 
 class ValidationIssue(BaseModel):
@@ -58,8 +78,10 @@ class TaskRead(BaseModel):
     status: TaskStatus
     created_by: str
     analyst_id: str
+    reviewer_analyst_id: str | None
     developer_id: str | None
     tester_id: str | None
+    reviewer_approved_at: datetime | None = None
     validation_result: dict | None
     attachments: list[TaskAttachmentRead] = Field(default_factory=list)
     indexed_at: datetime | None = None

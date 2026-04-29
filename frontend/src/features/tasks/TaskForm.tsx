@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { TaskTagOption } from "@/api/taskTagsApi";
-import type { TaskAttachmentRead, TaskRead, TaskUpdate } from "@/api/tasksApi";
+import type {
+  TaskAttachmentRead,
+  TaskRead,
+  TaskTagSuggestionResponse,
+  TaskUpdate,
+} from "@/api/tasksApi";
 import AttachmentUpload from "@/features/tasks/AttachmentUpload";
 import {
   buildTaskDocumentFromEditors,
@@ -18,13 +23,20 @@ interface Props {
   attachmentsUploading?: boolean;
   availableTags: TaskTagOption[];
   canCommitChanges?: boolean;
+  canSuggestTags?: boolean;
   committing?: boolean;
   disabled?: boolean;
   embeddingsStale?: boolean;
   loading?: boolean;
   onCommit?: () => Promise<void>;
+  onSuggestTags?: (payload: {
+    title: string;
+    content: string;
+    current_tags: string[];
+  }) => Promise<TaskTagSuggestionResponse>;
   onSubmit: (payload: TaskUpdate) => Promise<void>;
   onUploadAttachment?: (file: File) => Promise<void>;
+  suggestingTags?: boolean;
   task: TaskRead;
 }
 
@@ -63,14 +75,17 @@ export default function TaskForm({
   attachments = [],
   attachmentsUploading = false,
   availableTags,
+  canSuggestTags = false,
   canCommitChanges = false,
   committing = false,
   onSubmit,
   onCommit,
+  onSuggestTags,
   onUploadAttachment,
   disabled = false,
   embeddingsStale = false,
   loading = false,
+  suggestingTags = false,
 }: Props) {
   const initialSections = useMemo(
     () => parseTaskDocument(task.content),
@@ -87,12 +102,22 @@ export default function TaskForm({
     initialSections.changeHistory,
   );
   const [tags, setTags] = useState(task.tags);
+  const [tagSuggestions, setTagSuggestions] = useState<
+    TaskTagSuggestionResponse["suggestions"]
+  >([]);
+  const [tagSuggestionsGeneratedAt, setTagSuggestionsGeneratedAt] = useState<
+    string | null
+  >(null);
+  const [tagSuggestionsRequested, setTagSuggestionsRequested] = useState(false);
 
   useEffect(() => {
     setTitle(task.title);
     setDocumentBody(initialDocumentBody);
     setChangeHistory(initialSections.changeHistory);
     setTags(task.tags);
+    setTagSuggestions([]);
+    setTagSuggestionsGeneratedAt(null);
+    setTagSuggestionsRequested(false);
   }, [
     initialDocumentBody,
     initialSections.changeHistory,
@@ -100,35 +125,68 @@ export default function TaskForm({
     task.title,
   ]);
 
-  const hasUnsavedChanges =
-    title !== task.title ||
-    normalizeTaskEditorValue(documentBody) !==
-      normalizeTaskEditorValue(initialDocumentBody) ||
-    normalizeTaskEditorValue(changeHistory) !==
-      normalizeTaskEditorValue(initialSections.changeHistory) ||
-    !haveSameTags(tags, task.tags);
-  const isPostApprovalFlow = ["ready_for_dev", "in_progress", "done"].includes(
-    task.status,
-  );
-  const isAwaitingApproval = task.status === "awaiting_approval";
-  const saveDisabled = disabled || loading || !hasUnsavedChanges;
-  const commitDisabled =
-    !canCommitChanges || committing || hasUnsavedChanges || !embeddingsStale;
   const contentChanged =
     normalizeTaskEditorValue(documentBody) !==
       normalizeTaskEditorValue(initialDocumentBody) ||
     normalizeTaskEditorValue(changeHistory) !==
       normalizeTaskEditorValue(initialSections.changeHistory);
+  const currentTaskContent = contentChanged
+    ? buildTaskDocumentFromEditors(documentBody, changeHistory)
+    : task.content;
+  const hasUnsavedChanges =
+    title !== task.title ||
+    contentChanged ||
+    !haveSameTags(tags, task.tags);
+  const isPostApprovalFlow = [
+    "ready_for_dev",
+    "in_progress",
+    "ready_for_testing",
+    "testing",
+    "done",
+  ].includes(task.status);
+  const isAwaitingApproval = task.status === "awaiting_approval";
+  const saveDisabled = disabled || loading || !hasUnsavedChanges;
+  const commitDisabled =
+    !canCommitChanges || committing || hasUnsavedChanges || !embeddingsStale;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSubmit({
       title,
-      content: contentChanged
-        ? buildTaskDocumentFromEditors(documentBody, changeHistory)
-        : task.content,
+      content: currentTaskContent,
       tags,
     });
+  }
+
+  async function handleSuggestTags() {
+    if (!onSuggestTags) {
+      return;
+    }
+    try {
+      const result = await onSuggestTags({
+        title,
+        content: currentTaskContent,
+        current_tags: tags,
+      });
+      setTagSuggestions(result.suggestions);
+      setTagSuggestionsGeneratedAt(result.generated_at);
+      setTagSuggestionsRequested(true);
+    } catch {
+      setTagSuggestions([]);
+      setTagSuggestionsGeneratedAt(null);
+      setTagSuggestionsRequested(false);
+    }
+  }
+
+  function addSuggestedTag(tagName: string) {
+    if (tags.includes(tagName)) {
+      return;
+    }
+    setTags([...tags, tagName]);
+  }
+
+  function replaceWithSuggestedTags() {
+    setTags(tagSuggestions.map((item) => item.tag));
   }
 
   return (
@@ -328,6 +386,93 @@ export default function TaskForm({
                   value={tags}
                 />
               </section>
+
+              {canSuggestTags ? (
+                <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+                        LLM-подбор тегов
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-[#44546f]">
+                        Подбирает до 5 тегов из справочника текущего проекта по
+                        текущей версии задачи. Предлагаются только теги с
+                        ожидаемым совпадением не ниже 80%.
+                      </p>
+                    </div>
+                    <button
+                      className="ui-button-secondary whitespace-nowrap"
+                      disabled={disabled || suggestingTags || availableTags.length === 0}
+                      onClick={() => void handleSuggestTags()}
+                      type="button"
+                    >
+                      {suggestingTags ? "Подбираем..." : "Подобрать теги"}
+                    </button>
+                  </div>
+
+                  {tagSuggestions.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-[#172b4d]">
+                          Рекомендации
+                        </p>
+                        <button
+                          className="text-sm font-semibold text-[#0c66e4] disabled:text-[#97a0af]"
+                          disabled={disabled}
+                          onClick={replaceWithSuggestedTags}
+                          type="button"
+                        >
+                          Заменить выбранные
+                        </button>
+                      </div>
+                      <div className="space-y-3">
+                        {tagSuggestions.map((item) => {
+                          const alreadySelected = tags.includes(item.tag);
+                          return (
+                            <article
+                              key={item.tag}
+                              className="rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#172b4d]">
+                                      {item.tag}
+                                    </span>
+                                    <span className="text-xs font-medium text-[#5e6c84]">
+                                      {Math.round(item.confidence * 100)}%
+                                    </span>
+                                  </div>
+                                  <p className="mt-2 text-sm leading-6 text-[#44546f]">
+                                    {item.reason}
+                                  </p>
+                                </div>
+                                <button
+                                  className="ui-button-secondary whitespace-nowrap"
+                                  disabled={disabled || alreadySelected}
+                                  onClick={() => addSuggestedTag(item.tag)}
+                                  type="button"
+                                >
+                                  {alreadySelected ? "Уже выбран" : "Добавить"}
+                                </button>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                      {tagSuggestionsGeneratedAt ? (
+                        <p className="text-xs text-[#626f86]">
+                          Сформировано {formatDateTime(tagSuggestionsGeneratedAt)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : tagSuggestionsRequested ? (
+                    <p className="mt-4 text-sm leading-6 text-[#626f86]">
+                      Подходящих тегов с уверенностью 80% и выше не найдено.
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
 
               <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">

@@ -5,7 +5,15 @@ from fastapi import APIRouter, File, Query, Response, UploadFile, status
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.task import TaskStatus
-from app.schemas.task import TaskApprove, TaskAttachmentRead, TaskCreate, TaskRead, TaskUpdate
+from app.schemas.task import (
+    TaskApprove,
+    TaskAttachmentRead,
+    TaskCreate,
+    TaskRead,
+    TaskTagSuggestionRequest,
+    TaskTagSuggestionResponse,
+    TaskUpdate,
+)
 from app.services.task_service import TaskService
 
 settings = get_settings()
@@ -67,6 +75,17 @@ async def update_task(
     return await TaskService.update_task(project_id, task_id, payload, current_user, db)
 
 
+@router.post("/{task_id}/suggest-tags", response_model=TaskTagSuggestionResponse)
+async def suggest_task_tags(
+    project_id: str,
+    task_id: str,
+    payload: TaskTagSuggestionRequest,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskTagSuggestionResponse:
+    return await TaskService.suggest_task_tags(project_id, task_id, payload, current_user, db)
+
+
 @router.post("/{task_id}/commit", response_model=TaskRead)
 async def commit_task_changes(
     project_id: str,
@@ -86,6 +105,46 @@ async def approve_task(
     db: DBSession,
 ) -> TaskRead:
     return await TaskService.approve_task(task_id, payload, current_user, db)
+
+
+@router.post("/{task_id}/start-development", response_model=TaskRead)
+async def start_development(
+    project_id: str,
+    task_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.start_development(task_id, current_user, db)
+
+
+@router.post("/{task_id}/ready-for-testing", response_model=TaskRead)
+async def mark_ready_for_testing(
+    project_id: str,
+    task_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.mark_ready_for_testing(task_id, current_user, db)
+
+
+@router.post("/{task_id}/start-testing", response_model=TaskRead)
+async def start_testing(
+    project_id: str,
+    task_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.start_testing(task_id, current_user, db)
+
+
+@router.post("/{task_id}/complete", response_model=TaskRead)
+async def complete_task(
+    project_id: str,
+    task_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.complete_task(task_id, current_user, db)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

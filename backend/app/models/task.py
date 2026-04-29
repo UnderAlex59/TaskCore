@@ -18,6 +18,8 @@ class TaskStatus(str, enum.Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     READY_FOR_DEV = "ready_for_dev"
     IN_PROGRESS = "in_progress"
+    READY_FOR_TESTING = "ready_for_testing"
+    TESTING = "testing"
     DONE = "done"
 
 
@@ -44,6 +46,11 @@ class Task(Base):
         ForeignKey("users.id"),
         nullable=False,
     )
+    reviewer_analyst_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
     developer_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("users.id"),
@@ -54,6 +61,7 @@ class Task(Base):
         ForeignKey("users.id"),
         nullable=True,
     )
+    reviewer_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     validation_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

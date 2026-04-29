@@ -8,10 +8,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.custom_rule import CustomRule
+from app.models.project_task_tag import ProjectTaskTag
 from app.models.task import Task
 from app.models.task_tag import TaskTag
 from app.models.user import User
-from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagOptionRead, TaskTagUpdate
+from app.schemas.task_tag import (
+    AdminTaskTagRead,
+    ProjectTaskTagCreate,
+    TaskTagCreate,
+    TaskTagOptionRead,
+    TaskTagUpdate,
+)
 from app.services.audit_service import AuditService
 
 
@@ -25,8 +32,13 @@ class TaskTagService:
         return TaskTagService._normalize_display_name(name).casefold()
 
     @staticmethod
-    async def list_task_tags(db: AsyncSession) -> list[TaskTagOptionRead]:
-        stmt: Select[tuple[TaskTag]] = select(TaskTag).order_by(TaskTag.name.asc())
+    async def list_task_tags(project_id: str, db: AsyncSession) -> list[TaskTagOptionRead]:
+        stmt: Select[tuple[TaskTag]] = (
+            select(TaskTag)
+            .join(ProjectTaskTag, ProjectTaskTag.task_tag_id == TaskTag.id)
+            .where(ProjectTaskTag.project_id == project_id)
+            .order_by(TaskTag.name.asc())
+        )
         tags = list((await db.execute(stmt)).scalars().all())
         return [TaskTagOptionRead.model_validate(tag) for tag in tags]
 
@@ -69,6 +81,34 @@ class TaskTagService:
         ]
 
     @staticmethod
+    async def _get_or_create_global_tag(
+        payload: TaskTagCreate,
+        actor: User,
+        db: AsyncSession,
+    ) -> TaskTag:
+        display_name = TaskTagService._normalize_display_name(payload.name)
+        if not display_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Название тега не должно быть пустым",
+            )
+
+        normalized_name = TaskTagService._normalize_key(display_name)
+        existing_stmt: Select[tuple[TaskTag]] = select(TaskTag).where(TaskTag.normalized_name == normalized_name)
+        existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
+        tag = TaskTag(
+            name=display_name,
+            normalized_name=normalized_name,
+            created_by=actor.id,
+        )
+        db.add(tag)
+        await db.flush()
+        return tag
+
+    @staticmethod
     async def create_task_tag(payload: TaskTagCreate, actor: User, db: AsyncSession) -> AdminTaskTagRead:
         display_name = TaskTagService._normalize_display_name(payload.name)
         if not display_name:
@@ -77,18 +117,29 @@ class TaskTagService:
                 detail="Название тега не должно быть пустым",
             )
 
+        normalized_name = TaskTagService._normalize_key(display_name)
+        existing_stmt: Select[tuple[TaskTag]] = select(TaskTag).where(TaskTag.normalized_name == normalized_name)
+        existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Тег с таким названием уже существует",
+            )
+
         tag = TaskTag(
             name=display_name,
-            normalized_name=TaskTagService._normalize_key(display_name),
+            normalized_name=normalized_name,
             created_by=actor.id,
         )
         db.add(tag)
+        await db.flush()
         AuditService.record(
             db,
             actor_user_id=actor.id,
             event_type="admin.task_tag.created",
             entity_type="task_tag",
-            metadata={"name": display_name},
+            entity_id=tag.id,
+            metadata={"name": tag.name},
         )
         try:
             await db.commit()
@@ -216,7 +267,97 @@ class TaskTagService:
         await db.commit()
 
     @staticmethod
-    async def validate_reference_tags(tags: list[str], db: AsyncSession) -> list[str]:
+    async def add_task_tag_to_project(
+        project_id: str,
+        payload: ProjectTaskTagCreate,
+        actor: User,
+        db: AsyncSession,
+    ) -> TaskTagOptionRead:
+        tag = await TaskTagService._get_or_create_global_tag(payload, actor, db)
+        mapping = await db.get(ProjectTaskTag, {"project_id": project_id, "task_tag_id": tag.id})
+        if mapping is None:
+            db.add(
+                ProjectTaskTag(
+                    project_id=project_id,
+                    task_tag_id=tag.id,
+                    created_by=actor.id,
+                )
+            )
+
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="project.task_tag.upserted",
+            entity_type="project_task_tag",
+            entity_id=f"{project_id}:{tag.id}",
+            project_id=project_id,
+            metadata={"name": tag.name},
+        )
+        await db.commit()
+        return TaskTagOptionRead.model_validate(tag)
+
+    @staticmethod
+    async def remove_task_tag_from_project(
+        project_id: str,
+        tag_id: str,
+        actor: User,
+        db: AsyncSession,
+    ) -> None:
+        mapping = await db.get(ProjectTaskTag, {"project_id": project_id, "task_tag_id": tag_id})
+        if mapping is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Тег проекта не найден",
+            )
+
+        tag = await db.get(TaskTag, tag_id)
+        if tag is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Тег не найден",
+            )
+
+        tasks_count = int(
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Task)
+                    .where(Task.project_id == project_id, Task.tags.any(tag.name))
+                )
+            ).scalar_one()
+        )
+        rules_count = int(
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(CustomRule)
+                    .where(CustomRule.project_id == project_id, CustomRule.applies_to_tags.any(tag.name))
+                )
+            ).scalar_one()
+        )
+        if tasks_count or rules_count:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Тег нельзя убрать из проекта, пока он используется "
+                    f"в задачах ({tasks_count}) или правилах ({rules_count})"
+                ),
+            )
+
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="project.task_tag.removed",
+            entity_type="project_task_tag",
+            entity_id=f"{project_id}:{tag.id}",
+            project_id=project_id,
+            metadata={"name": tag.name},
+        )
+        await db.delete(mapping)
+        await db.commit()
+
+    @staticmethod
+    async def validate_reference_tags(project_id: str, tags: list[str], db: AsyncSession) -> list[str]:
         normalized_pairs: list[tuple[str, str]] = []
         seen_keys: set[str] = set()
         for raw_value in tags:
@@ -233,7 +374,10 @@ class TaskTagService:
             return []
 
         stmt: Select[tuple[TaskTag]] = select(TaskTag).where(
-            TaskTag.normalized_name.in_([key for key, _ in normalized_pairs])
+            TaskTag.normalized_name.in_([key for key, _ in normalized_pairs]),
+            TaskTag.id.in_(
+                select(ProjectTaskTag.task_tag_id).where(ProjectTaskTag.project_id == project_id)
+            ),
         )
         tag_rows = list((await db.execute(stmt)).scalars().all())
         tag_by_key = {tag.normalized_name: tag for tag in tag_rows}
@@ -242,7 +386,7 @@ class TaskTagService:
         if missing:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Теги не найдены в справочнике: {', '.join(missing)}",
+                detail=f"Теги не найдены в справочнике проекта: {', '.join(missing)}",
             )
 
         return [tag_by_key[key].name for key, _ in normalized_pairs]

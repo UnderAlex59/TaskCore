@@ -24,6 +24,10 @@ class TaskTagOptionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProjectTaskTagCreate(TaskTagCreate):
+    pass
+
+
 class AdminTaskTagRead(TaskTagOptionRead):
     created_by: str
     created_at: datetime

@@ -41,6 +41,7 @@ TRUNCATE_TARGETS = [
     "validation_questions",
     "tasks",
     "task_tags",
+    "project_task_tags",
     "custom_rules",
     "project_members",
     "projects",

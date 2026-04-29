@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str | None = None
     OLLAMA_BASE_URL: str = "http://localhost:11434"
+    GIGACHAT_VERIFY_SSL: bool = True
+    GIGACHAT_CA_BUNDLE_FILE: str | None = None
     EMBEDDING_PROVIDER: Literal["openai", "ollama"] | None = None
     EMBEDDING_MODEL: str | None = None
     OLLAMA_EMBEDDING_MODEL: str | None = None
@@ -61,6 +63,7 @@ class Settings(BaseSettings):
         "COOKIE_DOMAIN",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "GIGACHAT_CA_BUNDLE_FILE",
         "EMBEDDING_PROVIDER",
         "EMBEDDING_MODEL",
         "OLLAMA_EMBEDDING_MODEL",

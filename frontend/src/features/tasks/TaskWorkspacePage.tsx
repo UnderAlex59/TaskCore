@@ -46,8 +46,17 @@ function canUserAccessChat(task: TaskRead, userId?: string, role?: string) {
   if (task.analyst_id === userId) {
     return true;
   }
+  if (task.reviewer_analyst_id === userId) {
+    return true;
+  }
 
-  const teamChatStatuses = new Set(["ready_for_dev", "in_progress", "done"]);
+  const teamChatStatuses = new Set([
+    "ready_for_dev",
+    "in_progress",
+    "ready_for_testing",
+    "testing",
+    "done",
+  ]);
   if (!teamChatStatuses.has(task.status)) {
     return false;
   }
@@ -107,6 +116,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingTask, setSavingTask] = useState(false);
+  const [suggestingTags, setSuggestingTags] = useState(false);
   const [committingTask, setCommittingTask] = useState(false);
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -115,8 +125,12 @@ export default function TaskWorkspacePage({ mode }: Props) {
     null,
   );
   const [approving, setApproving] = useState(false);
+  const [workflowActionPending, setWorkflowActionPending] = useState<
+    "startDevelopment" | "readyForTesting" | "startTesting" | "complete" | null
+  >(null);
   const [developerSelection, setDeveloperSelection] = useState("");
   const [testerSelection, setTesterSelection] = useState("");
+  const [reviewerSelection, setReviewerSelection] = useState("");
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(
     mode === "chat" ? "chat" : "document",
   );
@@ -129,6 +143,14 @@ export default function TaskWorkspacePage({ mode }: Props) {
     () => members.filter((member) => member.role === "TESTER"),
     [members],
   );
+  const reviewerMembers = useMemo(
+    () =>
+      members.filter(
+        (member) =>
+          member.role === "ANALYST" && member.user_id !== task?.analyst_id,
+      ),
+    [members, task?.analyst_id],
+  );
   const canConnectToChat = task
     ? canUserAccessChat(task, user?.id, user?.role)
     : false;
@@ -136,7 +158,8 @@ export default function TaskWorkspacePage({ mode }: Props) {
   useEffect(() => {
     setDeveloperSelection(task?.developer_id ?? "");
     setTesterSelection(task?.tester_id ?? "");
-  }, [task?.developer_id, task?.tester_id]);
+    setReviewerSelection(task?.reviewer_analyst_id ?? "");
+  }, [task?.developer_id, task?.reviewer_analyst_id, task?.tester_id]);
 
   useEffect(() => {
     setActiveTab(mode === "chat" ? "chat" : "document");
@@ -158,7 +181,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
           tasksApi.get(projectId, taskId),
           projectsApi.listMembers(projectId),
           proposalsApi.list(taskId),
-          taskTagsApi.list(),
+          taskTagsApi.list(projectId),
         ]);
 
       setTask(loadedTask);
@@ -223,6 +246,29 @@ export default function TaskWorkspacePage({ mode }: Props) {
     }
   }
 
+  async function handleSuggestTags(payload: {
+    title: string;
+    content: string;
+    current_tags: string[];
+  }) {
+    if (!projectId || !taskId) {
+      throw new Error("Missing project or task id");
+    }
+
+    try {
+      setSuggestingTags(true);
+      setError(null);
+      return await tasksApi.suggestTags(projectId, taskId, payload);
+    } catch (caught) {
+      setError(
+        getApiErrorMessage(caught, "Не удалось подобрать теги для текущей версии задачи."),
+      );
+      throw caught;
+    } finally {
+      setSuggestingTags(false);
+    }
+  }
+
   async function handleCommitTaskChanges() {
     if (!projectId || !taskId) {
       return;
@@ -268,16 +314,49 @@ export default function TaskWorkspacePage({ mode }: Props) {
       setError(null);
       const approvedTask = await tasksApi.approve(projectId, taskId, {
         developer_id: developerSelection,
+        reviewer_analyst_id: reviewerSelection || null,
         tester_id: testerSelection,
       });
       setTask(approvedTask);
       await refreshTaskAndMessages();
     } catch (caught) {
       setError(
-        getApiErrorMessage(caught, "Не удалось сформировать команду задачи."),
+        getApiErrorMessage(caught, "Не удалось завершить этап аналитического ревью."),
       );
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function handleWorkflowTransition(
+    action: "startDevelopment" | "readyForTesting" | "startTesting" | "complete",
+  ) {
+    if (!projectId || !taskId) {
+      return;
+    }
+
+    const actionMap = {
+      complete: tasksApi.complete,
+      readyForTesting: tasksApi.markReadyForTesting,
+      startDevelopment: tasksApi.startDevelopment,
+      startTesting: tasksApi.startTesting,
+    } as const;
+    const fallbackMessages = {
+      complete: "Не удалось завершить задачу.",
+      readyForTesting: "Не удалось перевести задачу в статус готово к тестированию.",
+      startDevelopment: "Не удалось взять задачу в разработку.",
+      startTesting: "Не удалось взять задачу в тестирование.",
+    } as const;
+
+    try {
+      setWorkflowActionPending(action);
+      setError(null);
+      setTask(await actionMap[action](projectId, taskId));
+      await refreshTaskAndMessages();
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, fallbackMessages[action]));
+    } finally {
+      setWorkflowActionPending(null);
     }
   }
 
@@ -440,14 +519,20 @@ export default function TaskWorkspacePage({ mode }: Props) {
     "awaiting_approval",
     "ready_for_dev",
     "in_progress",
+    "ready_for_testing",
+    "testing",
     "done",
   ]);
   const postApprovalStatuses = new Set([
     "ready_for_dev",
     "in_progress",
+    "ready_for_testing",
+    "testing",
     "done",
   ]);
   const hasApprovalRole = user?.role === "ADMIN" || user?.role === "ANALYST";
+  const hasReviewRole =
+    hasApprovalRole || user?.role === "MANAGER";
   const canRunPostApprovalRevalidation =
     task.requires_revalidation &&
     postApprovalStatuses.has(task.status) &&
@@ -467,12 +552,23 @@ export default function TaskWorkspacePage({ mode }: Props) {
       task.status === "needs_rework" ||
       canRunPostApprovalRevalidation);
   const canApprove =
-    hasApprovalRole && task.status === "awaiting_approval";
+    hasReviewRole && task.status === "awaiting_approval";
+  const canConfigureApproval =
+    canApprove &&
+    (user?.role === "ADMIN" ||
+      user?.role === "MANAGER" ||
+      user?.id === task.analyst_id);
   const canReviewProposals = hasApprovalRole;
   const canCommitTask =
     canEditTask && task.status !== "validating" && task.embeddings_stale;
   const needsManualCommit =
-    ["ready_for_dev", "in_progress", "done"].includes(task.status) &&
+    [
+      "ready_for_dev",
+      "in_progress",
+      "ready_for_testing",
+      "testing",
+      "done",
+    ].includes(task.status) &&
     task.embeddings_stale;
   const detailHref = `/projects/${projectId}/tasks/${taskId}`;
   const tasksHref = `/projects/${projectId}/tasks`;
@@ -485,10 +581,28 @@ export default function TaskWorkspacePage({ mode }: Props) {
     members.map((member) => [member.user_id, member]),
   );
   const analyst = membersById.get(task.analyst_id);
+  const reviewer = task.reviewer_analyst_id
+    ? membersById.get(task.reviewer_analyst_id)
+    : null;
   const developer = task.developer_id
     ? membersById.get(task.developer_id)
     : null;
   const tester = task.tester_id ? membersById.get(task.tester_id) : null;
+  const secondReviewPending =
+    Boolean(task.reviewer_analyst_id) && !task.reviewer_approved_at;
+  const canStartDevelopment =
+    user?.id === task.developer_id && task.status === "ready_for_dev";
+  const canMarkReadyForTesting =
+    user?.id === task.developer_id && task.status === "in_progress";
+  const canStartTesting =
+    user?.id === task.tester_id && task.status === "ready_for_testing";
+  const canCompleteTask =
+    user?.id === task.tester_id && task.status === "testing";
+  const approvalButtonLabel = secondReviewPending
+    ? "Сохранить состав и отправить на второе ревью"
+    : task.reviewer_analyst_id && task.reviewer_approved_at
+      ? "Открыть разработку"
+      : "Подтвердить и назначить";
 
   const teamCards = [
     {
@@ -496,6 +610,12 @@ export default function TaskWorkspacePage({ mode }: Props) {
       title: "Аналитик",
       member: analyst,
       fallback: "Назначается автоматически при создании задачи.",
+    },
+    {
+      key: "reviewer",
+      title: "Второй аналитик",
+      member: reviewer,
+      fallback: "Не требуется для этой задачи.",
     },
     {
       key: "developer",
@@ -536,7 +656,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
   ) : (
     <article className="rounded-[16px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-5 py-6 text-sm leading-7 text-[#44546f]">
       Чат откроется после формирования команды задачи. До этого обсуждение
-      доступно только аналитику и администратору.
+      доступно аналитику, второму аналитику при назначении и администратору.
     </article>
   );
 
@@ -632,13 +752,16 @@ export default function TaskWorkspacePage({ mode }: Props) {
             attachmentsUploading={uploading}
             availableTags={taskTags}
             canCommitChanges={canCommitTask}
+            canSuggestTags={canEditTask && activeTab !== "history"}
             committing={committingTask}
             disabled={!canEditTask}
             embeddingsStale={task.embeddings_stale}
             loading={savingTask}
             onCommit={handleCommitTaskChanges}
+            onSuggestTags={handleSuggestTags}
             onSubmit={handleSave}
             onUploadAttachment={handleUpload}
+            suggestingTags={suggestingTags}
             task={task}
           />
 
@@ -685,17 +808,37 @@ export default function TaskWorkspacePage({ mode }: Props) {
                     ))}
                   </div>
 
-                  {canApprove ? (
+                  {canConfigureApproval ? (
                     <div className="mt-5 space-y-4 rounded-[14px] border border-[rgba(172,107,8,0.18)] bg-[#fff4e5] p-4">
                       <div>
                         <p className="text-sm font-semibold text-[#172b4d]">
                           Подтверждение после review
                         </p>
                         <p className="mt-1 text-sm leading-6 text-[#7f4c00]">
-                          Выберите разработчика и тестировщика, чтобы передать
-                          задачу в командную работу.
+                          Назначьте команду и при необходимости укажите второго
+                          аналитика. Статус `Готово к разработке` появится
+                          только после всех обязательных ревью.
                         </p>
                       </div>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-[#172b4d]">
+                          Второй аналитик
+                        </span>
+                        <select
+                          className="ui-field"
+                          onChange={(event) =>
+                            setReviewerSelection(event.target.value)
+                          }
+                          value={reviewerSelection}
+                        >
+                          <option value="">Без второго ревью</option>
+                          {reviewerMembers.map((member) => (
+                            <option key={member.user_id} value={member.user_id}>
+                              {member.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="block">
                         <span className="mb-2 block text-sm font-medium text-[#172b4d]">
                           Разработчик
@@ -743,9 +886,117 @@ export default function TaskWorkspacePage({ mode }: Props) {
                         type="button"
                       >
                         {approving
-                          ? "Формируем команду..."
-                          : "Подтвердить и назначить"}
+                          ? "Сохраняем маршрут..."
+                          : approvalButtonLabel}
                       </button>
+                      {secondReviewPending && reviewer ? (
+                        <p className="text-sm leading-6 text-[#7f4c00]">
+                          Ожидается подтверждение второго аналитика:{" "}
+                          <span className="font-medium text-[#172b4d]">
+                            {reviewer.full_name}
+                          </span>
+                          .
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {user?.id === task.reviewer_analyst_id &&
+                  task.status === "awaiting_approval" &&
+                  !task.reviewer_approved_at ? (
+                    <div className="mt-5 space-y-3 rounded-[14px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-[#172b4d]">
+                          Второе аналитическое ревью
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-[#44546f]">
+                          После вашего подтверждения задача станет готовой к
+                          разработке, если команда уже назначена.
+                        </p>
+                      </div>
+                      <button
+                        className="ui-button-primary w-full"
+                        disabled={approving}
+                        onClick={() => void handleApprove()}
+                        type="button"
+                      >
+                        {approving
+                          ? "Подтверждаем ревью..."
+                          : "Подтвердить второе ревью"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {canStartDevelopment ||
+                  canMarkReadyForTesting ||
+                  canStartTesting ||
+                  canCompleteTask ? (
+                    <div className="mt-5 space-y-3 rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-[#172b4d]">
+                          Переход по workflow
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-[#44546f]">
+                          Кнопки доступны только ответственному участнику на
+                          текущем этапе.
+                        </p>
+                      </div>
+                      {canStartDevelopment ? (
+                        <button
+                          className="ui-button-primary w-full"
+                          disabled={workflowActionPending !== null}
+                          onClick={() =>
+                            void handleWorkflowTransition("startDevelopment")
+                          }
+                          type="button"
+                        >
+                          {workflowActionPending === "startDevelopment"
+                            ? "Берём в разработку..."
+                            : "Взять в разработку"}
+                        </button>
+                      ) : null}
+                      {canMarkReadyForTesting ? (
+                        <button
+                          className="ui-button-primary w-full"
+                          disabled={workflowActionPending !== null}
+                          onClick={() =>
+                            void handleWorkflowTransition("readyForTesting")
+                          }
+                          type="button"
+                        >
+                          {workflowActionPending === "readyForTesting"
+                            ? "Переводим..."
+                            : "Готово к тестированию"}
+                        </button>
+                      ) : null}
+                      {canStartTesting ? (
+                        <button
+                          className="ui-button-primary w-full"
+                          disabled={workflowActionPending !== null}
+                          onClick={() =>
+                            void handleWorkflowTransition("startTesting")
+                          }
+                          type="button"
+                        >
+                          {workflowActionPending === "startTesting"
+                            ? "Запускаем тестирование..."
+                            : "Взять в тестирование"}
+                        </button>
+                      ) : null}
+                      {canCompleteTask ? (
+                        <button
+                          className="ui-button-primary w-full"
+                          disabled={workflowActionPending !== null}
+                          onClick={() =>
+                            void handleWorkflowTransition("complete")
+                          }
+                          type="button"
+                        >
+                          {workflowActionPending === "complete"
+                            ? "Завершаем..."
+                            : "Задача выполнена"}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </InspectorCard>

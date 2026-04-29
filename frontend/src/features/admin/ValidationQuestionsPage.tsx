@@ -29,6 +29,8 @@ const TASK_STATUS_OPTIONS: TaskStatus[] = [
   "awaiting_approval",
   "ready_for_dev",
   "in_progress",
+  "ready_for_testing",
+  "testing",
   "done",
 ];
 const VERDICT_OPTIONS: ValidationResult["verdict"][] = [

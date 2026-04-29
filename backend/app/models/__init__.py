@@ -9,6 +9,7 @@ from app.models.llm_request_log import LLMRequestLog
 from app.models.llm_runtime_settings import LLMRuntimeSettings
 from app.models.message import Message
 from app.models.project import Project, ProjectMember
+from app.models.project_task_tag import ProjectTaskTag
 from app.models.refresh_token import RefreshToken
 from app.models.task import Task, TaskAttachment
 from app.models.task_tag import TaskTag
@@ -28,6 +29,7 @@ __all__ = [
     "Message",
     "Project",
     "ProjectMember",
+    "ProjectTaskTag",
     "RefreshToken",
     "Task",
     "TaskAttachment",

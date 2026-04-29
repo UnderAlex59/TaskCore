@@ -160,6 +160,15 @@ async def test_admin_can_create_test_and_override_provider(
     assert vision_override_response.json()["agent_key"] == "rag-vision"
     assert vision_override_response.json()["provider_config_id"] == provider_id
 
+    task_tag_override_response = await client.put(
+        "/admin/llm/overrides/task_tag_suggester",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"provider_config_id": provider_id, "enabled": True},
+    )
+    assert task_tag_override_response.status_code == 200
+    assert task_tag_override_response.json()["agent_key"] == "task_tag_suggester"
+    assert task_tag_override_response.json()["provider_config_id"] == provider_id
+
 
 @pytest.mark.asyncio
 async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
@@ -184,6 +193,7 @@ async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
         "change-tracker",
         "chat-routing",
         "rag-vision",
+        "task_tag_suggester",
         "task-validation",
     } <= keys
 

@@ -47,7 +47,7 @@ export default function TaskCreatePage() {
         setError(null);
         const [loadedProject, loadedTaskTags] = await Promise.all([
           projectsApi.get(projectId),
-          taskTagsApi.list(),
+          taskTagsApi.list(projectId),
         ]);
 
         if (!cancelled) {

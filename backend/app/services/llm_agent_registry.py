@@ -35,6 +35,12 @@ from app.agents.qa_agent_graph import (
     QA_VERIFIER_AGENT_KEY,
     QA_VERIFIER_AGENT_NAME,
 )
+from app.agents.task_tag_suggestion_graph import (
+    TASK_TAG_SUGGESTER_AGENT_ALIASES,
+    TASK_TAG_SUGGESTER_AGENT_DESCRIPTION,
+    TASK_TAG_SUGGESTER_AGENT_KEY,
+    TASK_TAG_SUGGESTER_AGENT_NAME,
+)
 from app.agents.validation_graph import (
     VALIDATION_AGENT_ALIASES,
     VALIDATION_AGENT_DESCRIPTION,
@@ -94,5 +100,12 @@ def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
             description=VISION_AGENT_DESCRIPTION,
             aliases=VISION_AGENT_ALIASES,
             priority=80,
+        ),
+        ChatAgentMetadata(
+            key=TASK_TAG_SUGGESTER_AGENT_KEY,
+            name=TASK_TAG_SUGGESTER_AGENT_NAME,
+            description=TASK_TAG_SUGGESTER_AGENT_DESCRIPTION,
+            aliases=TASK_TAG_SUGGESTER_AGENT_ALIASES,
+            priority=90,
         ),
     )

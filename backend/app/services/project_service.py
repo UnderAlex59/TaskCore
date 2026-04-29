@@ -324,7 +324,7 @@ class ProjectService:
             project_id=project_id,
             title=payload.title,
             description=payload.description,
-            applies_to_tags=await TaskTagService.validate_reference_tags(payload.applies_to_tags, db),
+            applies_to_tags=await TaskTagService.validate_reference_tags(project_id, payload.applies_to_tags, db),
             is_active=payload.is_active,
             created_by=current_user.id,
         )
@@ -360,6 +360,7 @@ class ProjectService:
         updates = payload.model_dump(exclude_unset=True)
         if "applies_to_tags" in updates:
             updates["applies_to_tags"] = await TaskTagService.validate_reference_tags(
+                project_id,
                 list(updates["applies_to_tags"] or []),
                 db,
             )

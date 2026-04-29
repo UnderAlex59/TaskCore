@@ -9,6 +9,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import Select, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.task_tag_suggestion_graph import run_task_tag_suggestion_graph
 from app.agents.validation_graph import run_validation_graph
 from app.models.message import Message, MessageType
 from app.models.project import ProjectMember
@@ -19,6 +20,8 @@ from app.schemas.task import (
     TaskAttachmentRead,
     TaskCreate,
     TaskRead,
+    TaskTagSuggestionRequest,
+    TaskTagSuggestionResponse,
     TaskUpdate,
     ValidationIssue,
     ValidationResult,
@@ -42,11 +45,20 @@ class TaskService:
     post_approval_editable_statuses = {
         TaskStatus.READY_FOR_DEV,
         TaskStatus.IN_PROGRESS,
+        TaskStatus.READY_FOR_TESTING,
+        TaskStatus.TESTING,
         TaskStatus.DONE,
     }
     editable_statuses = pre_approval_editable_statuses | post_approval_editable_statuses
-    approval_roles = {UserRole.ADMIN, UserRole.ANALYST}
-    team_chat_statuses = {TaskStatus.READY_FOR_DEV, TaskStatus.IN_PROGRESS, TaskStatus.DONE}
+    validation_roles = {UserRole.ADMIN, UserRole.ANALYST}
+    review_roles = {UserRole.ADMIN, UserRole.ANALYST, UserRole.MANAGER}
+    team_chat_statuses = {
+        TaskStatus.READY_FOR_DEV,
+        TaskStatus.IN_PROGRESS,
+        TaskStatus.READY_FOR_TESTING,
+        TaskStatus.TESTING,
+        TaskStatus.DONE,
+    }
 
     @staticmethod
     async def get_task_or_404(project_id: str, task_id: str, db: AsyncSession) -> Task:
@@ -86,6 +98,8 @@ class TaskService:
         if current_user.role == UserRole.ADMIN:
             return True
         if current_user.id == task.analyst_id:
+            return True
+        if current_user.id == task.reviewer_analyst_id:
             return True
         if task.status in TaskService.team_chat_statuses:
             return current_user.id in {task.developer_id, task.tester_id}
@@ -128,6 +142,49 @@ class TaskService:
         return user.full_name
 
     @staticmethod
+    async def _broadcast_latest_agent_message(
+        task_id: str,
+        agent_name: str,
+        db: AsyncSession,
+    ) -> None:
+        message = (
+            (
+                await db.execute(
+                    select(Message)
+                    .where(
+                        Message.task_id == task_id,
+                        Message.author_id.is_(None),
+                        Message.agent_name == agent_name,
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if message is None:
+            return
+        await chat_connection_manager.broadcast_messages(
+            task_id,
+            [
+                serialize_message(
+                    message,
+                    author_name=None,
+                    author_avatar_url=None,
+                )
+            ],
+        )
+
+    @staticmethod
+    def _can_configure_review(task: Task, current_user: User) -> bool:
+        return current_user.role in {UserRole.ADMIN, UserRole.MANAGER} or current_user.id == task.analyst_id
+
+    @staticmethod
+    def _is_secondary_reviewer(task: Task, current_user: User) -> bool:
+        return task.reviewer_analyst_id is not None and current_user.id == task.reviewer_analyst_id
+
+    @staticmethod
     def _has_stale_embeddings(task: Task) -> bool:
         if task.indexed_at is None:
             return True
@@ -167,8 +224,10 @@ class TaskService:
             status=task.status,
             created_by=task.created_by,
             analyst_id=task.analyst_id,
+            reviewer_analyst_id=task.reviewer_analyst_id,
             developer_id=task.developer_id,
             tester_id=task.tester_id,
+            reviewer_approved_at=task.reviewer_approved_at,
             validation_result=task.validation_result,
             attachments=[TaskAttachmentRead.model_validate(item) for item in attachments],
             indexed_at=task.indexed_at,
@@ -237,7 +296,7 @@ class TaskService:
         db: AsyncSession,
     ) -> TaskRead:
         await ProjectService.ensure_project_access(project_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.validation_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут создавать задачи",
@@ -247,7 +306,7 @@ class TaskService:
             project_id=project_id,
             title=payload.title,
             content=payload.content,
-            tags=await TaskTagService.validate_reference_tags(payload.tags, db),
+            tags=await TaskTagService.validate_reference_tags(project_id, payload.tags, db),
             created_by=current_user.id,
             analyst_id=current_user.id,
         )
@@ -287,7 +346,7 @@ class TaskService:
         db: AsyncSession,
     ) -> TaskRead:
         await ProjectService.ensure_project_access(project_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.validation_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут редактировать задачи",
@@ -307,6 +366,7 @@ class TaskService:
 
         if "tags" in updates:
             updates["tags"] = await TaskTagService.validate_reference_tags(
+                project_id,
                 list(updates["tags"] or []),
                 db,
             )
@@ -361,7 +421,7 @@ class TaskService:
         db: AsyncSession,
     ) -> TaskRead:
         await ProjectService.ensure_project_access(project_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.validation_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут коммитить изменения задачи",
@@ -414,45 +474,133 @@ class TaskService:
         db: AsyncSession,
     ) -> TaskRead:
         task = await TaskService.get_task_with_access(task_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.review_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только аналитики и администраторы могут подтверждать задачу",
+                detail="Только аналитики, менеджеры и администраторы могут подтверждать задачу",
             )
         if task.status != TaskStatus.AWAITING_APPROVAL:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Задачу можно подтвердить только после успешного ревью",
             )
-        if payload.developer_id == payload.tester_id:
+        can_configure_review = TaskService._can_configure_review(task, current_user)
+        is_secondary_reviewer = TaskService._is_secondary_reviewer(task, current_user)
+        if not can_configure_review and not is_secondary_reviewer:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Подтвердить задачу может аналитик задачи, менеджер или назначенный второй аналитик",
+            )
+
+        current_timestamp = datetime.now(UTC)
+        payload_data = payload.model_dump(exclude_unset=True)
+        reviewer_assignment_changed = False
+        team_assignment_changed = False
+        reviewer_confirmed = False
+
+        if can_configure_review:
+            if "reviewer_analyst_id" in payload_data:
+                reviewer_analyst_id = payload_data["reviewer_analyst_id"]
+                if reviewer_analyst_id == task.analyst_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Второй аналитик должен отличаться от основного аналитика задачи",
+                    )
+                if reviewer_analyst_id is not None:
+                    await TaskService._get_project_member_or_422(
+                        task.project_id,
+                        reviewer_analyst_id,
+                        UserRole.ANALYST,
+                        db,
+                    )
+                if reviewer_analyst_id != task.reviewer_analyst_id:
+                    task.reviewer_analyst_id = reviewer_analyst_id
+                    task.reviewer_approved_at = None
+                    reviewer_assignment_changed = True
+
+            if "developer_id" in payload_data and payload_data["developer_id"] is not None:
+                await TaskService._get_project_member_or_422(
+                    task.project_id,
+                    payload_data["developer_id"],
+                    UserRole.DEVELOPER,
+                    db,
+                )
+                if payload_data["developer_id"] != task.developer_id:
+                    task.developer_id = payload_data["developer_id"]
+                    team_assignment_changed = True
+
+            if "tester_id" in payload_data and payload_data["tester_id"] is not None:
+                await TaskService._get_project_member_or_422(
+                    task.project_id,
+                    payload_data["tester_id"],
+                    UserRole.TESTER,
+                    db,
+                )
+                if payload_data["tester_id"] != task.tester_id:
+                    task.tester_id = payload_data["tester_id"]
+                    team_assignment_changed = True
+
+        if task.developer_id is not None and task.developer_id == task.tester_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Разработчик и тестировщик должны быть разными пользователями",
             )
 
-        await TaskService._get_project_member_or_422(
-            task.project_id,
-            payload.developer_id,
-            UserRole.DEVELOPER,
-            db,
-        )
-        await TaskService._get_project_member_or_422(
-            task.project_id,
-            payload.tester_id,
-            UserRole.TESTER,
-            db,
-        )
+        if is_secondary_reviewer and task.reviewer_analyst_id is not None and task.reviewer_approved_at is None:
+            task.reviewer_approved_at = current_timestamp
+            reviewer_confirmed = True
 
-        current_timestamp = datetime.now(UTC)
-        task.developer_id = payload.developer_id
-        task.tester_id = payload.tester_id
-        task.status = TaskStatus.READY_FOR_DEV
+        waiting_for_second_review = (
+            task.reviewer_analyst_id is not None and task.reviewer_approved_at is None
+        )
+        if not waiting_for_second_review and (task.developer_id is None or task.tester_id is None):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Перед переводом задачи в разработку нужно назначить разработчика и тестировщика",
+            )
+
         task.updated_at = current_timestamp
+        attachments = await TaskService._get_attachments(task.id, db)
+        approval_message: Message | None = None
 
-        developer_name = await TaskService._get_user_name(payload.developer_id, db)
-        tester_name = await TaskService._get_user_name(payload.tester_id, db)
-        db.add(
-            Message(
+        if waiting_for_second_review:
+            reviewer_name = await TaskService._get_user_name(task.reviewer_analyst_id, db)
+            if reviewer_assignment_changed or team_assignment_changed:
+                approval_message = Message(
+                    task_id=task.id,
+                    author_id=None,
+                    agent_name="ManagerAgent",
+                    message_type=MessageType.AGENT_ANSWER,
+                    content=(
+                        "Задача ожидает второе аналитическое ревью. "
+                        f"Второй аналитик: {reviewer_name}. "
+                        "После его подтверждения задача перейдет в статус готово к разработке."
+                    ),
+                    source_ref={
+                        "collection": "tasks",
+                        "reviewer_analyst_id": task.reviewer_analyst_id,
+                    },
+                )
+                db.add(approval_message)
+            AuditService.record(
+                db,
+                actor_user_id=current_user.id,
+                event_type="task.review_configured",
+                entity_type="task",
+                entity_id=task.id,
+                project_id=task.project_id,
+                task_id=task.id,
+                metadata={
+                    "developer_id": task.developer_id,
+                    "tester_id": task.tester_id,
+                    "reviewer_analyst_id": task.reviewer_analyst_id,
+                },
+            )
+        else:
+            task.status = TaskStatus.READY_FOR_DEV
+            developer_name = await TaskService._get_user_name(task.developer_id, db)
+            tester_name = await TaskService._get_user_name(task.tester_id, db)
+            approval_message = Message(
                 task_id=task.id,
                 author_id=None,
                 agent_name="ManagerAgent",
@@ -461,66 +609,228 @@ class TaskService:
                     "Команда задачи сформирована. "
                     f"Разработчик: {developer_name}. "
                     f"Тестировщик: {tester_name}. "
-                    "Командный чат открыт."
+                    + (
+                        "Второе аналитическое ревью подтверждено. "
+                        if task.reviewer_analyst_id is not None
+                        else ""
+                    )
+                    + "Командный чат открыт."
                 ),
                 source_ref={
                     "collection": "tasks",
-                    "developer_id": payload.developer_id,
-                    "tester_id": payload.tester_id,
+                    "developer_id": task.developer_id,
+                    "tester_id": task.tester_id,
+                    "reviewer_analyst_id": task.reviewer_analyst_id,
                 },
+            )
+            db.add(approval_message)
+            AuditService.record(
+                db,
+                actor_user_id=current_user.id,
+                event_type="task.approved",
+                entity_type="task",
+                entity_id=task.id,
+                project_id=task.project_id,
+                task_id=task.id,
+                metadata={
+                    "developer_id": task.developer_id,
+                    "tester_id": task.tester_id,
+                    "reviewer_analyst_id": task.reviewer_analyst_id,
+                    "reviewer_confirmed": reviewer_confirmed or task.reviewer_approved_at is not None,
+                },
+            )
+            await RagService.index_task_context(
+                db,
+                task,
+                attachments,
+                actor_user_id=current_user.id,
+                validation_result=task.validation_result,
+            )
+
+        await db.commit()
+        await db.refresh(task)
+        if approval_message is not None:
+            await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
+        return TaskService._serialize_task(task, attachments)
+
+    @staticmethod
+    async def start_development(
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        task = await TaskService.get_task_with_access(task_id, current_user, db)
+        if current_user.id != task.developer_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только назначенный разработчик может взять задачу в разработку",
+            )
+        if task.status != TaskStatus.READY_FOR_DEV:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Задачу можно взять в разработку только из статуса готово к разработке",
+            )
+
+        task.status = TaskStatus.IN_PROGRESS
+        task.updated_at = datetime.now(UTC)
+        db.add(
+            Message(
+                task_id=task.id,
+                author_id=None,
+                agent_name="ManagerAgent",
+                message_type=MessageType.AGENT_ANSWER,
+                content=f"Разработчик {current_user.full_name} взял задачу в работу.",
+                source_ref={"collection": "tasks", "status": task.status.value},
             )
         )
         AuditService.record(
             db,
             actor_user_id=current_user.id,
-            event_type="task.approved",
+            event_type="task.development_started",
             entity_type="task",
             entity_id=task.id,
             project_id=task.project_id,
             task_id=task.id,
-            metadata={
-                "developer_id": payload.developer_id,
-                "tester_id": payload.tester_id,
-            },
         )
-
         attachments = await TaskService._get_attachments(task.id, db)
-        await RagService.index_task_context(
-            db,
-            task,
-            attachments,
-            actor_user_id=current_user.id,
-            validation_result=task.validation_result,
-        )
         await db.commit()
         await db.refresh(task)
-        approval_message = (
-            (
-                await db.execute(
-                    select(Message)
-                    .where(
-                        Message.task_id == task.id,
-                        Message.author_id.is_(None),
-                        Message.agent_name == "ManagerAgent",
-                    )
-                    .order_by(Message.created_at.desc())
-                    .limit(1)
-                )
+        await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
+        return TaskService._serialize_task(task, attachments)
+
+    @staticmethod
+    async def mark_ready_for_testing(
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        task = await TaskService.get_task_with_access(task_id, current_user, db)
+        if current_user.id != task.developer_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только назначенный разработчик может перевести задачу в статус готово к тестированию",
             )
-            .scalars()
-            .first()
+        if task.status != TaskStatus.IN_PROGRESS:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Перевести задачу в статус готово к тестированию можно только из разработки",
+            )
+
+        task.status = TaskStatus.READY_FOR_TESTING
+        task.updated_at = datetime.now(UTC)
+        db.add(
+            Message(
+                task_id=task.id,
+                author_id=None,
+                agent_name="ManagerAgent",
+                message_type=MessageType.AGENT_ANSWER,
+                content=f"Разработчик {current_user.full_name} перевел задачу в статус готово к тестированию.",
+                source_ref={"collection": "tasks", "status": task.status.value},
+            )
         )
-        if approval_message is not None:
-            await chat_connection_manager.broadcast_messages(
-                task.id,
-                [
-                    serialize_message(
-                        approval_message,
-                        author_name=None,
-                        author_avatar_url=None,
-                    )
-                ],
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.ready_for_testing",
+            entity_type="task",
+            entity_id=task.id,
+            project_id=task.project_id,
+            task_id=task.id,
+        )
+        attachments = await TaskService._get_attachments(task.id, db)
+        await db.commit()
+        await db.refresh(task)
+        await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
+        return TaskService._serialize_task(task, attachments)
+
+    @staticmethod
+    async def start_testing(
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        task = await TaskService.get_task_with_access(task_id, current_user, db)
+        if current_user.id != task.tester_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только назначенный тестировщик может взять задачу в тестирование",
             )
+        if task.status != TaskStatus.READY_FOR_TESTING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Взять задачу в тестирование можно только из статуса готово к тестированию",
+            )
+
+        task.status = TaskStatus.TESTING
+        task.updated_at = datetime.now(UTC)
+        db.add(
+            Message(
+                task_id=task.id,
+                author_id=None,
+                agent_name="ManagerAgent",
+                message_type=MessageType.AGENT_ANSWER,
+                content=f"Тестировщик {current_user.full_name} начал тестирование задачи.",
+                source_ref={"collection": "tasks", "status": task.status.value},
+            )
+        )
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.testing_started",
+            entity_type="task",
+            entity_id=task.id,
+            project_id=task.project_id,
+            task_id=task.id,
+        )
+        attachments = await TaskService._get_attachments(task.id, db)
+        await db.commit()
+        await db.refresh(task)
+        await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
+        return TaskService._serialize_task(task, attachments)
+
+    @staticmethod
+    async def complete_task(
+        task_id: str,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        task = await TaskService.get_task_with_access(task_id, current_user, db)
+        if current_user.id != task.tester_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только назначенный тестировщик может завершить задачу",
+            )
+        if task.status != TaskStatus.TESTING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Завершить задачу можно только после начала тестирования",
+            )
+
+        task.status = TaskStatus.DONE
+        task.updated_at = datetime.now(UTC)
+        db.add(
+            Message(
+                task_id=task.id,
+                author_id=None,
+                agent_name="ManagerAgent",
+                message_type=MessageType.AGENT_ANSWER,
+                content=f"Тестировщик {current_user.full_name} завершил тестирование. Задача выполнена.",
+                source_ref={"collection": "tasks", "status": task.status.value},
+            )
+        )
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.completed",
+            entity_type="task",
+            entity_id=task.id,
+            project_id=task.project_id,
+            task_id=task.id,
+        )
+        attachments = await TaskService._get_attachments(task.id, db)
+        await db.commit()
+        await db.refresh(task)
+        await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
         return TaskService._serialize_task(task, attachments)
 
     @staticmethod
@@ -531,7 +841,7 @@ class TaskService:
         db: AsyncSession,
     ) -> None:
         await ProjectService.ensure_project_access(project_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.validation_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут удалять задачи",
@@ -612,7 +922,7 @@ class TaskService:
     @staticmethod
     async def validate_task(task_id: str, current_user: User, db: AsyncSession) -> ValidationResult:
         task = await TaskService.get_task_with_access(task_id, current_user, db)
-        if current_user.role not in TaskService.approval_roles:
+        if current_user.role not in TaskService.validation_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только аналитики и администраторы могут запускать проверку задач",
@@ -772,3 +1082,39 @@ class TaskService:
         if result.questions:
             return f"Найдены проблемы: {issue_text}. Нужно уточнить: {'; '.join(result.questions)}"
         return f"Найдены проблемы: {issue_text}"
+    @staticmethod
+    async def suggest_task_tags(
+        project_id: str,
+        task_id: str,
+        payload: TaskTagSuggestionRequest,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskTagSuggestionResponse:
+        await ProjectService.ensure_project_access(project_id, current_user, db)
+        if current_user.role not in TaskService.validation_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только аналитики и администраторы могут подбирать теги через LLM",
+            )
+
+        task = await TaskService.get_task_or_404(project_id, task_id, db)
+        available_tags = await TaskTagService.list_task_tags(project_id, db)
+        if not available_tags:
+            return TaskTagSuggestionResponse(suggestions=[], generated_at=datetime.now(UTC))
+
+        try:
+            return await run_task_tag_suggestion_graph(
+                db=db,
+                actor_user_id=current_user.id,
+                project_id=project_id,
+                task_id=task.id,
+                title=payload.title,
+                content=payload.content,
+                current_tags=payload.current_tags,
+                available_tags=[tag.name for tag in available_tags],
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc

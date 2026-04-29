@@ -11,6 +11,23 @@ export interface ValidationResult {
   validated_at: string;
 }
 
+export interface TaskTagSuggestionItem {
+  tag: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface TaskTagSuggestionRequest {
+  title: string;
+  content: string;
+  current_tags: string[];
+}
+
+export interface TaskTagSuggestionResponse {
+  suggestions: TaskTagSuggestionItem[];
+  generated_at: string;
+}
+
 export interface TaskRead {
   id: string;
   project_id: string;
@@ -20,8 +37,10 @@ export interface TaskRead {
   status: TaskStatus;
   created_by: string;
   analyst_id: string;
+  reviewer_analyst_id: string | null;
   developer_id: string | null;
   tester_id: string | null;
+  reviewer_approved_at: string | null;
   validation_result: ValidationResult | null;
   attachments: TaskAttachmentRead[];
   indexed_at: string | null;
@@ -40,8 +59,9 @@ export interface TaskCreate {
 export type TaskUpdate = TaskCreate;
 
 export interface TaskApprove {
-  developer_id: string;
-  tester_id: string;
+  developer_id?: string | null;
+  tester_id?: string | null;
+  reviewer_analyst_id?: string | null;
 }
 
 export interface TaskAttachmentRead {
@@ -61,6 +81,8 @@ export type TaskStatus =
   | "awaiting_approval"
   | "ready_for_dev"
   | "in_progress"
+  | "ready_for_testing"
+  | "testing"
   | "done";
 
 export interface TaskListParams {
@@ -87,6 +109,14 @@ export const tasksApi = {
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/commit`)).data,
   approve: async (projectId: string, taskId: string, payload: TaskApprove) =>
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/approve`, payload)).data,
+  startDevelopment: async (projectId: string, taskId: string) =>
+    (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/start-development`)).data,
+  markReadyForTesting: async (projectId: string, taskId: string) =>
+    (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/ready-for-testing`)).data,
+  startTesting: async (projectId: string, taskId: string) =>
+    (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/start-testing`)).data,
+  complete: async (projectId: string, taskId: string) =>
+    (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/complete`)).data,
   remove: async (projectId: string, taskId: string) => {
     await apiClient.delete(`/projects/${projectId}/tasks/${taskId}`);
   },
@@ -100,4 +130,15 @@ export const tasksApi = {
       })
     ).data;
   },
+  suggestTags: async (
+    projectId: string,
+    taskId: string,
+    payload: TaskTagSuggestionRequest,
+  ) =>
+    (
+      await apiClient.post<TaskTagSuggestionResponse>(
+        `/projects/${projectId}/tasks/${taskId}/suggest-tags`,
+        payload,
+      )
+    ).data,
 };

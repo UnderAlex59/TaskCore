@@ -55,6 +55,9 @@ export default function CustomRulesEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [savingTag, setSavingTag] = useState(false);
+  const [removingTagId, setRemovingTagId] = useState<string | null>(null);
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rulePendingDeletion, setRulePendingDeletion] =
@@ -73,7 +76,7 @@ export default function CustomRulesEditor() {
       const [loadedProject, loadedRules, loadedTaskTags] = await Promise.all([
         projectsApi.get(projectId),
         projectsApi.listRules(projectId),
-        taskTagsApi.list(),
+        taskTagsApi.list(projectId),
       ]);
       setProject(loadedProject);
       setRules(loadedRules);
@@ -176,6 +179,57 @@ export default function CustomRulesEditor() {
     }
   }
 
+  async function handleCreateTag(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!projectId || !newTagName.trim()) {
+      return;
+    }
+
+    try {
+      setSavingTag(true);
+      setError(null);
+      const createdTag = await taskTagsApi.create(projectId, newTagName.trim());
+      setTaskTags((current) =>
+        [...current.filter((tag) => tag.id !== createdTag.id), createdTag].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        ),
+      );
+      setNewTagName("");
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось добавить тег в справочник проекта."));
+    } finally {
+      setSavingTag(false);
+    }
+  }
+
+  async function handleRemoveTag(tagId: string) {
+    if (!projectId) {
+      return;
+    }
+
+    const removedTag = taskTags.find((tag) => tag.id === tagId);
+    if (!removedTag) {
+      return;
+    }
+
+    try {
+      setRemovingTagId(tagId);
+      setError(null);
+      await taskTagsApi.remove(projectId, tagId);
+      setTaskTags((current) => current.filter((tag) => tag.id !== tagId));
+      setForm((current) => ({
+        ...current,
+        applies_to_tags: current.applies_to_tags.filter(
+          (tagName) => tagName !== removedTag.name,
+        ),
+      }));
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось убрать тег из справочника проекта."));
+    } finally {
+      setRemovingTagId(null);
+    }
+  }
+
   function startEdit(rule: CustomRuleRead) {
     setEditingRuleId(rule.id);
     setForm({
@@ -239,6 +293,70 @@ export default function CustomRulesEditor() {
           </p>
         ) : null}
       </header>
+
+      <section className="glass-panel space-y-5 rounded-[28px] border border-black/10 p-6 shadow-panel">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-ember">
+            Справочник тегов проекта
+          </p>
+          <h3 className="mt-2 text-xl font-bold text-ink">
+            Набор тегов для задач и LLM
+          </h3>
+          <p className="mt-3 text-sm leading-7 text-ink/70">
+            Только эти теги доступны в задачах проекта, в правилах проверки и в
+            LLM-подборе тегов для аналитика.
+          </p>
+        </div>
+
+        <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleCreateTag}>
+          <input
+            autoComplete="off"
+            className="ui-field flex-1"
+            name="project-tag-name"
+            onChange={(event) => setNewTagName(event.target.value)}
+            placeholder="Например, Отчеты"
+            value={newTagName}
+          />
+          <button
+            className="ui-button-primary"
+            disabled={savingTag || newTagName.trim().length === 0}
+            type="submit"
+          >
+            {savingTag ? "Добавляем..." : "Добавить тег"}
+          </button>
+        </form>
+
+        <div className="space-y-3">
+          {taskTags.length === 0 ? (
+            <p className="rounded-[18px] border border-dashed border-black/10 px-4 py-5 text-sm text-slate/70">
+              В проекте пока нет тегов. Добавьте их здесь, чтобы аналитик мог
+              использовать справочник и автоподбор.
+            </p>
+          ) : (
+            taskTags.map((tag) => (
+              <article
+                key={tag.id}
+                className="flex flex-col gap-3 rounded-[18px] border border-black/10 bg-white/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p className="font-semibold text-ink">{tag.name}</p>
+                  <p className="mt-1 text-sm text-slate/70">
+                    Доступен для задач, правил и LLM-рекомендаций в этом проекте.
+                  </p>
+                </div>
+                <button
+                  className="ui-button-secondary"
+                  disabled={removingTagId === tag.id}
+                  onClick={() => void handleRemoveTag(tag.id)}
+                  type="button"
+                >
+                  {removingTagId === tag.id ? "Убираем..." : "Убрать из проекта"}
+                </button>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
 
       {project ? (
         <section className="glass-panel space-y-5 rounded-[28px] border border-black/10 p-6 shadow-panel">

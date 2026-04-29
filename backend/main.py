@@ -65,6 +65,11 @@ def create_app() -> FastAPI:
     app.mount("/uploads", uploads_app, name="uploads")
     app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False), name="api-uploads")
     app.mount(
+        "/api/langgraph-images",
+        StaticFiles(directory=settings.LANGGRAPH_IMAGES_DIR, check_dir=False, html=True),
+        name="api-langgraph-images",
+    )
+    app.mount(
         "/langgraph-images",
         StaticFiles(directory=settings.LANGGRAPH_IMAGES_DIR, check_dir=False, html=True),
         name="langgraph-images",

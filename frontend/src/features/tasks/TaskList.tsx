@@ -213,6 +213,8 @@ export default function TaskList() {
                     "awaiting_approval",
                     "ready_for_dev",
                     "in_progress",
+                    "ready_for_testing",
+                    "testing",
                     "done",
                   ].map((status) => (
                     <option key={status} value={status}>

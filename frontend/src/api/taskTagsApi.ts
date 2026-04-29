@@ -6,5 +6,11 @@ export interface TaskTagOption {
 }
 
 export const taskTagsApi = {
-  list: async () => (await apiClient.get<TaskTagOption[]>("/task-tags")).data,
+  list: async (projectId: string) =>
+    (await apiClient.get<TaskTagOption[]>(`/projects/${projectId}/task-tags`)).data,
+  create: async (projectId: string, name: string) =>
+    (await apiClient.post<TaskTagOption>(`/projects/${projectId}/task-tags`, { name })).data,
+  remove: async (projectId: string, tagId: string) => {
+    await apiClient.delete(`/projects/${projectId}/task-tags/${tagId}`);
+  },
 };
