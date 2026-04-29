@@ -59,7 +59,7 @@ class AdminQdrantService:
     @staticmethod
     def _task_filter(task_id: str) -> models.Filter:
         return models.Filter(
-            must=[AdminQdrantService._match_value_condition("task_id", task_id)]
+            must=[AdminQdrantService._match_value_condition("metadata.task_id", task_id)]
         )
 
     @staticmethod

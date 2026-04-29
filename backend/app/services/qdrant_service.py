@@ -33,6 +33,24 @@ _POINT_ID_NAMESPACE = uuid.UUID("a1fc4b4f-8c2d-4dcb-8a77-0f7a52465b62")
 
 class QdrantService:
     @staticmethod
+    def _metadata_key(field_name: str) -> str:
+        return f"metadata.{field_name}"
+
+    @staticmethod
+    def _metadata_value_condition(key: str, value: str) -> models.FieldCondition:
+        return models.FieldCondition(
+            key=QdrantService._metadata_key(key),
+            match=models.MatchValue(value=value),
+        )
+
+    @staticmethod
+    def _metadata_any_condition(key: str, values: list[str]) -> models.FieldCondition:
+        return models.FieldCondition(
+            key=QdrantService._metadata_key(key),
+            match=models.MatchAny(any=values),
+        )
+
+    @staticmethod
     def get_collection_names() -> tuple[str, str, str]:
         return (
             PROJECT_QUESTIONS_COLLECTION,
@@ -330,10 +348,7 @@ class QdrantService:
                 points_selector=QdrantService._filter_selector(
                     models.Filter(
                         must=[
-                            models.FieldCondition(
-                                key="task_id",
-                                match=models.MatchValue(value=task_id),
-                            )
+                            QdrantService._metadata_value_condition("task_id", task_id)
                         ]
                     )
                 ),
@@ -391,10 +406,7 @@ class QdrantService:
                 points_selector=QdrantService._filter_selector(
                     models.Filter(
                         must=[
-                            models.FieldCondition(
-                                key="task_id",
-                                match=models.MatchValue(value=task_id),
-                            )
+                            QdrantService._metadata_value_condition("task_id", task_id)
                         ]
                     )
                 ),
@@ -421,10 +433,7 @@ class QdrantService:
                 k=limit,
                 filter=models.Filter(
                     must=[
-                        models.FieldCondition(
-                            key="task_id",
-                            match=models.MatchValue(value=task_id),
-                        )
+                        QdrantService._metadata_value_condition("task_id", task_id)
                     ]
                 ),
             )
@@ -450,10 +459,7 @@ class QdrantService:
                 k=max(limit * 6, 12),
                 filter=models.Filter(
                     must=[
-                        models.FieldCondition(
-                            key="project_id",
-                            match=models.MatchValue(value=project_id),
-                        )
+                        QdrantService._metadata_value_condition("project_id", project_id)
                     ]
                 ),
             )
@@ -502,10 +508,7 @@ class QdrantService:
                 points_selector=QdrantService._filter_selector(
                     models.Filter(
                         must=[
-                            models.FieldCondition(
-                                key="task_id",
-                                match=models.MatchValue(value=task_id),
-                            )
+                            QdrantService._metadata_value_condition("task_id", task_id)
                         ]
                     )
                 ),
@@ -559,18 +562,10 @@ class QdrantService:
                 return []
 
             must_conditions: list[models.FieldCondition] = [
-                models.FieldCondition(
-                    key="project_id",
-                    match=models.MatchValue(value=project_id),
-                )
+                QdrantService._metadata_value_condition("project_id", project_id)
             ]
             if tags:
-                must_conditions.append(
-                    models.FieldCondition(
-                        key="tags",
-                        match=models.MatchAny(any=tags),
-                    )
-                )
+                must_conditions.append(QdrantService._metadata_any_condition("tags", tags))
 
             return await QdrantService._get_store(PROJECT_QUESTIONS_COLLECTION).asimilarity_search(
                 query_text,
@@ -590,10 +585,7 @@ class QdrantService:
                 points_selector=QdrantService._filter_selector(
                     models.Filter(
                         must=[
-                            models.FieldCondition(
-                                key="task_id",
-                                match=models.MatchValue(value=task_id),
-                            )
+                            QdrantService._metadata_value_condition("task_id", task_id)
                         ]
                     )
                 ),
@@ -620,14 +612,8 @@ class QdrantService:
                 k=3,
                 filter=models.Filter(
                     must=[
-                        models.FieldCondition(
-                            key="project_id",
-                            match=models.MatchValue(value=project_id),
-                        ),
-                        models.FieldCondition(
-                            key="status",
-                            match=models.MatchAny(any=["new", "accepted"]),
-                        ),
+                        QdrantService._metadata_value_condition("project_id", project_id),
+                        QdrantService._metadata_any_condition("status", ["new", "accepted"]),
                     ]
                 ),
             )
@@ -665,14 +651,8 @@ class QdrantService:
                 k=limit,
                 filter=models.Filter(
                     must=[
-                        models.FieldCondition(
-                            key="project_id",
-                            match=models.MatchValue(value=project_id),
-                        ),
-                        models.FieldCondition(
-                            key="status",
-                            match=models.MatchAny(any=["new", "accepted"]),
-                        ),
+                        QdrantService._metadata_value_condition("project_id", project_id),
+                        QdrantService._metadata_any_condition("status", ["new", "accepted"]),
                     ]
                 ),
             )
@@ -738,10 +718,7 @@ class QdrantService:
                 points_selector=QdrantService._filter_selector(
                     models.Filter(
                         must=[
-                            models.FieldCondition(
-                                key="task_id",
-                                match=models.MatchValue(value=task_id),
-                            )
+                            QdrantService._metadata_value_condition("task_id", task_id)
                         ]
                     )
                 ),

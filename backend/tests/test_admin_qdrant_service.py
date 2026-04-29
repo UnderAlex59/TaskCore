@@ -46,6 +46,14 @@ def make_collection_info(
     )
 
 
+def test_task_filter_targets_metadata_task_id() -> None:
+    filter_ = AdminQdrantService._task_filter("task-123")
+
+    assert len(filter_.must) == 1
+    assert filter_.must[0].key == "metadata.task_id"
+    assert filter_.must[0].match.value == "task-123"
+
+
 @pytest.mark.asyncio
 async def test_get_overview_marks_empty_collections_and_metadata_mismatch(
     monkeypatch: pytest.MonkeyPatch,
@@ -209,6 +217,7 @@ async def test_get_project_coverage_counts_live_points(
             filter_: models.Filter | None = None,
         ) -> int:
             assert filter_ is not None
+            assert filter_.must[0].key == "metadata.task_id"
             task_id = str(filter_.must[0].match.value)
             counts = {
                 (TASK_KNOWLEDGE_COLLECTION, fresh_task.id): 3,
