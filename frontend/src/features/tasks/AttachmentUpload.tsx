@@ -23,7 +23,10 @@ function isImageAttachment(attachment: TaskAttachmentRead) {
 }
 
 function isPdfAttachment(attachment: TaskAttachmentRead) {
-  return attachment.content_type === "application/pdf";
+  return (
+    attachment.content_type === "application/pdf" ||
+    attachment.filename.toLowerCase().endsWith(".pdf")
+  );
 }
 
 function isTextAttachment(attachment: TaskAttachmentRead) {
@@ -32,6 +35,15 @@ function isTextAttachment(attachment: TaskAttachmentRead) {
     attachment.content_type === "application/json" ||
     attachment.content_type === "application/xml"
   );
+}
+
+async function decodeTextBlob(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder("windows-1251").decode(buffer);
+  }
 }
 
 export default function AttachmentUpload({
@@ -50,6 +62,9 @@ export default function AttachmentUpload({
     null,
   );
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [visibleAltTextIds, setVisibleAltTextIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   async function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -77,15 +92,16 @@ export default function AttachmentUpload({
           return;
         }
 
+        objectUrl = URL.createObjectURL(blob);
+
         if (isTextAttachment(selectedAttachment)) {
-          const text = await blob.text();
+          const text = await decodeTextBlob(blob);
           if (active) {
-            setPreview({ status: "ready", text });
+            setPreview({ status: "ready", objectUrl, text });
           }
           return;
         }
 
-        objectUrl = URL.createObjectURL(blob);
         setPreview({ status: "ready", objectUrl });
       })
       .catch(() => {
@@ -138,12 +154,29 @@ export default function AttachmentUpload({
       if (selectedAttachment?.id === deleteTarget.id) {
         setSelectedAttachment(null);
       }
+      setVisibleAltTextIds((current) => {
+        const next = new Set(current);
+        next.delete(deleteTarget.id);
+        return next;
+      });
       setDeleteTarget(null);
     } catch {
       // Ошибка показывается на уровне страницы через общий error state.
     } finally {
       setDeletingId(null);
     }
+  }
+
+  function toggleAltText(attachmentId: string) {
+    setVisibleAltTextIds((current) => {
+      const next = new Set(current);
+      if (next.has(attachmentId)) {
+        next.delete(attachmentId);
+      } else {
+        next.add(attachmentId);
+      }
+      return next;
+    });
   }
 
   function renderPreview() {
@@ -192,12 +225,29 @@ export default function AttachmentUpload({
     }
 
     if (preview.objectUrl && isPdfAttachment(selectedAttachment)) {
+      const pdfUrl = `${preview.objectUrl}#toolbar=1&navpanes=0`;
       return (
-        <iframe
+        <object
           className="h-[62vh] w-full rounded-[12px] border border-[rgba(9,30,66,0.1)] bg-white"
-          src={preview.objectUrl}
-          title={selectedAttachment.filename}
-        />
+          data={pdfUrl}
+          type="application/pdf"
+        >
+          <embed
+            className="h-[62vh] w-full"
+            src={pdfUrl}
+            type="application/pdf"
+          />
+          <div className="rounded-[12px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-4 text-sm leading-6 text-[#44546f]">
+            PDF не удалось отобразить во встроенном просмотрщике.
+            <a
+              className="ml-2 font-semibold text-[#0c66e4] hover:text-[#0055cc]"
+              download={selectedAttachment.filename}
+              href={preview.objectUrl}
+            >
+              Скачать файл
+            </a>
+          </div>
+        </object>
       );
     }
 
@@ -246,54 +296,73 @@ export default function AttachmentUpload({
             Файлы пока не загружены.
           </div>
         ) : (
-          attachments.map((attachment) => (
-            <article
-              key={attachment.id}
-              className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-white px-4 py-4"
-            >
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <p className="text-anywhere font-medium text-[#172b4d]">
-                    {attachment.filename}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-[#44546f]">
-                    {attachment.content_type}
-                  </p>
-                  {attachment.alt_text ? (
-                    <p className="text-anywhere mt-2 rounded-[12px] bg-[#f7f8fa] px-3 py-2 text-sm leading-6 text-[#172b4d]">
-                      <span className="font-semibold">Alt-text: </span>
-                      {attachment.alt_text}
+          attachments.map((attachment) => {
+            const isAltTextVisible = visibleAltTextIds.has(attachment.id);
+            const altTextId = `attachment-alt-text-${attachment.id}`;
+
+            return (
+              <article
+                key={attachment.id}
+                className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-white px-4 py-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-anywhere font-medium text-[#172b4d]">
+                      {attachment.filename}
                     </p>
-                  ) : (
-                    <p className="mt-2 text-sm leading-6 text-[#626f86]">
-                      Alt-text не определен.
+                    <p className="mt-1 text-sm leading-6 text-[#44546f]">
+                      {attachment.content_type}
                     </p>
-                  )}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {attachment.alt_text ? (
+                      <button
+                        aria-controls={altTextId}
+                        aria-expanded={isAltTextVisible}
+                        className="ui-button-secondary px-3 py-2 text-xs"
+                        onClick={() => toggleAltText(attachment.id)}
+                        type="button"
+                      >
+                        {isAltTextVisible
+                          ? "Скрыть alt-text"
+                          : "Показать alt-text"}
+                      </button>
+                    ) : null}
+                    {onOpenAttachment ? (
+                      <button
+                        className="ui-button-secondary px-3 py-2 text-xs"
+                        onClick={() => setSelectedAttachment(attachment)}
+                        type="button"
+                      >
+                        Просмотреть
+                      </button>
+                    ) : null}
+                    {onDelete ? (
+                      <button
+                        className="ui-button-danger px-3 py-2 text-xs"
+                        disabled={disabled || deletingId === attachment.id}
+                        onClick={() => setDeleteTarget(attachment)}
+                        type="button"
+                      >
+                        {deletingId === attachment.id
+                          ? "Удаляем..."
+                          : "Удалить"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {onOpenAttachment ? (
-                    <button
-                      className="ui-button-secondary px-3 py-2 text-xs"
-                      onClick={() => setSelectedAttachment(attachment)}
-                      type="button"
-                    >
-                      Просмотреть
-                    </button>
-                  ) : null}
-                  {onDelete ? (
-                    <button
-                      className="ui-button-danger px-3 py-2 text-xs"
-                      disabled={disabled || deletingId === attachment.id}
-                      onClick={() => setDeleteTarget(attachment)}
-                      type="button"
-                    >
-                      {deletingId === attachment.id ? "Удаляем..." : "Удалить"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </article>
-          ))
+                {attachment.alt_text && isAltTextVisible ? (
+                  <p
+                    className="text-anywhere mt-3 w-full rounded-[12px] bg-[#f7f8fa] px-3 py-2 text-sm leading-6 text-[#172b4d]"
+                    id={altTextId}
+                  >
+                    <span className="font-semibold">Alt-text: </span>
+                    {attachment.alt_text}
+                  </p>
+                ) : null}
+              </article>
+            );
+          })
         )}
       </div>
 
@@ -321,7 +390,7 @@ export default function AttachmentUpload({
                   {selectedAttachment.content_type}
                 </p>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2">
                 {preview.status === "ready" && preview.objectUrl ? (
                   <a
                     className="ui-button-secondary px-3 py-2 text-xs"
@@ -330,6 +399,31 @@ export default function AttachmentUpload({
                   >
                     Скачать
                   </a>
+                ) : null}
+                {preview.status === "ready" &&
+                preview.objectUrl &&
+                isPdfAttachment(selectedAttachment) ? (
+                  <a
+                    className="ui-button-secondary px-3 py-2 text-xs"
+                    href={preview.objectUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Открыть отдельно
+                  </a>
+                ) : null}
+                {selectedAttachment.alt_text ? (
+                  <button
+                    aria-controls={`attachment-preview-alt-text-${selectedAttachment.id}`}
+                    aria-expanded={visibleAltTextIds.has(selectedAttachment.id)}
+                    className="ui-button-secondary px-3 py-2 text-xs"
+                    onClick={() => toggleAltText(selectedAttachment.id)}
+                    type="button"
+                  >
+                    {visibleAltTextIds.has(selectedAttachment.id)
+                      ? "Скрыть alt-text"
+                      : "Показать alt-text"}
+                  </button>
                 ) : null}
                 <button
                   className="ui-button-secondary px-3 py-2 text-xs"
@@ -341,12 +435,16 @@ export default function AttachmentUpload({
               </div>
             </header>
             <div className="min-h-0 overflow-auto px-5 py-5">
-              {selectedAttachment.alt_text ? (
+              {selectedAttachment.alt_text &&
+              visibleAltTextIds.has(selectedAttachment.id) ? (
                 <section className="mb-4 rounded-[12px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
                     Alt-text
                   </p>
-                  <p className="text-anywhere mt-2 text-sm leading-6 text-[#172b4d]">
+                  <p
+                    className="text-anywhere mt-2 text-sm leading-6 text-[#172b4d]"
+                    id={`attachment-preview-alt-text-${selectedAttachment.id}`}
+                  >
                     {selectedAttachment.alt_text}
                   </p>
                 </section>

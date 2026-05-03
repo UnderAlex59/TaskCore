@@ -39,10 +39,41 @@ services:
     environment:
       OLLAMA_HOST: http://ollama:11434
     entrypoint: ["/bin/sh", "-lc"]
-    command:
-      [
-        "provider=\"$${EMBEDDING_PROVIDER:-}\"; if [ \"$$provider\" != \"ollama\" ]; then echo 'Skipping local Ollama embedding pull'; exit 0; fi; if [ -z \"$${OLLAMA_EMBEDDING_MODEL}\" ]; then echo 'OLLAMA_EMBEDDING_MODEL is required when EMBEDDING_PROVIDER=ollama' >&2; exit 1; fi; until ollama list > /dev/null 2>&1; do sleep 2; done; ollama pull \"$${OLLAMA_EMBEDDING_MODEL}\"",
-      ]
+    command: |
+      provider="$${EMBEDDING_PROVIDER:-}"
+      if [ "$$provider" != "ollama" ]; then
+        echo "Skipping local Ollama embedding pull"
+        exit 0
+      fi
+
+      model="$${OLLAMA_EMBEDDING_MODEL:-}"
+      if [ -z "$$model" ]; then
+        echo "OLLAMA_EMBEDDING_MODEL is required when EMBEDDING_PROVIDER=ollama" >&2
+        exit 1
+      fi
+
+      until ollama list > /dev/null 2>&1; do
+        sleep 2
+      done
+
+      installed_models="$$(ollama list | awk 'NR > 1 {print $$1}')"
+      if printf '%s\n' "$$installed_models" | grep -Fxq "$$model" || \
+        printf '%s\n' "$$installed_models" | grep -Fxq "$$model:latest"; then
+        echo "Ollama model already present: $$model"
+        exit 0
+      fi
+
+      attempt=1
+      max_attempts=5
+      until ollama pull "$$model"; do
+        if [ "$$attempt" -ge "$$max_attempts" ]; then
+          echo "Failed to pull Ollama model after $$max_attempts attempts: $$model" >&2
+          exit 1
+        fi
+        attempt="$$((attempt + 1))"
+        echo "Retrying Ollama model pull ($$attempt/$$max_attempts): $$model"
+        sleep 10
+      done
     depends_on:
       ollama:
         condition: service_healthy

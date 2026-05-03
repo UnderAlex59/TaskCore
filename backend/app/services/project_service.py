@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.validation_settings import normalize_validation_node_settings
 from app.models.audit_event import AuditEvent
 from app.models.custom_rule import CustomRule
+from app.models.llm_request_log import LLMRequestLog
 from app.models.project import Project, ProjectMember
 from app.models.task import Task
 from app.models.user import User, UserRole
@@ -199,9 +200,19 @@ class ProjectService:
                 .where(AuditEvent.task_id.in_(task_ids))
                 .values(task_id=None)
             )
+            await db.execute(
+                update(LLMRequestLog)
+                .where(LLMRequestLog.task_id.in_(task_ids))
+                .values(task_id=None)
+            )
         await db.execute(
             update(AuditEvent)
             .where(AuditEvent.project_id == project.id)
+            .values(project_id=None)
+        )
+        await db.execute(
+            update(LLMRequestLog)
+            .where(LLMRequestLog.project_id == project.id)
             .values(project_id=None)
         )
         AuditService.record(

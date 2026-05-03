@@ -393,8 +393,8 @@ export default function TaskForm({
 
               {canSuggestTags ? (
                 <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
+                  <div className="flex flex-col gap-4">
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
                         Подбор тегов
                       </p>
@@ -405,7 +405,7 @@ export default function TaskForm({
                       </p>
                     </div>
                     <button
-                      className="ui-button-secondary"
+                      className="ui-button-secondary w-full whitespace-nowrap px-3"
                       disabled={
                         disabled || suggestingTags || availableTags.length === 0
                       }

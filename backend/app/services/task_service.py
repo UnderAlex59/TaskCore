@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 import re
 import uuid
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.task_tag_suggestion_graph import run_task_tag_suggestion_graph
 from app.agents.validation_graph import run_validation_graph
 from app.models.audit_event import AuditEvent
+from app.models.llm_request_log import LLMRequestLog
 from app.models.message import Message, MessageType
 from app.models.project import ProjectMember
 from app.models.task import Task, TaskAttachment, TaskStatus
@@ -153,6 +155,13 @@ class TaskService:
             path.unlink(missing_ok=True)
         except (OSError, ValueError):
             pass
+
+    @staticmethod
+    def _resolve_content_type(filename: str, uploaded_content_type: str | None) -> str:
+        if uploaded_content_type and uploaded_content_type != "application/octet-stream":
+            return uploaded_content_type
+        guessed_content_type, _ = mimetypes.guess_type(filename)
+        return guessed_content_type or uploaded_content_type or "application/octet-stream"
 
     @staticmethod
     async def _get_project_member_or_422(
@@ -896,6 +905,11 @@ class TaskService:
             .where(AuditEvent.task_id == task.id)
             .values(task_id=None)
         )
+        await db.execute(
+            update(LLMRequestLog)
+            .where(LLMRequestLog.task_id == task.id)
+            .values(task_id=None)
+        )
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -937,7 +951,7 @@ class TaskService:
         attachment = TaskAttachment(
             task_id=task.id,
             filename=original_name,
-            content_type=file.content_type or "application/octet-stream",
+            content_type=TaskService._resolve_content_type(original_name, file.content_type),
             storage_path=str(target_path),
             alt_text=None,
         )
