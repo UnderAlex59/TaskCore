@@ -57,14 +57,16 @@ function EditorCard({
   title: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]">
+    <section className="min-w-0 overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]">
       <div className="border-b border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-6 py-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
           {title}
         </p>
-        <p className="mt-2 text-sm leading-6 text-[#44546f]">{helperText}</p>
+        <p className="text-anywhere mt-2 text-sm leading-6 text-[#44546f]">
+          {helperText}
+        </p>
       </div>
-      <div className="px-6 py-6 sm:px-8 sm:py-8">{children}</div>
+      <div className="min-w-0 px-6 py-6 sm:px-8 sm:py-8">{children}</div>
     </section>
   );
 }
@@ -134,9 +136,7 @@ export default function TaskForm({
     ? buildTaskDocumentFromEditors(documentBody, changeHistory)
     : task.content;
   const hasUnsavedChanges =
-    title !== task.title ||
-    contentChanged ||
-    !haveSameTags(tags, task.tags);
+    title !== task.title || contentChanged || !haveSameTags(tags, task.tags);
   const isPostApprovalFlow = [
     "ready_for_dev",
     "in_progress",
@@ -190,42 +190,42 @@ export default function TaskForm({
   }
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit}>
-      <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-[#f7f8fa] px-5 py-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <form className="min-w-0 space-y-5" onSubmit={handleSubmit}>
+      <section className="min-w-0 rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-[#f7f8fa] px-5 py-4">
+        <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
             <p className="section-eyebrow">Спецификация задачи</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-[#e9f2ff] px-3 py-1 text-xs font-semibold text-[#0c66e4]">
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+              <span className="text-anywhere max-w-full rounded-full bg-[#e9f2ff] px-3 py-1 text-xs font-semibold text-[#0c66e4]">
                 {getTaskStatusLabel(task.status)}
               </span>
-              <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
+              <span className="text-anywhere max-w-full rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
                 Обновлено {formatDateTime(task.updated_at)}
               </span>
               {task.indexed_at ? (
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
+                <span className="text-anywhere max-w-full rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
                   Индекс {formatDateTime(task.indexed_at)}
                 </span>
               ) : null}
             </div>
-            <h3 className="mt-4 text-2xl font-semibold leading-tight text-[#172b4d] sm:text-[2rem]">
+            <h3 className="text-anywhere mt-4 text-2xl font-semibold leading-tight text-[#172b4d] sm:text-[2rem]">
               {activePane === "history"
                 ? "История изменений задачи"
                 : "Текст задачи"}
             </h3>
-            <p className="mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
+            <p className="text-anywhere mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
               {activePane === "history"
                 ? "Фиксируйте смысловые правки постановки отдельно от основного текста задачи. Это упрощает чтение текущей версии и помогает команде видеть, что менялось."
                 : "Работайте с задачей как с единым документом без визуального дробления на блоки. При необходимости используйте заголовки и списки прямо в тексте."}
             </p>
           </div>
 
-          <div className="grid gap-3 sm:min-w-[17rem]">
-            <div className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-white px-4 py-3">
+          <div className="grid min-w-0 gap-3 sm:min-w-[17rem]">
+            <div className="min-w-0 rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-white px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
                 Состояние редактора
               </p>
-              <p className="mt-2 text-sm leading-6 text-[#172b4d]">
+              <p className="text-anywhere mt-2 text-sm leading-6 text-[#172b4d]">
                 {disabled
                   ? "Редактирование временно недоступно."
                   : hasUnsavedChanges
@@ -240,8 +240,8 @@ export default function TaskForm({
 
         {isAwaitingApproval ? (
           <div className="mt-4 rounded-[14px] border border-[rgba(172,107,8,0.18)] bg-[#fff4e5] px-4 py-3 text-sm leading-6 text-[#7f4c00]">
-            Любое изменение на этапе подтверждения возвращает задачу в
-            доработку и потребует повторной проверки.
+            Любое изменение на этапе подтверждения возвращает задачу в доработку
+            и потребует повторной проверки.
           </div>
         ) : null}
 
@@ -263,9 +263,7 @@ export default function TaskForm({
                 : "Один документ для чтения и редактирования задачи. Заголовки и структура остаются внутри текста, а не в UI."
             }
             title={
-              activePane === "history"
-                ? "История изменений"
-                : "Документ задачи"
+              activePane === "history" ? "История изменений" : "Документ задачи"
             }
           >
             {activePane === "document" ? (
@@ -392,17 +390,19 @@ export default function TaskForm({
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
-                        LLM-подбор тегов
+                        Подбор тегов
                       </p>
                       <p className="mt-3 text-sm leading-7 text-[#44546f]">
-                        Подбирает до 5 тегов из справочника текущего проекта по
-                        текущей версии задачи. Предлагаются только теги с
-                        ожидаемым совпадением не ниже 80%.
+                        Подбирает до 5 тегов из справочника проекта по текущей
+                        версии задачи. Предлагаются только теги с ожидаемым
+                        совпадением не ниже 80%.
                       </p>
                     </div>
                     <button
-                      className="ui-button-secondary whitespace-nowrap"
-                      disabled={disabled || suggestingTags || availableTags.length === 0}
+                      className="ui-button-secondary"
+                      disabled={
+                        disabled || suggestingTags || availableTags.length === 0
+                      }
                       onClick={() => void handleSuggestTags()}
                       type="button"
                     >
@@ -431,12 +431,12 @@ export default function TaskForm({
                           return (
                             <article
                               key={item.tag}
-                              className="rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3"
+                              className="min-w-0 rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3"
                             >
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#172b4d]">
+                                    <span className="text-anywhere max-w-full rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#172b4d]">
                                       {item.tag}
                                     </span>
                                     <span className="text-xs font-medium text-[#5e6c84]">
@@ -448,7 +448,7 @@ export default function TaskForm({
                                   </p>
                                 </div>
                                 <button
-                                  className="ui-button-secondary whitespace-nowrap"
+                                  className="ui-button-secondary"
                                   disabled={disabled || alreadySelected}
                                   onClick={() => addSuggestedTag(item.tag)}
                                   type="button"
@@ -462,7 +462,8 @@ export default function TaskForm({
                       </div>
                       {tagSuggestionsGeneratedAt ? (
                         <p className="text-xs text-[#626f86]">
-                          Сформировано {formatDateTime(tagSuggestionsGeneratedAt)}
+                          Сформировано{" "}
+                          {formatDateTime(tagSuggestionsGeneratedAt)}
                         </p>
                       ) : null}
                     </div>
@@ -480,8 +481,14 @@ export default function TaskForm({
                 </p>
                 <ul className="mt-3 space-y-3 text-sm leading-6 text-[#44546f]">
                   <li>Держите текущую постановку в одном связанном тексте.</li>
-                  <li>Используйте заголовки и списки внутри документа, если это помогает чтению.</li>
-                  <li>Историю изменений переносите на отдельную вкладку, чтобы не перегружать основную версию.</li>
+                  <li>
+                    Используйте заголовки и списки внутри документа, если это
+                    помогает чтению.
+                  </li>
+                  <li>
+                    Историю изменений переносите на отдельную вкладку, чтобы не
+                    перегружать основную версию.
+                  </li>
                 </ul>
               </section>
             </>
@@ -491,18 +498,26 @@ export default function TaskForm({
                 Как вести историю
               </p>
               <ul className="mt-3 space-y-3 text-sm leading-6 text-[#44546f]">
-                <li>Фиксируйте только смысловые изменения, а не каждую мелкую правку.</li>
-                <li>Указывайте причину изменения, если она важна для команды.</li>
-                <li>После сохранения при необходимости публикуйте новую версию через commit.</li>
+                <li>
+                  Фиксируйте только смысловые изменения, а не каждую мелкую
+                  правку.
+                </li>
+                <li>
+                  Указывайте причину изменения, если она важна для команды.
+                </li>
+                <li>
+                  После сохранения при необходимости публикуйте новую версию
+                  через commit.
+                </li>
               </ul>
             </section>
           )}
         </aside>
       </div>
 
-      <div className="sticky bottom-3 z-10 flex flex-col gap-4 rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 shadow-[0_12px_24px_rgba(9,30,66,0.08)] sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-[#172b4d]">
+      <div className="sticky bottom-3 z-10 flex min-w-0 flex-col gap-4 rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 shadow-[0_12px_24px_rgba(9,30,66,0.08)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <p className="text-anywhere text-sm font-medium text-[#172b4d]">
             {hasUnsavedChanges
               ? "Есть несохраненные изменения."
               : embeddingsStale && canCommitChanges
@@ -511,14 +526,14 @@ export default function TaskForm({
                   ? "Документ синхронизирован. Новые правки можно публиковать отдельным commit."
                   : "Страница синхронизирована с текущей карточкой задачи."}
           </p>
-          <p className="text-xs text-[#626f86]">
+          <p className="text-anywhere text-xs text-[#626f86]">
             {activePane === "history"
               ? "История изменений хранится отдельно от основного текста, но сохраняется в ту же задачу."
               : "Переход задачи в разработку больше не блокирует работу аналитика над постановкой."}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex min-w-0 flex-wrap gap-3">
           {canCommitChanges ? (
             <button
               className="ui-button-secondary"

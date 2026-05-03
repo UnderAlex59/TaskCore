@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { authApi } from "@/api/authApi";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { useAuthStore } from "@/store/authStore";
 
@@ -17,8 +18,17 @@ function StatusProbe() {
 }
 
 describe("AuthProvider", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.pushState({}, "", "/projects");
+  });
+
   it("marks auth as initialized even when refresh fails", async () => {
-    useAuthStore.setState({ user: null, accessToken: null, isInitialized: false });
+    useAuthStore.setState({
+      user: null,
+      accessToken: null,
+      isInitialized: false,
+    });
 
     render(
       <AuthProvider>
@@ -29,5 +39,25 @@ describe("AuthProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("initialized")).toBeInTheDocument();
     });
+  });
+
+  it("does not request refresh on public pages", async () => {
+    window.history.pushState({}, "", "/login");
+    useAuthStore.setState({
+      user: null,
+      accessToken: null,
+      isInitialized: false,
+    });
+
+    render(
+      <AuthProvider>
+        <StatusProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("initialized")).toBeInTheDocument();
+    });
+    expect(authApi.refresh).not.toHaveBeenCalled();
   });
 });

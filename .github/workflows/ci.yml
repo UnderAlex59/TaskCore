@@ -64,22 +64,10 @@ jobs:
       - name: Build
         run: npm run build
 
-  packaging:
+  docker-images:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.16.2
-      - name: Helm lint
-        run: helm lint deploy/helm/task-platform
-      - name: Helm template
-        run: |
-          helm template task-platform deploy/helm/task-platform \
-            --set backend.secretEnv.databaseUrl=postgresql+asyncpg://app_user:app_pass@postgres:5432/taskplatform \
-            --set backend.secretEnv.jwtSecretKey=test-secret-value-123456789 \
-            --set ingress.enabled=true \
-            --set ingress.hosts[0].host=task-platform.example.com
       - name: Build backend image
         run: docker build -t task-platform-backend:ci backend
       - name: Build frontend image

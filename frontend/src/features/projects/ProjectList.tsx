@@ -10,6 +10,7 @@ import ProjectCard from "@/features/projects/ProjectCard";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
+import { getRoleLabel } from "@/shared/lib/locale";
 import { useAuthStore } from "@/store/authStore";
 
 const PROJECT_CREATORS = new Set(["ADMIN", "ANALYST", "MANAGER"]);
@@ -85,13 +86,15 @@ export default function ProjectList() {
     return <LoadingSpinner label="Загрузка проектов" />;
   }
 
+  const canCreateProject = PROJECT_CREATORS.has(user?.role ?? "");
+
   return (
     <section className="space-y-6">
-      <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
+      <header className="page-panel px-5 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="section-eyebrow">Projects</p>
-            <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
+          <div className="min-w-0 max-w-3xl">
+            <p className="section-eyebrow">Проекты</p>
+            <h2 className="text-anywhere mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
               Проекты рабочего пространства
             </h2>
             <p className="mt-4 text-sm leading-7 text-[#44546f]">
@@ -100,11 +103,39 @@ export default function ProjectList() {
             </p>
           </div>
           <CreateProjectModal
-            canCreate={PROJECT_CREATORS.has(user?.role ?? "")}
+            canCreate={canCreateProject}
             loading={creating}
             onCreate={handleCreate}
           />
         </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              Проектов
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              {projects.length}
+            </p>
+          </div>
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              Роль
+            </p>
+            <p className="mt-2 text-sm font-semibold text-[#172b4d]">
+              {user?.role ? getRoleLabel(user.role) : "Не указана"}
+            </p>
+          </div>
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              Создание
+            </p>
+            <p className="mt-2 text-sm font-semibold text-[#172b4d]">
+              {canCreateProject ? "Доступно" : "Только просмотр"}
+            </p>
+          </div>
+        </div>
+
         {error ? (
           <p
             aria-live="polite"
@@ -116,12 +147,17 @@ export default function ProjectList() {
       </header>
 
       {projects.length === 0 ? (
-        <div className="rounded-[18px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-6 py-8 text-sm leading-7 text-[#626f86]">
-          Проектов пока нет. Создайте первый проект, чтобы начать работу с
-          задачами и участниками.
+        <div className="page-panel border-dashed px-6 py-8">
+          <p className="text-lg font-semibold text-[#172b4d]">
+            Проектов пока нет
+          </p>
+          <p className="mt-2 max-w-2xl text-sm leading-7 text-[#626f86]">
+            Создайте первый проект, чтобы начать работу с задачами, участниками
+            и правилами проверки.
+          </p>
         </div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-2">
+        <div className="grid min-w-0 gap-5 xl:grid-cols-2">
           {projects.map((project) => (
             <ProjectCard
               key={project.id}

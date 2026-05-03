@@ -12,7 +12,7 @@ const productHighlights = [
     body: "После согласования задача уходит в разработку вместе с полным рабочим контекстом и сохраненными решениями.",
   },
   {
-    title: "Управляемый change flow",
+    title: "Управляемый поток изменений",
     body: "Изменения после старта разработки сохраняются отдельно и публикуются в семантический индекс через явный commit.",
   },
 ];
@@ -46,7 +46,7 @@ export default function LandingPage() {
         <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
-              Task Platform
+              Платформа задач
             </p>
             <p className="mt-1 text-sm text-[#44546f]">
               Рабочая система для требований, проверки и командной передачи
@@ -72,7 +72,7 @@ export default function LandingPage() {
           <div className="grid gap-10 px-6 py-8 lg:grid-cols-[minmax(0,1.2fr)_320px] lg:px-8 lg:py-10">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
-                Product Workspace
+                Рабочая область
               </p>
               <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-tight text-[#172b4d] sm:text-5xl">
                 Управляйте жизненным циклом задачи как единым рабочим

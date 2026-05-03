@@ -1,11 +1,8 @@
 SHELL := /bin/sh
 
 PROJECT_NAME ?= task-platform
-HELM_CHART ?= deploy/helm/task-platform
-HELM_NAMESPACE ?= task-platform
-HELM_VALUES ?=
 
-.PHONY: backend-lint backend-test frontend-lint frontend-test frontend-build check docker-build compose-up compose-down helm-lint helm-template helm-install helm-uninstall
+.PHONY: backend-lint backend-test frontend-lint frontend-test frontend-build check docker-build compose-up compose-down
 
 backend-lint:
 	cd backend && ruff check . && ruff format --check . && mypy .
@@ -33,16 +30,3 @@ compose-up:
 
 compose-down:
 	docker compose down
-
-helm-lint:
-	helm lint $(HELM_CHART)
-
-helm-template:
-	helm template $(PROJECT_NAME) $(HELM_CHART) $(HELM_VALUES)
-
-helm-install:
-	helm upgrade --install $(PROJECT_NAME) $(HELM_CHART) -n $(HELM_NAMESPACE) --create-namespace $(HELM_VALUES)
-
-helm-uninstall:
-	helm uninstall $(PROJECT_NAME) -n $(HELM_NAMESPACE)
-

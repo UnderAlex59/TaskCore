@@ -149,7 +149,7 @@ export default function TaskCreatePage() {
 
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
-              <p className="section-eyebrow">Analyst Task Workspace</p>
+              <p className="section-eyebrow">Рабочая область задачи</p>
               <h2 className="mt-2 text-balance text-3xl font-semibold leading-tight text-[#172b4d] sm:text-[2.25rem]">
                 Новая задача
               </h2>

@@ -1,4 +1,10 @@
-import { useDeferredValue, useEffect, useEffectEvent, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 
 import type { UserRole } from "@/api/authApi";
@@ -24,6 +30,17 @@ const PROJECT_MEMBER_ROLES: UserRole[] = [
   "TESTER",
   "ADMIN",
 ];
+const TASK_STATUS_OPTIONS: TaskStatus[] = [
+  "draft",
+  "needs_rework",
+  "awaiting_approval",
+  "ready_for_dev",
+  "in_progress",
+  "ready_for_testing",
+  "testing",
+  "done",
+];
+
 export default function TaskList() {
   const { projectId } = useParams();
   const user = useAuthStore((state) => state.user);
@@ -99,6 +116,19 @@ export default function TaskList() {
   const availableUsers = users.filter(
     (candidate) => !members.some((member) => member.user_id === candidate.id),
   );
+  const taskStats = useMemo(
+    () => ({
+      total: tasks.length,
+      inWork: tasks.filter((task) =>
+        ["in_progress", "ready_for_testing", "testing"].includes(task.status),
+      ).length,
+      attention: tasks.filter((task) =>
+        ["needs_rework", "awaiting_approval"].includes(task.status),
+      ).length,
+    }),
+    [tasks],
+  );
+  const hasActiveFilters = search.trim().length > 0 || statusFilter !== "";
 
   async function handleAddMember(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -160,11 +190,11 @@ export default function TaskList() {
 
   return (
     <section className="space-y-6">
-      <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
+      <header className="page-panel px-5 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="max-w-3xl">
-            <p className="section-eyebrow">Tasks</p>
-            <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
+          <div className="min-w-0 max-w-3xl">
+            <p className="section-eyebrow">Задачи</p>
+            <h2 className="text-anywhere mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
               {project?.name ?? "Задачи проекта"}
             </h2>
             <p className="mt-4 text-sm leading-7 text-[#44546f]">
@@ -173,7 +203,7 @@ export default function TaskList() {
             </p>
           </div>
 
-          <div className="space-y-3">
+          <div className="w-full max-w-xl space-y-3">
             {canCreateTask ? (
               <Link
                 className="ui-button-primary w-full justify-center"
@@ -183,7 +213,7 @@ export default function TaskList() {
               </Link>
             ) : null}
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
               <label className="block">
                 <span className="sr-only">Поиск задач</span>
                 <input
@@ -207,16 +237,7 @@ export default function TaskList() {
                   value={statusFilter}
                 >
                   <option value="">Все статусы</option>
-                  {[
-                    "draft",
-                    "needs_rework",
-                    "awaiting_approval",
-                    "ready_for_dev",
-                    "in_progress",
-                    "ready_for_testing",
-                    "testing",
-                    "done",
-                  ].map((status) => (
+                  {TASK_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
                       {getTaskStatusLabel(status)}
                     </option>
@@ -224,6 +245,33 @@ export default function TaskList() {
                 </select>
               </label>
             </div>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              Найдено
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              {taskStats.total}
+            </p>
+          </div>
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              В работе
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              {taskStats.inWork}
+            </p>
+          </div>
+          <div className="metric-tile">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
+              Требуют внимания
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              {taskStats.attention}
+            </p>
           </div>
         </div>
 
@@ -237,29 +285,32 @@ export default function TaskList() {
         ) : null}
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_360px]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_360px]">
+        <div className="min-w-0 space-y-4">
           {tasks.length === 0 ? (
-            <div className="rounded-[18px] border border-dashed border-[rgba(9,30,66,0.12)] bg-white px-6 py-8 text-sm leading-7 text-[#626f86]">
-              По текущим фильтрам задачи не найдены.
+            <div className="page-panel border-dashed px-6 py-8">
+              <p className="text-lg font-semibold text-[#172b4d]">
+                {hasActiveFilters ? "Задачи не найдены" : "Задач пока нет"}
+              </p>
+              <p className="mt-2 text-sm leading-7 text-[#626f86]">
+                {hasActiveFilters
+                  ? "Измените поисковый запрос или статус, чтобы расширить выдачу."
+                  : "Создайте первую постановку, чтобы команда могла пройти проверку и взять задачу в работу."}
+              </p>
             </div>
           ) : (
             tasks.map((task) => (
-              <div key={task.id} className="space-y-3">
-                <TaskCard task={task} />
-                <Link
-                  className="ui-button-secondary"
-                  to={`/projects/${projectId}/tasks/${task.id}`}
-                >
-                  Открыть задачу
-                </Link>
-              </div>
+              <TaskCard
+                key={task.id}
+                detailHref={`/projects/${projectId}/tasks/${task.id}`}
+                task={task}
+              />
             ))
           )}
         </div>
 
-        <div className="space-y-6">
-          <section className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-5">
+        <div className="min-w-0 space-y-6">
+          <section className="page-panel p-5 xl:sticky xl:top-6">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
                 Команда проекта
@@ -275,11 +326,11 @@ export default function TaskList() {
                   key={member.user_id}
                   className="flex flex-col items-start gap-3 rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div>
-                    <p className="font-medium text-[#172b4d]">
+                  <div className="min-w-0">
+                    <p className="text-anywhere font-medium text-[#172b4d]">
                       {member.full_name}
                     </p>
-                    <p className="text-[#44546f]">
+                    <p className="text-anywhere text-[#44546f]">
                       {member.email} · роль в проекте{" "}
                       {getRoleLabel(member.role)}
                     </p>

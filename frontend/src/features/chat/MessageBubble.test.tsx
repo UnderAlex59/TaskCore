@@ -33,4 +33,29 @@ describe("MessageBubble", () => {
     expect(container.firstChild).toHaveClass("justify-start");
     expect(screen.getByText("Alex Analyst")).toBeInTheDocument();
   });
+
+  it("marks agent messages with agent metadata", () => {
+    render(
+      <MessageBubble
+        currentUserId="user-1"
+        message={{
+          ...baseMessage,
+          agent_name: "QAAgent",
+          author_id: null,
+          author_name: null,
+          message_type: "agent_answer",
+          source_ref: {
+            agent_description: "Отвечает на вопросы по требованиям.",
+            agent_key: "qa",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Агент вопросов")).toBeInTheDocument();
+    expect(screen.getByText("Агент")).toBeInTheDocument();
+    expect(
+      screen.getByText("Отвечает на вопросы по требованиям."),
+    ).toBeInTheDocument();
+  });
 });

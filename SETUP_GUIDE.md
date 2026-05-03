@@ -1,149 +1,123 @@
 # Setup Guide
 
-Ниже описан актуальный порядок запуска проекта после подготовки к Kubernetes.
+Этот документ описывает актуальный запуск Task Platform MVP: локальную разработку, production-like контур через Docker Compose, переменные окружения, проверки готовности и команды сопровождения.
 
-## 1. Что изменилось
-
-- backend больше не запускает `alembic upgrade head` из основного `CMD`;
-- в Compose миграции вынесены в отдельный сервис `migrate`;
-- в Kubernetes миграции запускаются отдельным Helm hook `Job`;
-- backend получил `readyz` для проверок readiness;
-- frontend nginx теперь настраивается через `BACKEND_UPSTREAM`;
-- для k8s добавлен Helm chart с HPA, PDB, ingress и PVC.
-
-## 2. Требования
+## Требования
 
 Для локальной разработки:
 
 - Python `3.12.x`
 - Node.js `24.x`
 - npm `11.x`
-- Docker + Docker Compose
+- Docker и Docker Compose
+- Git
 
-Для Kubernetes:
+Backend поддерживает Python `>=3.12,<3.15`, но проектные команды и инструкции ориентированы на Python 3.12.
 
-- Kubernetes `1.27+`
-- Helm `3.x`
-- ingress controller
-- metrics-server для работы HPA
-- storage class с `ReadWriteMany` или внешний storage для загрузок
+## Сервисы Docker Compose
 
-## 3. Переменные окружения backend
+`docker-compose.yml` поднимает полный контур:
 
-Шаблон: `backend/.env.example`
+- `postgres` - PostgreSQL 16, база `taskplatform`, пользователь `app_user`.
+- `qdrant` - векторное хранилище для RAG.
+- `ollama` - локальный runtime моделей.
+- `ollama-init` - подтягивает `OLLAMA_EMBEDDING_MODEL`, если `EMBEDDING_PROVIDER=ollama`.
+- `migrate` - выполняет `alembic upgrade head`.
+- `backend` - FastAPI-приложение.
+- `frontend` - nginx со статикой React SPA и proxy `/api` на backend.
 
-Ключевые переменные:
+Миграции вынесены в отдельный сервис. Backend стартует после успешного завершения `migrate`.
 
-- `DATABASE_URL`
-- `JWT_SECRET_KEY`
-- `ALLOWED_ORIGINS`
-- `COOKIE_SECURE`
-- `COOKIE_DOMAIN`
-- `UPLOAD_DIR`
+## Переменные окружения backend
 
-Параметры пула БД для нагрузки:
+Шаблон: `backend/.env.example`.
 
-- `DB_POOL_SIZE`
-- `DB_MAX_OVERFLOW`
-- `DB_POOL_TIMEOUT`
-- `DB_POOL_RECYCLE`
+Обязательные и важные параметры:
 
-Пример production-конфига:
+- `DATABASE_URL` - DSN PostgreSQL для SQLAlchemy AsyncIO.
+- `JWT_SECRET_KEY` - длинный случайный секрет подписи JWT.
+- `ALLOWED_ORIGINS` - JSON-массив или comma-separated список разрешенных origins.
+- `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN` - настройки refresh-cookie.
+- `QDRANT_URL`, `QDRANT_API_KEY` - подключение к Qdrant.
+- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OLLAMA_BASE_URL` - базовые provider-настройки.
+- `GIGACHAT_VERIFY_SSL`, `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CA_BUNDLE_PEM` - TLS-настройки GigaChat.
+- `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `EMBEDDING_DIMENSION` - embeddings для RAG.
+- `LLM_SETTINGS_ENCRYPTION_KEY` - ключ для чувствительных настроек LLM runtime.
+- `CHAT_AGENT_MODULES` - список внешних модулей с LangGraph agent subgraphs.
+- `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS` - параметры chunking.
+- `RAG_ATTACHMENT_MAX_TEXT_CHARS` - лимит текста вложения для RAG.
+- `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES` - Vision-контур вложений.
+- `UPLOAD_DIR` - каталог загруженных файлов.
+- `LANGGRAPH_IMAGES_DIR` - каталог PNG/HTML-экспорта графов.
+
+Пример локального dev-конфига:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://app_user:strong_password@postgres:5432/taskplatform
+DATABASE_URL=postgresql+asyncpg://app_user:app_pass@localhost:5432/taskplatform
 DB_POOL_SIZE=10
 DB_MAX_OVERFLOW=20
 DB_POOL_TIMEOUT=30
 DB_POOL_RECYCLE=1800
-JWT_SECRET_KEY=generate_a_long_random_secret
+JWT_SECRET_KEY=replace_with_a_long_random_secret
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=15
 REFRESH_TOKEN_EXPIRE_DAYS=7
-COOKIE_SECURE=true
+COOKIE_SECURE=false
 COOKIE_SAMESITE=lax
-COOKIE_DOMAIN=app.example.com
-ALLOWED_ORIGINS=["https://app.example.com"]
-QDRANT_URL=http://qdrant:6333
+COOKIE_DOMAIN=
+ALLOWED_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
+CHAT_AGENT_MODULES=[]
+QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
-LLM_PROVIDER=openai
 OPENAI_API_KEY=
-OLLAMA_BASE_URL=http://ollama:11434
-LLM_MODEL=gpt-4o
-EMBEDDING_MODEL=text-embedding-3-small
-UPLOAD_DIR=/var/lib/task-platform/uploads
+OPENAI_BASE_URL=
+OLLAMA_BASE_URL=http://localhost:11434
+EMBEDDING_PROVIDER=ollama
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_MODEL=
+EMBEDDING_DIMENSION=
+LLM_SETTINGS_ENCRYPTION_KEY=
+RAG_CHUNK_TARGET_TOKENS=450
+RAG_CHUNK_OVERLAP_TOKENS=50
+RAG_ATTACHMENT_MAX_TEXT_CHARS=20000
+RAG_VISION_ENABLED=true
+RAG_VISION_MAX_IMAGE_BYTES=5242880
+UPLOAD_DIR=./uploads
+LANGGRAPH_IMAGES_DIR=../langgraph_graphs
 ```
 
-## 4. Переменные окружения frontend
+## Переменные окружения frontend
 
-Шаблон: `frontend/.env.example`
-
-Для локальной разработки:
+Шаблон: `frontend/.env.example`.
 
 ```env
 VITE_API_URL=/api
 VITE_API_PROXY_TARGET=http://localhost:8000
 ```
 
-В этом режиме `vite dev server` проксирует и обычные HTTP-запросы, и WebSocket-подключения `/api/*` на backend.
+В production-like Compose frontend собирается с `VITE_API_URL=/api`. Runtime proxy внутри nginx-контейнера направляет запросы на `BACKEND_UPSTREAM=backend:8000`.
 
-Для production-сборки frontend обычно собирается с `VITE_API_URL=/api`.
+## Быстрый запуск через Docker Compose
 
-Runtime proxy внутри контейнера управляется переменной:
-
-```env
-BACKEND_UPSTREAM=backend:8000
-```
-
-В Kubernetes это значение автоматически задаётся chart'ом.
-
-## 5. Локальный ручной запуск
-
-### 5.1. Инфраструктура
+1. Создайте backend-конфиг:
 
 ```bash
-docker compose up postgres qdrant -d
+cp backend/.env.example backend/.env
 ```
 
-### 5.2. Backend
+2. Проверьте минимум:
 
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e .[dev]
-alembic upgrade head
-uvicorn main:app --reload
-```
+- `JWT_SECRET_KEY` не должен оставаться примером.
+- Для OpenAI/OpenRouter/GigaChat укажите ключи в админке или env в зависимости от сценария.
+- Для локальных embeddings через Ollama задайте `EMBEDDING_PROVIDER=ollama` и `OLLAMA_EMBEDDING_MODEL`.
 
-Backend будет доступен по адресам:
-
-- `http://localhost:8000`
-- `http://localhost:8000/docs`
-- `http://localhost:8000/healthz`
-- `http://localhost:8000/readyz`
-
-### 5.3. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend будет доступен по адресу `http://localhost:5173`.
-
-## 6. Production-like запуск через Docker Compose
+3. Запустите контур:
 
 ```bash
 docker compose up --build -d
 ```
 
-По умолчанию frontend публикуется на `http://localhost:8080`.
-Если нужен другой порт, задайте переменную окружения `FRONTEND_PORT`, например `FRONTEND_PORT=80`.
-
-Проверка:
+4. Проверьте сервисы:
 
 ```bash
 docker compose ps
@@ -152,93 +126,123 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
-Остановка:
+Адреса:
+
+- UI: `http://localhost:8080`
+- frontend health: `http://localhost:8080/healthz`
+- backend health через proxy: `http://localhost:8080/api/healthz`
+- backend readiness через proxy: `http://localhost:8080/api/readyz`
+
+Другой порт frontend:
 
 ```bash
-docker compose down
+FRONTEND_PORT=80 docker compose up --build -d
 ```
 
-Остановка со сбросом данных:
+## Локальный dev-запуск
+
+Этот режим удобен для разработки: backend и frontend запускаются с hot reload, а PostgreSQL/Qdrant остаются в Docker.
+
+### 1. Поднять инфраструктуру
 
 ```bash
+docker compose up postgres qdrant -d
+```
+
+Если нужны локальные embeddings через Ollama, также поднимите:
+
+```bash
+docker compose up ollama ollama-init -d
+```
+
+### 2. Запустить backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+alembic upgrade head
+uvicorn main:app --reload
+```
+
+Backend:
+
+- API: `http://localhost:8000`
+- OpenAPI: `http://localhost:8000/docs`
+- health: `http://localhost:8000/healthz`
+- readiness: `http://localhost:8000/readyz`
+
+### 3. Запустить frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend dev server:
+
+- UI: `http://localhost:5173`
+- API proxy: `/api -> http://localhost:8000`
+- WebSocket proxy включен для `/api`.
+
+## Проверки качества
+
+Из корня:
+
+```bash
+make backend-lint
+make backend-test
+make frontend-lint
+make frontend-test
+make frontend-build
+make check
+```
+
+Прямые команды:
+
+```bash
+cd backend
+ruff check .
+ruff format --check .
+mypy .
+pytest
+
+cd frontend
+npm run lint
+npm run typecheck
+npm run test -- --run
+npm run build
+```
+
+## Команды сопровождения
+
+```bash
+make docker-build
+make compose-up
+make compose-down
+```
+
+Docker Compose:
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f qdrant
+docker compose down
 docker compose down -v
 ```
 
-## 7. Kubernetes через Helm
+`docker compose down -v` удаляет volumes PostgreSQL, Qdrant, Ollama и uploads. Используйте эту команду только если нужен полный сброс локальных данных.
 
-### 7.1. Подготовка values
+## Эксплуатационные замечания
 
-Возьмите за основу:
-
-- `deploy/helm/task-platform/values.yaml`
-- `deploy/helm/task-platform/values.production.example.yaml`
-
-Минимально проверьте и заполните:
-
-- `backend.image.repository`
-- `backend.image.tag`
-- `frontend.image.repository`
-- `frontend.image.tag`
-- `backend.secretEnv.databaseUrl`
-- `backend.secretEnv.jwtSecretKey`
-- `backend.env.allowedOrigins`
-- `backend.env.cookieDomain`
-- `ingress.enabled`
-- `ingress.hosts`
-- `ingress.tls`
-- `uploads.persistence`
-
-### 7.2. Установка
-
-```bash
-helm upgrade --install task-platform deploy/helm/task-platform \
-  -n task-platform \
-  --create-namespace \
-  -f deploy/helm/task-platform/values.production.yaml
-```
-
-### 7.3. Что создаёт chart
-
-- `Deployment` и `Service` для backend;
-- `Deployment` и `Service` для frontend;
-- `Job` для миграций с hook `pre-install,pre-upgrade`;
-- `HorizontalPodAutoscaler` для backend и frontend;
-- `PodDisruptionBudget` для backend и frontend;
-- `PersistentVolumeClaim` под загрузки;
-- `Ingress` с отдельными маршрутами `/api` и `/`.
-
-### 7.4. Проверка после установки
-
-```bash
-kubectl get pods -n task-platform
-kubectl get ingress -n task-platform
-kubectl logs job/task-platform-backend-migrate -n task-platform
-kubectl get hpa -n task-platform
-```
-
-Readiness backend:
-
-```bash
-kubectl port-forward svc/task-platform-backend 8000:8000 -n task-platform
-curl http://127.0.0.1:8000/readyz
-```
-
-## 8. Рекомендации по масштабированию
-
-- backend масштабируется горизонтально через HPA, потому что состояние хранится в PostgreSQL;
-- refresh token rotation хранится в БД, а не в памяти pod'а;
-- frontend полностью stateless;
-- загрузки нельзя хранить на `emptyDir`, если вы реально поднимаете несколько backend pod'ов;
-- для production лучше вынести PostgreSQL, Qdrant и файлы во внешние managed сервисы.
-
-## 9. Команды сопровождения
-
-```bash
-make check
-make docker-build
-make helm-lint
-make helm-template
-make helm-install HELM_VALUES="-f deploy/helm/task-platform/values.production.yaml"
-```
-
-Если `make` недоступен, используйте те же команды напрямую.
+- Backend можно масштабировать горизонтально только при общем PostgreSQL, общем Qdrant и общем файловом хранилище uploads.
+- В текущем Compose uploads хранятся в Docker volume, а LangGraph-схемы монтируются в `./langgraph_graphs`.
+- Refresh token rotation хранится в PostgreSQL, поэтому процесс backend остается stateless.
+- Frontend stateless: вся длительная сессия поддерживается backend refresh-cookie.
+- Qdrant должен быть доступен до старта backend, потому что на lifespan выполняется `ensure_collections`.
+- Если `EMBEDDING_PROVIDER=ollama`, `ollama-init` требует непустой `OLLAMA_EMBEDDING_MODEL`.

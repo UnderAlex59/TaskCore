@@ -26,6 +26,8 @@
   --success-tint: #e8f5e9;
   --warning-tint: #fff4e5;
   --danger-tint: #fdecec;
+  --shadow-panel:
+    0 1px 2px rgba(9, 30, 66, 0.06), 0 14px 36px rgba(9, 30, 66, 0.06);
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -59,19 +61,19 @@
   }
 
   .ui-button-primary {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-[#0c66e4] bg-[#0c66e4] px-4 py-2.5 text-sm font-semibold text-white transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[#0055cc] hover:bg-[#0055cc] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-w-0 max-w-full items-center justify-center rounded-[10px] border border-[#0c66e4] bg-[#0c66e4] px-4 py-2.5 text-center text-sm font-semibold text-white transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[#0055cc] hover:bg-[#0055cc] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-secondary {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-[rgba(9,30,66,0.14)] bg-white px-4 py-2.5 text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-w-0 max-w-full items-center justify-center rounded-[10px] border border-[rgba(9,30,66,0.14)] bg-white px-4 py-2.5 text-center text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-ghost {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-transparent bg-transparent px-4 py-2.5 text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[rgba(9,30,66,0.12)] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-w-0 max-w-full items-center justify-center rounded-[10px] border border-transparent bg-transparent px-4 py-2.5 text-center text-sm font-semibold text-[#172b4d] transition-[background-color,border-color,color,box-shadow,opacity] hover:border-[rgba(9,30,66,0.12)] hover:bg-[#f7f8fa] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cloud disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-danger {
-    @apply inline-flex items-center justify-center rounded-[10px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-2.5 text-sm font-semibold text-[#ae2e24] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f9d8d6] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-w-0 max-w-full items-center justify-center rounded-[10px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-2.5 text-center text-sm font-semibold text-[#ae2e24] transition-[background-color,border-color,color,box-shadow,opacity] hover:bg-[#f9d8d6] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .section-eyebrow {
@@ -80,6 +82,28 @@
 
   .subtle-divider {
     @apply border-[rgba(9,30,66,0.12)];
+  }
+
+  .page-panel {
+    @apply rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.05)];
+  }
+
+  .work-card {
+    @apply min-w-0 overflow-hidden rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.04)] transition-[border-color,box-shadow,transform] hover:border-[rgba(12,102,228,0.22)] hover:shadow-[0_12px_28px_rgba(9,30,66,0.08)];
+  }
+
+  .metric-tile {
+    @apply rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3;
+  }
+
+  .status-pill {
+    @apply inline-flex min-w-0 max-w-full items-center rounded-full border px-3 py-1 text-center text-xs font-semibold;
+    overflow-wrap: anywhere;
+  }
+
+  .text-anywhere {
+    overflow-wrap: anywhere;
+    word-break: normal;
   }
 }
 
@@ -109,9 +133,7 @@ body {
   background: var(--surface-default);
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
-  box-shadow:
-    0 1px 2px rgba(9, 30, 66, 0.06),
-    0 8px 24px rgba(9, 30, 66, 0.04);
+  box-shadow: var(--shadow-panel);
 }
 
 .mesh-card {

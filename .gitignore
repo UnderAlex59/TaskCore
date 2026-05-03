@@ -23,7 +23,6 @@ frontend/coverage/
 # Environment
 backend/.env
 frontend/.env
-deploy/helm/task-platform/values.production.yaml
 
 # Misc
 *.log

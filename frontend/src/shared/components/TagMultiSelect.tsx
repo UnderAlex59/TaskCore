@@ -86,30 +86,34 @@ export default function TagMultiSelect({
   const summary = value.length === 0 ? placeholder : value.join(", ");
 
   return (
-    <div ref={rootRef} className="block">
+    <div ref={rootRef} className="block min-w-0">
       {hideLabel ? null : (
         <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
           {label}
         </span>
       )}
 
-      <div className="relative">
+      <div className="relative min-w-0">
         <button
           aria-label={`${label}: ${summary}`}
           aria-controls={panelId}
           aria-expanded={isOpen}
-          className="ui-field flex min-h-[3rem] items-center justify-between gap-4 text-left"
+          className="ui-field flex min-h-[3rem] min-w-0 items-center justify-between gap-4 text-left"
           disabled={disabled}
           name={name}
           onClick={() => setIsOpen((current) => !current)}
           type="button"
         >
           <span
-            className={value.length === 0 ? "text-[#7a869a]" : "text-[#172b4d]"}
+            className={
+              value.length === 0
+                ? "min-w-0 text-anywhere text-[#7a869a]"
+                : "min-w-0 text-anywhere text-[#172b4d]"
+            }
           >
             {summary}
           </span>
-          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[#626f86]">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-[#626f86]">
             {isOpen ? "Скрыть" : "Выбрать"}
           </span>
         </button>
@@ -117,7 +121,7 @@ export default function TagMultiSelect({
         {isOpen ? (
           <div
             id={panelId}
-            className="absolute z-20 mt-2 w-full rounded-[14px] border border-[rgba(9,30,66,0.12)] bg-white p-3 shadow-[0_12px_24px_rgba(9,30,66,0.08)]"
+            className="absolute z-20 mt-2 w-full min-w-0 rounded-[14px] border border-[rgba(9,30,66,0.12)] bg-white p-3 shadow-[0_12px_24px_rgba(9,30,66,0.08)]"
           >
             <input
               aria-label={`${label}: поиск`}
@@ -144,14 +148,16 @@ export default function TagMultiSelect({
                   return (
                     <label
                       key={option.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 text-sm text-[#172b4d] transition-colors hover:bg-white"
+                      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 text-sm text-[#172b4d] transition-colors hover:bg-white"
                     >
                       <input
                         checked={checked}
                         onChange={() => toggleTag(option.name)}
                         type="checkbox"
                       />
-                      <span>{option.name}</span>
+                      <span className="text-anywhere min-w-0">
+                        {option.name}
+                      </span>
                     </label>
                   );
                 })
@@ -174,16 +180,18 @@ export default function TagMultiSelect({
       </div>
 
       {helperText ? (
-        <p className="mt-2 text-xs leading-6 text-[#626f86]">{helperText}</p>
+        <p className="text-anywhere mt-2 text-xs leading-6 text-[#626f86]">
+          {helperText}
+        </p>
       ) : null}
 
       {value.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex min-w-0 flex-wrap gap-2">
           {value.map((tag) => (
             <button
               aria-label={`Убрать тег ${tag}`}
               key={tag}
-              className="rounded-full border border-[rgba(9,30,66,0.08)] bg-[#f7f8fa] px-3 py-1 text-xs font-semibold text-[#44546f] transition-colors hover:bg-[#eef0f3] disabled:cursor-default disabled:hover:bg-[#f7f8fa]"
+              className="text-anywhere max-w-full rounded-full border border-[rgba(9,30,66,0.08)] bg-[#f7f8fa] px-3 py-1 text-xs font-semibold text-[#44546f] transition-colors hover:bg-[#eef0f3] disabled:cursor-default disabled:hover:bg-[#f7f8fa]"
               disabled={disabled}
               onClick={() => removeTag(tag)}
               type="button"

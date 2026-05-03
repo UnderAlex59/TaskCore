@@ -68,7 +68,7 @@ export default function LoginPage() {
                 value: "Постановка оформляется как структурированный документ",
               },
               {
-                title: "Review",
+                title: "Проверка",
                 value: "Проверка и изменения остаются рядом с задачей",
               },
             ].map((item) => (

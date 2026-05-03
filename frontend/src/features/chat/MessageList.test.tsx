@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MessageList from "@/features/chat/MessageList";
@@ -51,5 +51,51 @@ describe("MessageList", () => {
     await waitFor(() => {
       expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("shows a waiting indicator after a recognized task question", () => {
+    render(
+      <MessageList
+        messages={[
+          {
+            ...baseMessage,
+            content: "Какие статусы считаются терминальными?",
+            message_type: "question",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText("Агент готовит ответ по задаче"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the waiting indicator after an agent response arrives", () => {
+    render(
+      <MessageList
+        messages={[
+          {
+            ...baseMessage,
+            content: "Какие статусы считаются терминальными?",
+            message_type: "question",
+          },
+          {
+            ...baseMessage,
+            agent_name: "QAAgent",
+            author_id: null,
+            author_name: null,
+            content: "В текущей постановке это не описано.",
+            id: "message-2",
+            message_type: "agent_answer",
+            source_ref: { agent_key: "qa" },
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByText("Агент готовит ответ по задаче"),
+    ).not.toBeInTheDocument();
   });
 });

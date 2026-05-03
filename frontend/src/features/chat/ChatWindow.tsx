@@ -34,20 +34,20 @@ export default function ChatWindow({
   return (
     <section
       className={[
-        "flex min-h-[34rem] flex-col overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]",
+        "flex min-h-[34rem] min-w-0 flex-col overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]",
         className,
       ].join(" ")}
     >
       <div className="border-b border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-5 py-4 sm:px-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+        <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
               {eyebrow}
             </p>
             <h3 className="mt-2 text-2xl font-semibold text-[#172b4d]">
               {title}
             </h3>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-[#44546f]">
+            <p className="text-anywhere mt-2 max-w-2xl text-sm leading-7 text-[#44546f]">
               {description}
             </p>
           </div>
