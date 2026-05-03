@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
+from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DBSession, require_role
 from app.models.user import User, UserRole
 from app.schemas.project import (
@@ -18,6 +19,7 @@ from app.schemas.project import (
 )
 from app.services.project_service import ProjectService
 
+settings = get_settings()
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
@@ -56,7 +58,7 @@ async def delete_project(
     current_user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     db: DBSession,
 ) -> Response:
-    await ProjectService.delete_project(project_id, current_user, db)
+    await ProjectService.delete_project(project_id, current_user, db, settings.UPLOAD_DIR)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

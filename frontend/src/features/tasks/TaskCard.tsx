@@ -8,7 +8,10 @@ import {
 } from "@/shared/lib/locale";
 
 interface Props {
+  canDelete?: boolean;
+  deleting?: boolean;
   detailHref?: string;
+  onDelete?: (task: TaskRead) => void | Promise<void>;
   task: TaskRead;
 }
 
@@ -32,7 +35,13 @@ function getStatusClassName(status: TaskRead["status"]) {
   return "border-[rgba(12,102,228,0.18)] bg-[#e9f2ff] text-[#0c66e4]";
 }
 
-export default function TaskCard({ detailHref, task }: Props) {
+export default function TaskCard({
+  canDelete = false,
+  deleting = false,
+  detailHref,
+  onDelete,
+  task,
+}: Props) {
   const verdict = task.validation_result?.verdict;
 
   return (
@@ -78,11 +87,23 @@ export default function TaskCard({ detailHref, task }: Props) {
             <span>Вложения: {task.attachments.length}</span>
           ) : null}
         </div>
-        {detailHref ? (
-          <Link className="ui-button-secondary shrink-0" to={detailHref}>
-            Открыть задачу
-          </Link>
-        ) : null}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {detailHref ? (
+            <Link className="ui-button-secondary" to={detailHref}>
+              Открыть задачу
+            </Link>
+          ) : null}
+          {canDelete && onDelete ? (
+            <button
+              className="ui-button-danger"
+              disabled={deleting}
+              onClick={() => void onDelete(task)}
+              type="button"
+            >
+              {deleting ? "Удаляем..." : "Удалить"}
+            </button>
+          ) : null}
+        </div>
       </div>
     </article>
   );

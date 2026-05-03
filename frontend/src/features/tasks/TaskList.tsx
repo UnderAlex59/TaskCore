@@ -5,7 +5,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import type { UserRole } from "@/api/authApi";
 import {
@@ -43,6 +43,7 @@ const TASK_STATUS_OPTIONS: TaskStatus[] = [
 
 export default function TaskList() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
 
   const [project, setProject] = useState<ProjectRead | null>(null);
@@ -51,6 +52,8 @@ export default function TaskList() {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingMember, setSavingMember] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -59,6 +62,10 @@ export default function TaskList() {
   const [memberRole, setMemberRole] = useState<UserRole>("DEVELOPER");
   const [memberPendingRemoval, setMemberPendingRemoval] =
     useState<ProjectMemberRead | null>(null);
+  const [projectPendingDeletion, setProjectPendingDeletion] =
+    useState<ProjectRead | null>(null);
+  const [taskPendingDeletion, setTaskPendingDeletion] =
+    useState<TaskRead | null>(null);
 
   const deferredSearch = useDeferredValue(search);
 
@@ -113,6 +120,8 @@ export default function TaskList() {
     currentMembership?.role === "MANAGER" ||
     currentMembership?.role === "ADMIN";
   const canCreateTask = TASK_CREATORS.has(user?.role ?? "");
+  const canDeleteProject = user?.role === "ADMIN";
+  const canDeleteTask = user?.role === "ADMIN";
   const availableUsers = users.filter(
     (candidate) => !members.some((member) => member.user_id === candidate.id),
   );
@@ -184,6 +193,43 @@ export default function TaskList() {
     }
   }
 
+  async function handleDeleteTask() {
+    if (!projectId || !taskPendingDeletion) {
+      return;
+    }
+
+    try {
+      setDeletingTaskId(taskPendingDeletion.id);
+      setError(null);
+      await tasksApi.remove(projectId, taskPendingDeletion.id);
+      setTasks((current) =>
+        current.filter((task) => task.id !== taskPendingDeletion.id),
+      );
+      setTaskPendingDeletion(null);
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить задачу."));
+    } finally {
+      setDeletingTaskId(null);
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!projectId || !projectPendingDeletion) {
+      return;
+    }
+
+    try {
+      setDeletingProject(true);
+      setError(null);
+      await projectsApi.remove(projectId);
+      navigate("/projects", { replace: true });
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить проект."));
+    } finally {
+      setDeletingProject(false);
+    }
+  }
+
   if (loading) {
     return <LoadingSpinner label="Загрузка задач" />;
   }
@@ -211,6 +257,16 @@ export default function TaskList() {
               >
                 Создать задачу
               </Link>
+            ) : null}
+            {canDeleteProject && project ? (
+              <button
+                className="ui-button-danger w-full justify-center"
+                disabled={deletingProject}
+                onClick={() => setProjectPendingDeletion(project)}
+                type="button"
+              >
+                {deletingProject ? "Удаляем проект..." : "Удалить проект"}
+              </button>
             ) : null}
 
             <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
@@ -302,7 +358,10 @@ export default function TaskList() {
             tasks.map((task) => (
               <TaskCard
                 key={task.id}
+                canDelete={canDeleteTask}
+                deleting={deletingTaskId === task.id}
                 detailHref={`/projects/${projectId}/tasks/${task.id}`}
+                onDelete={setTaskPendingDeletion}
                 task={task}
               />
             ))
@@ -414,6 +473,42 @@ export default function TaskList() {
         onConfirm={handleRemoveMember}
         open={memberPendingRemoval !== null}
         title="Удаление участника проекта"
+      />
+      <ConfirmDialog
+        busy={deletingTaskId === taskPendingDeletion?.id}
+        confirmLabel="Удалить задачу"
+        description={
+          taskPendingDeletion
+            ? `Удалить задачу «${taskPendingDeletion.title}»? История, вложения и индекс задачи будут удалены.`
+            : ""
+        }
+        destructive
+        onClose={() => {
+          if (deletingTaskId === null) {
+            setTaskPendingDeletion(null);
+          }
+        }}
+        onConfirm={handleDeleteTask}
+        open={taskPendingDeletion !== null}
+        title="Удаление задачи"
+      />
+      <ConfirmDialog
+        busy={deletingProject}
+        confirmLabel="Удалить проект"
+        description={
+          projectPendingDeletion
+            ? `Удалить проект «${projectPendingDeletion.name}»? Все задачи, вложения и рабочий контекст проекта будут удалены.`
+            : ""
+        }
+        destructive
+        onClose={() => {
+          if (!deletingProject) {
+            setProjectPendingDeletion(null);
+          }
+        }}
+        onConfirm={handleDeleteProject}
+        open={projectPendingDeletion !== null}
+        title="Удаление проекта"
       />
     </section>
   );

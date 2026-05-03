@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from anyio import Path
 from httpx import AsyncClient
 
 from app.services.llm_runtime_service import LLMInvocationResult
@@ -944,6 +945,107 @@ async def test_image_attachment_upload_generates_alt_text_and_indexes_it(
         and "Макет формы входа" in chunk["content"]
         for chunk in captured_chunks
     )
+
+
+async def test_task_attachment_can_be_viewed_and_deleted(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register_user(client, email="admin-attachment@example.com", full_name="Alice Admin")
+    await register_user(client, email="analyst-attachment@example.com", full_name="Nina Analyst")
+
+    admin_token = await login_user(client, email="admin-attachment@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    analyst_id = next(
+        user["id"]
+        for user in users_response.json()
+        if user["email"] == "analyst-attachment@example.com"
+    )
+    role_response = await client.patch(
+        f"/users/{analyst_id}",
+        headers=admin_headers,
+        json={"role": "ANALYST"},
+    )
+    assert role_response.status_code == 200
+
+    async def fake_replace_task_knowledge(**kwargs) -> bool:  # type: ignore[no-untyped-def]
+        return True
+
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.replace_task_knowledge",
+        fake_replace_task_knowledge,
+    )
+
+    analyst_token = await login_user(client, email="analyst-attachment@example.com")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Attachment workspace", "description": "View and delete files"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    create_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "Attachment lifecycle",
+            "content": "Нужно проверить просмотр и удаление вложений.",
+            "tags": [],
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    file_bytes = "Русский текст в UTF-8".encode()
+    upload_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/attachments",
+        headers=analyst_headers,
+        files={"file": ("notes.txt", file_bytes, "text/plain")},
+    )
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+    attachment_id = attachment["id"]
+    storage_path = Path(attachment["storage_path"])
+    assert await storage_path.exists()
+
+    view_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}",
+        headers=analyst_headers,
+    )
+    assert view_response.status_code == 200
+    assert view_response.content == file_bytes
+    assert view_response.headers["content-type"].startswith("text/plain")
+
+    task_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=analyst_headers,
+    )
+    assert task_response.status_code == 200
+    assert [item["id"] for item in task_response.json()["attachments"]] == [attachment_id]
+
+    delete_response = await client.delete(
+        f"/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}",
+        headers=analyst_headers,
+    )
+    assert delete_response.status_code == 204
+    assert not await storage_path.exists()
+
+    refreshed_task_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=analyst_headers,
+    )
+    assert refreshed_task_response.status_code == 200
+    assert refreshed_task_response.json()["attachments"] == []
+
+    missing_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}",
+        headers=analyst_headers,
+    )
+    assert missing_response.status_code == 404
 
 
 async def test_image_attachment_upload_does_not_fail_when_vision_fails(

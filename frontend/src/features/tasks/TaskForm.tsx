@@ -34,6 +34,8 @@ interface Props {
     content: string;
     current_tags: string[];
   }) => Promise<TaskTagSuggestionResponse>;
+  onDeleteAttachment?: (attachment: TaskAttachmentRead) => Promise<void>;
+  onOpenAttachment?: (attachment: TaskAttachmentRead) => Promise<Blob>;
   onSubmit: (payload: TaskUpdate) => Promise<void>;
   onUploadAttachment?: (file: File) => Promise<void>;
   suggestingTags?: boolean;
@@ -83,6 +85,8 @@ export default function TaskForm({
   onSubmit,
   onCommit,
   onSuggestTags,
+  onDeleteAttachment,
+  onOpenAttachment,
   onUploadAttachment,
   disabled = false,
   embeddingsStale = false,
@@ -330,6 +334,8 @@ export default function TaskForm({
                     attachments={attachments}
                     busy={attachmentsUploading}
                     disabled={disabled}
+                    onDelete={onDeleteAttachment}
+                    onOpenAttachment={onOpenAttachment}
                     onUpload={onUploadAttachment}
                   />
                 ) : null}

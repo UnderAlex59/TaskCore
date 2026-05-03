@@ -6,11 +6,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.task_tag_suggestion_graph import run_task_tag_suggestion_graph
 from app.agents.validation_graph import run_validation_graph
+from app.models.audit_event import AuditEvent
 from app.models.message import Message, MessageType
 from app.models.project import ProjectMember
 from app.models.task import Task, TaskAttachment, TaskStatus
@@ -113,6 +114,45 @@ class TaskService:
             .order_by(TaskAttachment.created_at.asc())
         )
         return list((await db.execute(stmt)).scalars().all())
+
+    @staticmethod
+    async def _get_attachment_or_404(
+        task_id: str,
+        attachment_id: str,
+        db: AsyncSession,
+    ) -> TaskAttachment:
+        attachment = await db.get(TaskAttachment, attachment_id)
+        if attachment is None or attachment.task_id != task_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Вложение не найдено",
+            )
+        return attachment
+
+    @staticmethod
+    def _attachment_path_or_404(attachment: TaskAttachment, upload_dir: str) -> Path:
+        path = Path(attachment.storage_path)
+        try:
+            path.resolve().relative_to(Path(upload_dir).resolve())
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Файл вложения не найден",
+            ) from error
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Файл вложения не найден",
+            )
+        return path
+
+    @staticmethod
+    def _delete_attachment_file(path: Path, upload_dir: str) -> None:
+        try:
+            path.resolve().relative_to(Path(upload_dir).resolve())
+            path.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
 
     @staticmethod
     async def _get_project_member_or_422(
@@ -839,6 +879,7 @@ class TaskService:
         task_id: str,
         current_user: User,
         db: AsyncSession,
+        upload_dir: str | None = None,
     ) -> None:
         await ProjectService.ensure_project_access(project_id, current_user, db)
         if current_user.role not in TaskService.validation_roles:
@@ -848,6 +889,13 @@ class TaskService:
             )
 
         task = await TaskService.get_task_or_404(project_id, task_id, db)
+        attachments = await TaskService._get_attachments(task.id, db)
+        attachment_paths = [Path(attachment.storage_path) for attachment in attachments]
+        await db.execute(
+            update(AuditEvent)
+            .where(AuditEvent.task_id == task.id)
+            .values(task_id=None)
+        )
         AuditService.record(
             db,
             actor_user_id=current_user.id,
@@ -855,11 +903,14 @@ class TaskService:
             entity_type="task",
             entity_id=task.id,
             project_id=project_id,
-            task_id=task.id,
+            metadata={"task_id": task.id, "attachment_count": len(attachments)},
         )
         await db.delete(task)
-        await QdrantService.delete_task_artifacts(task_id=task.id)
         await db.commit()
+        await QdrantService.delete_task_artifacts(task_id=task.id)
+        if upload_dir is not None:
+            for path in attachment_paths:
+                TaskService._delete_attachment_file(path, upload_dir)
 
     @staticmethod
     async def upload_attachment(
@@ -918,6 +969,63 @@ class TaskService:
         await db.commit()
         await db.refresh(attachment)
         return TaskAttachmentRead.model_validate(attachment)
+
+    @staticmethod
+    async def get_attachment_file(
+        project_id: str,
+        task_id: str,
+        attachment_id: str,
+        current_user: User,
+        db: AsyncSession,
+        upload_dir: str,
+    ) -> tuple[TaskAttachment, Path]:
+        await ProjectService.ensure_project_access(project_id, current_user, db)
+        task = await TaskService.get_task_or_404(project_id, task_id, db)
+        attachment = await TaskService._get_attachment_or_404(task.id, attachment_id, db)
+        return attachment, TaskService._attachment_path_or_404(attachment, upload_dir)
+
+    @staticmethod
+    async def delete_attachment(
+        project_id: str,
+        task_id: str,
+        attachment_id: str,
+        current_user: User,
+        db: AsyncSession,
+        upload_dir: str,
+    ) -> None:
+        await ProjectService.ensure_project_access(project_id, current_user, db)
+        task = await TaskService.get_task_or_404(project_id, task_id, db)
+        attachment = await TaskService._get_attachment_or_404(task.id, attachment_id, db)
+        path = Path(attachment.storage_path)
+
+        await db.delete(attachment)
+        await db.flush()
+
+        attachments = await TaskService._get_attachments(task.id, db)
+        current_timestamp = datetime.now(UTC)
+        task.updated_at = current_timestamp
+        if task.status in TaskService.post_approval_editable_statuses:
+            TaskService._mark_requires_revalidation(task)
+        await RagService.index_task_context(
+            db,
+            task,
+            attachments,
+            actor_user_id=current_user.id,
+            validation_result=task.validation_result,
+        )
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.attachment_deleted",
+            entity_type="task_attachment",
+            entity_id=attachment.id,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={"filename": attachment.filename},
+        )
+        await db.commit()
+
+        TaskService._delete_attachment_file(path, upload_dir)
 
     @staticmethod
     async def validate_task(task_id: str, current_user: User, db: AsyncSession) -> ValidationResult:

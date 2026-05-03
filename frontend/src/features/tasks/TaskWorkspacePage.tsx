@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import {
   chatApi,
@@ -15,10 +15,16 @@ import {
 import { projectsApi, type ProjectMemberRead } from "@/api/projectsApi";
 import { proposalsApi, type ProposalRead } from "@/api/proposalsApi";
 import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
-import { tasksApi, type TaskRead, type TaskUpdate } from "@/api/tasksApi";
+import {
+  tasksApi,
+  type TaskAttachmentRead,
+  type TaskRead,
+  type TaskUpdate,
+} from "@/api/tasksApi";
 import ChatWindow from "@/features/chat/ChatWindow";
 import TaskForm from "@/features/tasks/TaskForm";
 import ValidationPanel from "@/features/tasks/ValidationPanel";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import {
@@ -107,6 +113,7 @@ function InspectorCard({
 
 export default function TaskWorkspacePage({ mode }: Props) {
   const { projectId, taskId } = useParams();
+  const navigate = useNavigate();
   const accessToken = useAuthStore((state) => state.accessToken);
   const user = useAuthStore((state) => state.user);
 
@@ -122,7 +129,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [committingTask, setCommittingTask] = useState(false);
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingTask, setDeletingTask] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [taskPendingDeletion, setTaskPendingDeletion] = useState(false);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(
     null,
   );
@@ -390,6 +399,46 @@ export default function TaskWorkspacePage({ mode }: Props) {
     }
   }
 
+  async function handleOpenAttachment(attachment: TaskAttachmentRead) {
+    if (!projectId || !taskId) {
+      throw new Error("Task route params are missing.");
+    }
+
+    return tasksApi.getAttachmentBlob(projectId, taskId, attachment.id);
+  }
+
+  async function handleDeleteAttachment(attachment: TaskAttachmentRead) {
+    if (!projectId || !taskId) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await tasksApi.deleteAttachment(projectId, taskId, attachment.id);
+      setTask(await tasksApi.get(projectId, taskId));
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить вложение."));
+      throw caught;
+    }
+  }
+
+  async function handleDeleteTask() {
+    if (!projectId || !taskId) {
+      return;
+    }
+
+    try {
+      setDeletingTask(true);
+      setError(null);
+      await tasksApi.remove(projectId, taskId);
+      navigate(`/projects/${projectId}/tasks`, { replace: true });
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить задачу."));
+    } finally {
+      setDeletingTask(false);
+    }
+  }
+
   async function handleSendMessage(content: string) {
     if (!taskId) {
       return;
@@ -569,6 +618,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
       user?.role === "MANAGER" ||
       user?.id === task.analyst_id);
   const canReviewProposals = hasApprovalRole;
+  const canDeleteTask = user?.role === "ADMIN";
   const canCommitTask =
     canEditTask && task.status !== "validating" && task.embeddings_stale;
   const needsManualCommit =
@@ -693,6 +743,16 @@ export default function TaskWorkspacePage({ mode }: Props) {
                 перегрузку и позволяет работать с каждым контекстом отдельно.
               </p>
             </div>
+            {canDeleteTask ? (
+              <button
+                className="ui-button-danger shrink-0"
+                disabled={deletingTask}
+                onClick={() => setTaskPendingDeletion(true)}
+                type="button"
+              >
+                {deletingTask ? "Удаляем..." : "Удалить задачу"}
+              </button>
+            ) : null}
           </div>
 
           <div className="flex min-w-0 flex-wrap gap-2 text-xs font-medium text-[#44546f]">
@@ -767,6 +827,8 @@ export default function TaskWorkspacePage({ mode }: Props) {
           embeddingsStale={task.embeddings_stale}
           loading={savingTask}
           onCommit={handleCommitTaskChanges}
+          onDeleteAttachment={handleDeleteAttachment}
+          onOpenAttachment={handleOpenAttachment}
           onSuggestTags={handleSuggestTags}
           onSubmit={handleSave}
           onUploadAttachment={handleUpload}
@@ -1147,6 +1209,21 @@ export default function TaskWorkspacePage({ mode }: Props) {
       <div className={activeTab === "chat" ? "block" : "hidden"}>
         {chatSection}
       </div>
+
+      <ConfirmDialog
+        busy={deletingTask}
+        confirmLabel="Удалить задачу"
+        description={`Удалить задачу «${task.title}»? История, вложения и индекс задачи будут удалены.`}
+        destructive
+        onClose={() => {
+          if (!deletingTask) {
+            setTaskPendingDeletion(false);
+          }
+        }}
+        onConfirm={handleDeleteTask}
+        open={taskPendingDeletion}
+        title="Удаление задачи"
+      />
     </section>
   );
 }

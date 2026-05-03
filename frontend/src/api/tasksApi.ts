@@ -130,6 +130,16 @@ export const tasksApi = {
       })
     ).data;
   },
+  getAttachmentBlob: async (projectId: string, taskId: string, attachmentId: string) =>
+    (
+      await apiClient.get<Blob>(
+        `/projects/${projectId}/tasks/${taskId}/attachments/${attachmentId}`,
+        { responseType: "blob" },
+      )
+    ).data,
+  deleteAttachment: async (projectId: string, taskId: string, attachmentId: string) => {
+    await apiClient.delete(`/projects/${projectId}/tasks/${taskId}/attachments/${attachmentId}`);
+  },
   suggestTags: async (
     projectId: string,
     taskId: string,

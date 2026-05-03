@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DBSession
@@ -149,7 +150,7 @@ async def complete_task(
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_task(project_id: str, task_id: str, current_user: CurrentUser, db: DBSession) -> Response:
-    await TaskService.delete_task(project_id, task_id, current_user, db)
+    await TaskService.delete_task(project_id, task_id, current_user, db, settings.UPLOAD_DIR)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -169,3 +170,45 @@ async def upload_attachment(
         db,
         settings.UPLOAD_DIR,
     )
+
+
+@router.get("/{task_id}/attachments/{attachment_id}")
+async def get_attachment(
+    project_id: str,
+    task_id: str,
+    attachment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> FileResponse:
+    attachment, path = await TaskService.get_attachment_file(
+        project_id,
+        task_id,
+        attachment_id,
+        current_user,
+        db,
+        settings.UPLOAD_DIR,
+    )
+    return FileResponse(path, media_type=attachment.content_type, filename=attachment.filename)
+
+
+@router.delete(
+    "/{task_id}/attachments/{attachment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_attachment(
+    project_id: str,
+    task_id: str,
+    attachment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> Response:
+    await TaskService.delete_attachment(
+        project_id,
+        task_id,
+        attachment_id,
+        current_user,
+        db,
+        settings.UPLOAD_DIR,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

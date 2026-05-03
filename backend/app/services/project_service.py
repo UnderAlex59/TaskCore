@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Sequence
+from pathlib import Path
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.validation_settings import normalize_validation_node_settings
+from app.models.audit_event import AuditEvent
 from app.models.custom_rule import CustomRule
 from app.models.project import Project, ProjectMember
+from app.models.task import Task
 from app.models.user import User, UserRole
 from app.schemas.project import (
     CustomRuleCreate,
@@ -21,6 +25,7 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.services.audit_service import AuditService
+from app.services.qdrant_service import QdrantService
 from app.services.task_tag_service import TaskTagService
 
 
@@ -136,6 +141,15 @@ class ProjectService:
         return ProjectService._serialize_project(project)
 
     @staticmethod
+    def _delete_project_upload_dir(project_id: str, upload_dir: str) -> None:
+        path = Path(upload_dir) / project_id
+        try:
+            path.resolve().relative_to(Path(upload_dir).resolve())
+            shutil.rmtree(path, ignore_errors=True)
+        except (OSError, ValueError):
+            pass
+
+    @staticmethod
     async def update_project(
         project_id: str,
         payload: ProjectUpdate,
@@ -169,18 +183,41 @@ class ProjectService:
         return ProjectService._serialize_project(project)
 
     @staticmethod
-    async def delete_project(project_id: str, current_user: User, db: AsyncSession) -> None:
+    async def delete_project(
+        project_id: str,
+        current_user: User,
+        db: AsyncSession,
+        upload_dir: str | None = None,
+    ) -> None:
         project = await ProjectService.get_project_or_404(project_id, db)
+        task_ids = list(
+            (await db.execute(select(Task.id).where(Task.project_id == project.id))).scalars().all()
+        )
+        if task_ids:
+            await db.execute(
+                update(AuditEvent)
+                .where(AuditEvent.task_id.in_(task_ids))
+                .values(task_id=None)
+            )
+        await db.execute(
+            update(AuditEvent)
+            .where(AuditEvent.project_id == project.id)
+            .values(project_id=None)
+        )
         AuditService.record(
             db,
             actor_user_id=current_user.id,
             event_type="project.deleted",
             entity_type="project",
             entity_id=project.id,
-            project_id=project.id,
+            metadata={"project_id": project.id, "task_count": len(task_ids)},
         )
         await db.delete(project)
         await db.commit()
+        for task_id in task_ids:
+            await QdrantService.delete_task_artifacts(task_id=task_id)
+        if upload_dir is not None:
+            ProjectService._delete_project_upload_dir(project.id, upload_dir)
 
     @staticmethod
     async def list_members(project_id: str, current_user: User, db: AsyncSession) -> list[ProjectMemberRead]:
