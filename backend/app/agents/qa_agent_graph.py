@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
+from langchain_core.documents import Document
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
@@ -26,7 +28,7 @@ QA_AGENT_ALIASES = ("question", "analyst", "qaagent", "qa-agent")
 QA_PLANNER_AGENT_KEY = "qa-planner"
 QA_PLANNER_AGENT_NAME = "QAPlannerAgent"
 QA_PLANNER_AGENT_DESCRIPTION = (
-    "Планирует, насколько глубокий анализ нужен для вопроса по задаче и какой контекст стоит извлекать."
+    "Планирует глубину анализа для вопроса по задаче и выбирает контекст для извлечения."
 )
 QA_PLANNER_AGENT_ALIASES: tuple[str, ...] = ()
 
@@ -40,7 +42,7 @@ QA_ANSWER_AGENT_ALIASES: tuple[str, ...] = ()
 QA_VERIFIER_AGENT_KEY = "qa-verifier"
 QA_VERIFIER_AGENT_NAME = "QAVerifierAgent"
 QA_VERIFIER_AGENT_DESCRIPTION = (
-    "Проверяет, что аналитический ответ действительно опирается на доступный контекст и не содержит догадок."
+    "Проверяет, что аналитический ответ опирается на доступный контекст без догадок."
 )
 QA_VERIFIER_AGENT_ALIASES: tuple[str, ...] = ()
 
@@ -57,6 +59,7 @@ _LOW_CONFIDENCE_MARKERS = (
 )
 _BACKLOG_NOTICE = "Вопрос сохранён в базе вопросов для последующей валидации задачи."
 _ALLOWED_ANALYSIS_MODES = {"direct", "deep"}
+_ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
 
 
 class QAAgentGraphState(ChatState, total=False):
@@ -90,6 +93,12 @@ class QAAgentGraphState(ChatState, total=False):
     canonical_question_hint: str | None
     rag_snippets: list[str]
     rag_chunk_ids: list[str]
+    attachment_filenames: list[str]
+    cross_task_snippets: list[str]
+    cross_task_chunk_ids: list[str]
+    cross_task_ids: list[str]
+    cross_task_sources: list[dict[str, str]]
+    rag_context_scope: str
     answer_system_prompt: str
     answer_user_prompt: str
     answer_payload: dict[str, object] | None
@@ -184,6 +193,93 @@ def _build_llm_stage_ref(
         "model": model,
         "ok": ok,
     }
+
+
+def _is_attachment_document(document: Document) -> bool:
+    metadata = document.metadata or {}
+    source_type = str(metadata.get("source_type") or "").strip()
+    chunk_kind = str(metadata.get("chunk_kind") or "").strip()
+    return source_type in _ATTACHMENT_SOURCE_TYPES or chunk_kind in _ATTACHMENT_SOURCE_TYPES
+
+
+async def _load_attachment_context_from_db(
+    db: Any,
+    *,
+    task_id: str,
+) -> tuple[list[str], list[str]]:
+    if db is None or not hasattr(db, "execute"):
+        return [], []
+
+    try:
+        from sqlalchemy import select
+
+        from app.models.task import TaskAttachment
+        from app.services.attachment_content_service import AttachmentContentService
+
+        result = await db.execute(
+            select(TaskAttachment)
+            .where(TaskAttachment.task_id == task_id)
+            .order_by(TaskAttachment.created_at.asc())
+        )
+        attachments = list(result.scalars().all())
+    except Exception:
+        return [], []
+
+    snippets: list[str] = []
+    filenames: list[str] = []
+    for attachment in attachments:
+        filename = str(getattr(attachment, "filename", "") or "attachment").strip()
+        content_type = str(getattr(attachment, "content_type", "") or "").strip()
+        storage_path = str(getattr(attachment, "storage_path", "") or "").strip()
+        if not storage_path:
+            continue
+
+        extracted_text = AttachmentContentService.extract_text(Path(storage_path), content_type)
+        if extracted_text:
+            snippets.append(f"Вложение {filename}:\n{extracted_text}")
+            filenames.append(filename)
+            continue
+
+        if AttachmentContentService.is_image(content_type):
+            alt_text = AttachmentContentService._meaningful_alt_text(
+                getattr(attachment, "alt_text", None)
+            )
+            if alt_text:
+                snippets.append(f"Изображение {filename}:\n{alt_text}")
+                filenames.append(filename)
+
+    return snippets, filenames
+
+
+def _format_cross_task_document(document: Document) -> tuple[str, dict[str, str]] | None:
+    content = document.page_content.strip()
+    if not content:
+        return None
+
+    metadata = document.metadata or {}
+    source = {
+        "task_id": str(metadata.get("task_id") or "").strip(),
+        "task_title": str(metadata.get("task_title") or "").strip(),
+        "task_status": str(metadata.get("task_status") or "").strip(),
+        "source_type": str(metadata.get("source_type") or "").strip(),
+        "chunk_id": str(metadata.get("chunk_id") or "").strip(),
+    }
+    source_text = (
+        f"Задача: {source['task_title'] or source['task_id'] or 'неизвестно'} "
+        f"(id: {source['task_id'] or 'нет'}, статус: {source['task_status'] or 'нет'}, "
+        f"source_type: {source['source_type'] or 'нет'}, chunk_id: {source['chunk_id'] or 'нет'})"
+    )
+    return f"{source_text}\n{content}", source
+
+
+def _resolve_rag_context_scope(*, has_attachments: bool, has_cross_task: bool) -> str:
+    if has_attachments and has_cross_task:
+        return "attachments+cross_task"
+    if has_attachments:
+        return "attachments"
+    if has_cross_task:
+        return "cross_task"
+    return "none"
 
 
 def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
@@ -293,25 +389,74 @@ async def _invoke_qa_planner(state: QAAgentGraphState) -> QAAgentGraphState:
 
 async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
     task_id = str(state.get("task_id") or "").strip()
+    project_id = str(state.get("project_id") or "").strip()
     needs_rag = bool(state.get("needs_rag"))
     retrieval_query = str(state.get("retrieval_query", "")).strip()
     retrieval_limit = int(state.get("retrieval_limit", 3))
+    collect_attachments = bool(task_id)
+    query_text = retrieval_query or str(state.get("message_content", ""))
 
     rag_documents = (
         await QdrantService.search_task_knowledge(
             task_id=task_id,
-            query_text=retrieval_query or str(state.get("message_content", "")),
+            query_text=query_text,
             limit=retrieval_limit,
+            include_source_types=sorted(_ATTACHMENT_SOURCE_TYPES),
         )
-        if task_id and needs_rag
+        if collect_attachments
         else []
     )
-    rag_snippets = [document.page_content for document in rag_documents if document.page_content.strip()]
+    attachment_documents = [
+        document
+        for document in rag_documents
+        if _is_attachment_document(document) and document.page_content.strip()
+    ]
+    rag_snippets = [document.page_content for document in attachment_documents]
     rag_chunk_ids = [
         str(document.metadata.get("chunk_id"))
-        for document in rag_documents
+        for document in attachment_documents
         if document.metadata.get("chunk_id")
     ]
+    attachment_filenames = [
+        str(document.metadata.get("filename"))
+        for document in attachment_documents
+        if document.metadata.get("filename")
+    ]
+    if collect_attachments and not rag_snippets:
+        rag_snippets, attachment_filenames = await _load_attachment_context_from_db(
+            state.get("db"),
+            task_id=task_id,
+        )
+
+    cross_task_documents = (
+        await QdrantService.search_project_task_knowledge(
+            project_id=project_id,
+            query_text=query_text,
+            exclude_task_id=task_id or None,
+            limit=min(retrieval_limit, 4),
+        )
+        if needs_rag and project_id
+        else []
+    )
+    cross_task_snippets: list[str] = []
+    cross_task_sources: list[dict[str, str]] = []
+    for document in cross_task_documents:
+        formatted = _format_cross_task_document(document)
+        if formatted is None:
+            continue
+        snippet, source = formatted
+        source_task_id = source.get("task_id", "")
+        if task_id and source_task_id == task_id:
+            continue
+        cross_task_snippets.append(snippet)
+        cross_task_sources.append(source)
+
+    cross_task_chunk_ids = [
+        source["chunk_id"] for source in cross_task_sources if source.get("chunk_id")
+    ]
+    cross_task_ids = list(
+        dict.fromkeys(source["task_id"] for source in cross_task_sources if source.get("task_id"))
+    )
 
     validation_result = state.get("validation_result") or {}
     issues = list(state.get("issues", []))
@@ -319,10 +464,26 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
     related_titles = str(state.get("related_titles", ""))
     focus_points = list(state.get("focus_points", []))
     rag_context = "\n\n".join(f"- {snippet}" for snippet in rag_snippets) if rag_snippets else "нет"
+    cross_task_context = (
+        "\n\n".join(f"- {snippet}" for snippet in cross_task_snippets)
+        if cross_task_snippets
+        else "нет"
+    )
+    rag_context_scope = _resolve_rag_context_scope(
+        has_attachments=bool(rag_snippets),
+        has_cross_task=bool(cross_task_snippets),
+    )
+    all_chunk_ids = [*rag_chunk_ids, *cross_task_chunk_ids]
 
     return {
         "rag_snippets": rag_snippets,
-        "rag_chunk_ids": rag_chunk_ids,
+        "rag_chunk_ids": all_chunk_ids,
+        "attachment_filenames": attachment_filenames,
+        "cross_task_snippets": cross_task_snippets,
+        "cross_task_chunk_ids": cross_task_chunk_ids,
+        "cross_task_ids": cross_task_ids,
+        "cross_task_sources": cross_task_sources,
+        "rag_context_scope": rag_context_scope,
         "answer_system_prompt": QA_ANSWER_SYSTEM_PROMPT,
         "answer_user_prompt": (
             f"Режим анализа: {state.get('analysis_mode', 'direct')}\n"
@@ -330,7 +491,12 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Статус задачи: {state.get('task_status', '')}\n"
             f"Описание задачи:\n{state.get('task_content', '')}\n\n"
-            f"RAG-контекст из task_knowledge:\n{rag_context}\n\n"
+            f"Дополнительный контекст из вложений:\n{rag_context}\n\n"
+            "Контекст из других задач проекта:\n"
+            "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
+            "приоритет у текущей задачи. Не переноси требования из другой задачи "
+            "без явного основания.\n"
+            f"{cross_task_context}\n\n"
             f"Вопрос пользователя:\n{state.get('message_content', '')}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
             f"Замечания проверки: {issues}\n"
@@ -401,6 +567,11 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
         if state.get("rag_snippets")
         else "нет"
     )
+    cross_task_context = (
+        "\n\n".join(f"- {snippet}" for snippet in list(state.get("cross_task_snippets", [])))
+        if state.get("cross_task_snippets")
+        else "нет"
+    )
     validation_result = state.get("validation_result") or {}
 
     return {
@@ -408,7 +579,11 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
         "verify_user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Описание задачи:\n{state.get('task_content', '')}\n\n"
-            f"RAG-контекст:\n{rag_context}\n\n"
+            f"Дополнительный контекст из вложений:\n{rag_context}\n\n"
+            "Контекст из других задач проекта:\n"
+            "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
+            "приоритет у текущей задачи.\n"
+            f"{cross_task_context}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
             f"Draft answer:\n{draft_answer}\n\n"
             f"Draft confidence: {draft_confidence}\n"
@@ -462,7 +637,15 @@ def _build_fallback_response(state: QAAgentGraphState) -> tuple[str, str]:
     ]
     rag_snippets = list(state.get("rag_snippets", []))
     if rag_snippets:
-        fallback_parts.append("Найден релевантный контекст в task_knowledge: " + rag_snippets[0][:220])
+        fallback_parts.append(
+            "Найден дополнительный контекст во вложениях: " + rag_snippets[0][:220]
+        )
+    cross_task_snippets = list(state.get("cross_task_snippets", []))
+    if cross_task_snippets:
+        fallback_parts.append(
+            "Найден справочный контекст из других задач проекта: "
+            + cross_task_snippets[0][:220]
+        )
     verdict = validation_result.get("verdict")
     if verdict:
         fallback_parts.append(f"Последний вердикт проверки: `{verdict}`.")
@@ -541,12 +724,19 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
             ok=bool(state.get("verify_ok")),
         )
 
+    rag_context_scope = str(state.get("rag_context_scope", "none"))
+    collection = "tasks"
+    if state.get("rag_chunk_ids"):
+        collection = "task_knowledge"
+    elif rag_context_scope == "attachments":
+        collection = "task_attachments"
+
     return {
         "agent_name": QA_AGENT_NAME,
         "message_type": "agent_answer",
         "response": response,
         "source_ref": {
-            "collection": "task_knowledge" if state.get("rag_chunk_ids") else "tasks",
+            "collection": collection,
             "provider_kind": state.get("answer_provider_kind"),
             "model": state.get("answer_model"),
             "answer_confidence": confidence,
@@ -554,6 +744,11 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
             "focus_points": list(state.get("focus_points", [])),
             "validation_backlog_question": validation_backlog_question,
             "chunk_ids": list(state.get("rag_chunk_ids", [])),
+            "rag_context_scope": rag_context_scope,
+            "attachment_filenames": list(state.get("attachment_filenames", [])),
+            "cross_task_chunk_ids": list(state.get("cross_task_chunk_ids", [])),
+            "cross_task_ids": list(state.get("cross_task_ids", [])),
+            "cross_task_sources": list(state.get("cross_task_sources", [])),
             "related_task_ids": [
                 item["task_id"]
                 for item in list(state.get("related_tasks", []))

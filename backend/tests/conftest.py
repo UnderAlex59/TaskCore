@@ -66,6 +66,9 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
+    async def _search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
     async def _search_related_tasks(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
@@ -87,20 +90,54 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _delete_task_artifacts(**kwargs) -> None:  # type: ignore[no-untyped-def]
         return None
 
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.ensure_collections", _ensure_collections)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.replace_task_knowledge", _replace_task_knowledge)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.delete_task_knowledge", _delete_task_knowledge)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_task_knowledge", _search_task_knowledge)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_related_tasks", _search_related_tasks)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.replace_project_questions", _replace_project_questions)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.search_project_questions", _search_project_questions)
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.ensure_collections",
+        _ensure_collections,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.replace_task_knowledge",
+        _replace_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.delete_task_knowledge",
+        _delete_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        _search_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_task_knowledge",
+        _search_project_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_related_tasks",
+        _search_related_tasks,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.replace_project_questions",
+        _replace_project_questions,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_questions",
+        _search_project_questions,
+    )
     monkeypatch.setattr(
         "app.services.qdrant_service.QdrantService.delete_project_questions_for_task",
         _delete_project_questions_for_task,
     )
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.find_duplicate_proposal", _find_duplicate_proposal)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.upsert_proposal", _upsert_proposal)
-    monkeypatch.setattr("app.services.qdrant_service.QdrantService.delete_task_artifacts", _delete_task_artifacts)
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.find_duplicate_proposal",
+        _find_duplicate_proposal,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.upsert_proposal",
+        _upsert_proposal,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.delete_task_artifacts",
+        _delete_task_artifacts,
+    )
 
 
 def apply_migrations() -> None:

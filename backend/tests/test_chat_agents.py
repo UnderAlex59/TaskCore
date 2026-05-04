@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -198,7 +199,9 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
         )
     )
 
-    assert result.response == "Нужно развивать API через версионируемый контракт и явные события синхронизации."
+    assert result.response == (
+        "Нужно развивать API через версионируемый контракт и явные события синхронизации."
+    )
     assert result.source_ref["provider_kind"] == "openrouter"
     assert result.source_ref["answer_confidence"] == "high"
     assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
@@ -310,7 +313,10 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
         if kwargs["agent_key"] == "qa-answer":
             return LLMInvocationResult(
                 ok=True,
-                text='{"answer":"Используйте событие status.changed.", "confidence":"high", "canonical_question":null}',
+                text=(
+                    '{"answer":"Используйте событие status.changed.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
                 provider_config_id="provider-1",
                 provider_kind="openai",
                 model="gpt-4o-mini",
@@ -323,7 +329,10 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
         if kwargs["agent_key"] == "qa-verifier":
             return LLMInvocationResult(
                 ok=True,
-                text='{"final_answer":"Используйте событие status.changed.", "confidence":"high", "grounded":true, "canonical_question":null}',
+                text=(
+                    '{"final_answer":"Используйте событие status.changed.", '
+                    '"confidence":"high", "grounded":true, "canonical_question":null}'
+                ),
                 provider_config_id="provider-1",
                 provider_kind="openai",
                 model="gpt-4o-mini",
@@ -336,10 +345,16 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["include_source_types"] == ["attachment_image_alt_text", "attachment_text"]
         return [
             Document(
                 page_content="Publish event status.changed after every persisted transition.",
-                metadata={"chunk_id": "task-1:content"},
+                metadata={
+                    "chunk_id": "task-1:attachment:file-1:0",
+                    "chunk_kind": "attachment_text",
+                    "filename": "integration.md",
+                    "source_type": "attachment_text",
+                },
             )
         ]
 
@@ -368,8 +383,495 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
     )
 
     assert result.source_ref["collection"] == "task_knowledge"
-    assert result.source_ref["chunk_ids"] == ["task-1:content"]
+    assert result.source_ref["chunk_ids"] == ["task-1:attachment:file-1:0"]
+    assert result.source_ref["rag_context_scope"] == "attachments"
+    assert result.source_ref["attachment_filenames"] == ["integration.md"]
     assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
+
+
+@pytest.mark.asyncio
+async def test_question_agent_excludes_current_task_text_chunks_from_qa_rag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_answer_prompt = ""
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":true,"needs_verification":false,'
+                    '"retrieval_query":"api event","retrieval_limit":4,'
+                    '"focus_points":[],"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=8,
+                total_tokens=12,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Контекст вложений не найден.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return [
+            Document(
+                page_content="QDRANT_ONLY_TASK_CONTENT_DUPLICATE",
+                metadata={
+                    "chunk_id": "task-1:task_content:task-1:0",
+                    "chunk_kind": "task_content",
+                    "source_type": "task_content",
+                },
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="ready_for_dev",
+            task_content="Main task content is already passed directly.",
+            message_type="question",
+            message_content="Что есть во вложениях?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert "QDRANT_ONLY_TASK_CONTENT_DUPLICATE" not in captured_answer_prompt
+    assert "Дополнительный контекст из вложений:\nнет" in captured_answer_prompt
+    assert result.source_ref["chunk_ids"] == []
+    assert result.source_ref["rag_context_scope"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_uses_attachment_text_chunks_from_qdrant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_answer_prompt = ""
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":true,"needs_verification":false,'
+                    '"retrieval_query":"SLA","retrieval_limit":4,'
+                    '"focus_points":[],"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=8,
+                total_tokens=12,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"SLA описан во вложении.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return [
+            Document(
+                page_content="TASK_CONTENT_NOISE_SHOULD_NOT_APPEAR",
+                metadata={
+                    "chunk_id": "task-1:task_content:task-1:0",
+                    "chunk_kind": "task_content",
+                    "source_type": "task_content",
+                },
+            ),
+            Document(
+                page_content="Attachment says SLA is 15 minutes.",
+                metadata={
+                    "chunk_id": "task-1:attachment:file-1:0",
+                    "chunk_kind": "attachment_text",
+                    "filename": "sla.txt",
+                    "source_type": "attachment_text",
+                },
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="SLA",
+            task_status="ready_for_dev",
+            task_content="Main task content is already passed directly.",
+            message_type="question",
+            message_content="Какой SLA?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert "Attachment says SLA is 15 minutes." in captured_answer_prompt
+    assert "TASK_CONTENT_NOISE_SHOULD_NOT_APPEAR" not in captured_answer_prompt
+    assert result.source_ref["chunk_ids"] == ["task-1:attachment:file-1:0"]
+    assert result.source_ref["rag_context_scope"] == "attachments"
+    assert result.source_ref["attachment_filenames"] == ["sla.txt"]
+
+
+@pytest.mark.asyncio
+async def test_question_agent_falls_back_to_text_attachment_file_when_qdrant_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured_answer_prompt = ""
+    attachment_path = tmp_path / "policy.txt"
+    attachment_path.write_text(
+        "Fallback attachment says timeout is 30 seconds.",
+        encoding="utf-8",
+    )
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":true,"needs_verification":false,'
+                    '"retrieval_query":"timeout","retrieval_limit":4,'
+                    '"focus_points":[],"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=8,
+                total_tokens=12,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Timeout описан во вложении.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    class FakeScalarResult:
+        def all(self):  # type: ignore[no-untyped-def]
+            return [
+                SimpleNamespace(
+                    alt_text=None,
+                    content_type="text/plain",
+                    filename="policy.txt",
+                    storage_path=str(attachment_path),
+                )
+            ]
+
+    class FakeExecuteResult:
+        def scalars(self):  # type: ignore[no-untyped-def]
+            return FakeScalarResult()
+
+    class FakeDB:
+        async def execute(self, statement):  # type: ignore[no-untyped-def]
+            return FakeExecuteResult()
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=FakeDB(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="Timeout",
+            task_status="ready_for_dev",
+            task_content="Main task content is already passed directly.",
+            message_type="question",
+            message_content="Какой timeout?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert "Fallback attachment says timeout is 30 seconds." in captured_answer_prompt
+    assert result.source_ref["chunk_ids"] == []
+    assert result.source_ref["rag_context_scope"] == "attachments"
+    assert result.source_ref["attachment_filenames"] == ["policy.txt"]
+
+
+@pytest.mark.asyncio
+async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_answer_prompt = ""
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":true,"needs_verification":false,'
+                    '"retrieval_query":"status.changed event","retrieval_limit":4,'
+                    '"focus_points":[],"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=8,
+                total_tokens=12,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Используйте событие status.changed.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def fake_search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs == {
+            "project_id": "project-1",
+            "query_text": "status.changed event",
+            "exclude_task_id": "task-1",
+            "limit": 4,
+        }
+        return [
+            Document(
+                page_content="Previous task requires publishing status.changed after persistence.",
+                metadata={
+                    "chunk_id": "task-2:task_content:task-2:0",
+                    "source_type": "task_content",
+                    "task_id": "task-2",
+                    "task_status": "completed",
+                    "task_title": "Status events",
+                },
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_task_knowledge",
+        fake_search_project_task_knowledge,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="ready_for_dev",
+            task_content="Current task content is authoritative.",
+            message_type="question",
+            message_content="Какой event публиковать?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert "Контекст из других задач проекта" in captured_answer_prompt
+    assert "приоритет у текущей задачи" in captured_answer_prompt
+    assert "Status events" in captured_answer_prompt
+    assert "task-2:task_content:task-2:0" in captured_answer_prompt
+    assert "Previous task requires publishing status.changed" in captured_answer_prompt
+    assert result.source_ref["collection"] == "task_knowledge"
+    assert result.source_ref["chunk_ids"] == ["task-2:task_content:task-2:0"]
+    assert result.source_ref["cross_task_chunk_ids"] == ["task-2:task_content:task-2:0"]
+    assert result.source_ref["cross_task_ids"] == ["task-2"]
+    assert result.source_ref["cross_task_sources"] == [
+        {
+            "task_id": "task-2",
+            "task_title": "Status events",
+            "task_status": "completed",
+            "source_type": "task_content",
+            "chunk_id": "task-2:task_content:task-2:0",
+        }
+    ]
+    assert result.source_ref["rag_context_scope"] == "cross_task"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_skips_cross_task_search_when_rag_is_not_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "qa-planner":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"analysis_mode":"direct","needs_rag":false,"needs_verification":false,'
+                    '"retrieval_query":null,"retrieval_limit":2,'
+                    '"focus_points":[],"canonical_question_hint":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=8,
+                total_tokens=12,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Ответ из текущей задачи.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def fake_search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("cross-task RAG should not run when needs_rag=false")
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_task_knowledge",
+        fake_search_project_task_knowledge,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="Direct answer",
+            task_status="ready_for_dev",
+            task_content="Answer is in the task body.",
+            message_type="question",
+            message_content="Что делать?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert result.source_ref["chunk_ids"] == []
+    assert result.source_ref["cross_task_chunk_ids"] == []
+    assert result.source_ref["cross_task_ids"] == []
+    assert result.source_ref["rag_context_scope"] == "none"
 
 
 @pytest.mark.asyncio
@@ -653,6 +1155,8 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
 
     class FakeDB:
         async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            if identifier != "task-1":
+                return None
             return SimpleNamespace(
                 id=identifier,
                 project_id="project-1",
@@ -698,6 +1202,19 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "chat-routing":
+            return LLMInvocationResult(
+                ok=True,
+                text='{"task_related": true, "reason": "requirements question"}',
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
         if kwargs["agent_key"] == "qa-planner":
             return LLMInvocationResult(
                 ok=True,
@@ -747,6 +1264,8 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
 
     class FakeDB:
         async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            if identifier != "task-1":
+                return None
             return SimpleNamespace(
                 id=identifier,
                 project_id="project-1",
@@ -819,6 +1338,10 @@ async def test_chat_graph_creates_proposal_via_langgraph(monkeypatch: pytest.Mon
     def fake_audit_record(*args, **kwargs):  # type: ignore[no-untyped-def]
         audit_events.append(str(kwargs["event_type"]))
 
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return None
+
     monkeypatch.setattr(
         "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
         fake_invoke_chat,
@@ -830,7 +1353,7 @@ async def test_chat_graph_creates_proposal_via_langgraph(monkeypatch: pytest.Mon
     monkeypatch.setattr("app.services.audit_service.AuditService.record", fake_audit_record)
 
     state = await run_chat_graph(
-        db=object(),
+        db=FakeDB(),
         task_id="task-1",
         project_id="project-1",
         actor_user_id="user-1",

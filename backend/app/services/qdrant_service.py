@@ -423,22 +423,89 @@ class QdrantService:
         task_id: str,
         query_text: str,
         limit: int = 4,
+        include_source_types: list[str] | None = None,
     ) -> list[Document]:
         try:
             if not await QdrantService.ensure_collections():
                 return []
 
+            must_conditions: list[models.FieldCondition] = [
+                QdrantService._metadata_value_condition("task_id", task_id)
+            ]
+            normalized_source_types = [
+                str(item).strip()
+                for item in (include_source_types or [])
+                if str(item).strip()
+            ]
+            if normalized_source_types:
+                must_conditions.append(
+                    QdrantService._metadata_any_condition(
+                        "source_type",
+                        normalized_source_types,
+                    )
+                )
+
             return await QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION).asimilarity_search(
                 query_text,
                 k=limit,
-                filter=models.Filter(
-                    must=[
-                        QdrantService._metadata_value_condition("task_id", task_id)
-                    ]
-                ),
+                filter=models.Filter(must=must_conditions),
             )
         except Exception:
             logger.exception("Failed to search task knowledge for task %s", task_id)
+            return []
+
+    @staticmethod
+    async def search_project_task_knowledge(
+        *,
+        project_id: str,
+        query_text: str,
+        exclude_task_id: str | None = None,
+        limit: int = 4,
+    ) -> list[Document]:
+        try:
+            if not await QdrantService.ensure_collections():
+                return []
+
+            normalized_limit = max(1, min(int(limit), 4))
+            must_conditions: list[models.FieldCondition] = [
+                QdrantService._metadata_value_condition("project_id", project_id)
+            ]
+            must_not_conditions: list[models.FieldCondition] = []
+            if exclude_task_id:
+                must_not_conditions.append(
+                    QdrantService._metadata_value_condition("task_id", exclude_task_id)
+                )
+
+            hits = await QdrantService._get_store(
+                TASK_KNOWLEDGE_COLLECTION
+            ).asimilarity_search_with_score(
+                query_text,
+                k=max(normalized_limit * 6, 12),
+                filter=models.Filter(
+                    must=must_conditions,
+                    must_not=must_not_conditions or None,
+                ),
+            )
+
+            documents: list[Document] = []
+            per_task_count: dict[str, int] = {}
+            for document, _score in hits:
+                task_id = str(document.metadata.get("task_id", "")).strip()
+                if not task_id or task_id == exclude_task_id:
+                    continue
+                if per_task_count.get(task_id, 0) >= 2:
+                    continue
+                if not document.page_content.strip():
+                    continue
+
+                per_task_count[task_id] = per_task_count.get(task_id, 0) + 1
+                documents.append(document)
+                if len(documents) >= normalized_limit:
+                    break
+
+            return documents
+        except Exception:
+            logger.exception("Failed to search task knowledge for project %s", project_id)
             return []
 
     @staticmethod

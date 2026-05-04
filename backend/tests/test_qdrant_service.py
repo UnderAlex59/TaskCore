@@ -10,6 +10,8 @@ from qdrant_client import models
 from app.services.qdrant_service import QdrantService
 
 REAL_REPLACE_TASK_KNOWLEDGE = QdrantService.replace_task_knowledge
+REAL_SEARCH_TASK_KNOWLEDGE = QdrantService.search_task_knowledge
+REAL_SEARCH_PROJECT_TASK_KNOWLEDGE = QdrantService.search_project_task_knowledge
 
 
 def make_settings(**overrides: object) -> SimpleNamespace:
@@ -92,7 +94,11 @@ def test_vector_size_uses_ollama_model_mapping(monkeypatch) -> None:
 
 def test_embedding_metadata_uses_active_provider_and_model(monkeypatch) -> None:
     monkeypatch.setattr(QdrantService, "_resolve_embedding_provider", Mock(return_value="ollama"))
-    monkeypatch.setattr(QdrantService, "_get_active_embedding_model", Mock(return_value="nomic-embed-text"))
+    monkeypatch.setattr(
+        QdrantService,
+        "_get_active_embedding_model",
+        Mock(return_value="nomic-embed-text"),
+    )
 
     assert QdrantService._get_embedding_metadata() == {
         "embedding_provider": "ollama",
@@ -104,7 +110,11 @@ def test_collection_matches_active_embeddings_requires_matching_size_and_metadat
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(QdrantService, "_resolve_embedding_provider", Mock(return_value="ollama"))
-    monkeypatch.setattr(QdrantService, "_get_active_embedding_model", Mock(return_value="nomic-embed-text"))
+    monkeypatch.setattr(
+        QdrantService,
+        "_get_active_embedding_model",
+        Mock(return_value="nomic-embed-text"),
+    )
     collection_info = SimpleNamespace(
         config=SimpleNamespace(
             params=SimpleNamespace(
@@ -148,7 +158,11 @@ def test_collection_matches_active_embeddings_requires_matching_size_and_metadat
 def test_create_collection_writes_embedding_metadata(monkeypatch) -> None:
     client = Mock()
     monkeypatch.setattr(QdrantService, "_resolve_embedding_provider", Mock(return_value="ollama"))
-    monkeypatch.setattr(QdrantService, "_get_active_embedding_model", Mock(return_value="nomic-embed-text"))
+    monkeypatch.setattr(
+        QdrantService,
+        "_get_active_embedding_model",
+        Mock(return_value="nomic-embed-text"),
+    )
 
     QdrantService._create_collection(
         client,
@@ -172,13 +186,105 @@ def test_normalize_point_id_preserves_uuid_values() -> None:
 
 
 def test_normalize_point_id_hashes_invalid_string_values_to_uuid() -> None:
-    raw_id = "f1248baf-ee60-4867-bf43-d0e614b19717:task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
+    raw_id = (
+        "f1248baf-ee60-4867-bf43-d0e614b19717:"
+        "task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
+    )
 
     normalized = QdrantService._normalize_point_id("task_knowledge", raw_id)
 
     assert normalized != raw_id
     assert normalized == QdrantService._normalize_point_id("task_knowledge", raw_id)
     assert str(uuid.UUID(str(normalized))) == normalized
+
+
+@pytest.mark.asyncio
+async def test_search_task_knowledge_filters_by_included_source_types(monkeypatch) -> None:
+    class FakeStore:
+        def __init__(self) -> None:
+            self.filter_: models.Filter | None = None
+
+        async def asimilarity_search(  # type: ignore[no-untyped-def]
+            self,
+            query_text,
+            *,
+            k,
+            filter,
+        ):
+            self.filter_ = filter
+            return []
+
+    store = FakeStore()
+    monkeypatch.setattr(QdrantService, "ensure_collections", AsyncMock(return_value=True))
+    monkeypatch.setattr(QdrantService, "_get_store", Mock(return_value=store))
+
+    await REAL_SEARCH_TASK_KNOWLEDGE(
+        task_id="task-1",
+        query_text="attachment context",
+        include_source_types=["attachment_text", "attachment_image_alt_text"],
+    )
+
+    assert store.filter_ is not None
+    conditions = list(store.filter_.must or [])
+    assert any(
+        condition.key == "metadata.task_id"
+        and getattr(condition.match, "value", None) == "task-1"
+        for condition in conditions
+    )
+    assert any(
+        condition.key == "metadata.source_type"
+        and set(getattr(condition.match, "any", []))
+        == {"attachment_text", "attachment_image_alt_text"}
+        for condition in conditions
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_project_task_knowledge_filters_project_and_excludes_current_task(
+    monkeypatch,
+) -> None:
+    class FakeStore:
+        def __init__(self) -> None:
+            self.filter_: models.Filter | None = None
+            self.k: int | None = None
+
+        async def asimilarity_search_with_score(  # type: ignore[no-untyped-def]
+            self,
+            query_text,
+            *,
+            k,
+            filter,
+        ):
+            self.filter_ = filter
+            self.k = k
+            return []
+
+    store = FakeStore()
+    monkeypatch.setattr(QdrantService, "ensure_collections", AsyncMock(return_value=True))
+    monkeypatch.setattr(QdrantService, "_get_store", Mock(return_value=store))
+
+    await REAL_SEARCH_PROJECT_TASK_KNOWLEDGE(
+        project_id="project-1",
+        query_text="shared integration behavior",
+        exclude_task_id="task-1",
+        limit=4,
+    )
+
+    assert store.filter_ is not None
+    must_conditions = list(store.filter_.must or [])
+    must_not_conditions = list(store.filter_.must_not or [])
+    assert store.k == 24
+    assert any(
+        condition.key == "metadata.project_id"
+        and getattr(condition.match, "value", None) == "project-1"
+        for condition in must_conditions
+    )
+    assert any(
+        condition.key == "metadata.task_id"
+        and getattr(condition.match, "value", None) == "task-1"
+        for condition in must_not_conditions
+    )
+    assert not any(condition.key == "metadata.task_status" for condition in must_conditions)
 
 
 @pytest.mark.asyncio
@@ -206,7 +312,10 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
         tags=["backend"],
         chunks=[
             {
-                "chunk_id": "f1248baf-ee60-4867-bf43-d0e614b19717:task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0",
+                "chunk_id": (
+                    "f1248baf-ee60-4867-bf43-d0e614b19717:"
+                    "task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
+                ),
                 "chunk_index": 0,
                 "chunk_kind": "task",
                 "content": "Index this task",
@@ -221,5 +330,8 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
     ids = store.ids
     assert ids is not None
     assert len(ids) == 1
-    assert ids[0] != "f1248baf-ee60-4867-bf43-d0e614b19717:task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
+    assert ids[0] != (
+        "f1248baf-ee60-4867-bf43-d0e614b19717:"
+        "task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
+    )
     assert str(uuid.UUID(str(ids[0]))) == str(ids[0])
