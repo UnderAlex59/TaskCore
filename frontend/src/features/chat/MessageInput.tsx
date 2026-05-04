@@ -2,12 +2,14 @@ import { useState } from "react";
 
 interface Props {
   busy?: boolean;
+  compact?: boolean;
   disabled?: boolean;
   onSend?: (value: string) => void | Promise<void>;
   placeholder?: string;
 }
 
 export default function MessageInput({
+  compact = false,
   disabled = false,
   onSend,
   busy = false,
@@ -46,7 +48,11 @@ export default function MessageInput({
           Сообщение в чат
         </label>
         <textarea
-          className="ui-field min-h-24 resize-none"
+          className={
+            compact
+              ? "ui-field min-h-16 resize-none sm:min-h-20"
+              : "ui-field min-h-20 resize-none sm:min-h-24"
+          }
           disabled={disabled || busy}
           id="task-chat-message"
           name="message"
@@ -60,11 +66,13 @@ export default function MessageInput({
           }
           value={value}
         />
-        <p className="mt-2 text-xs leading-5 text-slate/60">
-          {disabled
-            ? "Чат сейчас недоступен."
-            : "Нажмите Enter для отправки. Shift+Enter переносит строку."}
-        </p>
+        {compact ? null : (
+          <p className="mt-2 text-xs leading-5 text-slate/60">
+            {disabled
+              ? "Чат сейчас недоступен."
+              : "Нажмите Enter для отправки. Shift+Enter переносит строку."}
+          </p>
+        )}
       </div>
       <button
         className="ui-button-primary self-end px-5 py-3"

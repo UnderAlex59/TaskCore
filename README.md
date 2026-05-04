@@ -57,6 +57,7 @@
 - [backend/README.md](backend/README.md)
 - [frontend/README.md](frontend/README.md)
 - [backend/app/agents/README.md](backend/app/agents/README.md)
+- [docs/langgraph-graphs.md](docs/langgraph-graphs.md)
 - [SETUP_GUIDE.md](SETUP_GUIDE.md)
 - [WINDOWS_SETUP.md](WINDOWS_SETUP.md)
 - [architecture-spec.md](architecture-spec.md)

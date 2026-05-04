@@ -4,6 +4,7 @@ import type { MessageRead } from "@/api/chatApi";
 import MessageBubble from "@/features/chat/MessageBubble";
 
 interface Props {
+  agentPendingMessage?: MessageRead | null;
   currentUserId?: string;
   messages: MessageRead[];
 }
@@ -22,7 +23,25 @@ function getPendingQuestion(messages: MessageRead[]) {
   return null;
 }
 
-function AgentThinkingIndicator({ question }: { question: MessageRead }) {
+function getScrollableParent(element: HTMLElement) {
+  let parent = element.parentElement;
+
+  while (parent) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      parent.scrollHeight > parent.clientHeight
+    ) {
+      return parent;
+    }
+
+    parent = parent.parentElement;
+  }
+
+  return null;
+}
+
+function AgentThinkingIndicator({ message }: { message: MessageRead }) {
   return (
     <div
       aria-live="polite"
@@ -39,36 +58,57 @@ function AgentThinkingIndicator({ question }: { question: MessageRead }) {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#0c66e4] [animation-delay:240ms]" />
         </div>
       </div>
-      <div className="min-w-0 max-w-[42rem] rounded-[14px] border border-[rgba(12,102,228,0.16)] bg-[#f8fbff] px-4 py-3 text-sm text-[#172b4d] shadow-[0_1px_2px_rgba(9,30,66,0.05)]">
-        <p className="text-anywhere font-semibold text-[#172b4d]">
-          Агент готовит ответ по задаче
-        </p>
+      <div className="min-w-0 max-w-[42rem] rounded-[14px] border border-[rgba(12,102,228,0.2)] bg-[#f8fbff] px-4 py-3 text-sm text-[#172b4d] shadow-[0_1px_2px_rgba(9,30,66,0.05)]">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <p className="text-anywhere font-semibold text-[#172b4d]">
+            Агент отвечает
+          </p>
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#0c66e4]" />
+        </div>
         <p className="text-anywhere mt-1 text-xs leading-5 text-[#626f86]">
-          Вопрос распознан. Ответ появится в этой ветке чата.
+          Ответ формируется в фоне и появится в этой ветке чата.
         </p>
-        <p className="text-anywhere mt-2 line-clamp-2 text-xs leading-5 text-[#44546f]">
-          «{question.content}»
+        <p className="text-anywhere mt-2 line-clamp-2 border-t border-[rgba(12,102,228,0.12)] pt-2 text-xs leading-5 text-[#44546f]">
+          «{message.content}»
         </p>
       </div>
     </div>
   );
 }
 
-export default function MessageList({ currentUserId, messages }: Props) {
+export default function MessageList({
+  agentPendingMessage = null,
+  currentUserId,
+  messages,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const lastMessageId = messages.at(-1)?.id;
-  const pendingQuestion = getPendingQuestion(messages);
+  const pendingMessage = agentPendingMessage ?? getPendingQuestion(messages);
 
   useEffect(() => {
     if (!bottomRef.current) {
       return;
     }
 
+    const behavior: ScrollBehavior = messages.length > 1 ? "smooth" : "auto";
+
     bottomRef.current.scrollIntoView({
-      behavior: messages.length > 1 ? "smooth" : "auto",
+      behavior,
       block: "end",
     });
-  }, [lastMessageId, messages.length]);
+
+    const scrollParent = getScrollableParent(bottomRef.current);
+    if (!scrollParent) {
+      return;
+    }
+
+    scrollParent.scrollTop = scrollParent.scrollHeight;
+    const frameId = window.requestAnimationFrame(() => {
+      scrollParent.scrollTop = scrollParent.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [lastMessageId, messages.length, pendingMessage?.id]);
 
   if (messages.length === 0) {
     return (
@@ -98,8 +138,8 @@ export default function MessageList({ currentUserId, messages }: Props) {
           message={message}
         />
       ))}
-      {pendingQuestion ? (
-        <AgentThinkingIndicator question={pendingQuestion} />
+      {pendingMessage ? (
+        <AgentThinkingIndicator message={pendingMessage} />
       ) : null}
       <div ref={bottomRef} />
     </div>

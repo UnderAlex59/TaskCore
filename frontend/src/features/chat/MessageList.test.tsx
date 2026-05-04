@@ -66,8 +66,20 @@ describe("MessageList", () => {
       />,
     );
 
+    expect(screen.getByText("Агент отвечает")).toBeInTheDocument();
+  });
+
+  it("shows a waiting indicator while an explicit agent response is pending", () => {
+    render(
+      <MessageList
+        agentPendingMessage={baseMessage}
+        messages={[baseMessage]}
+      />,
+    );
+
+    expect(screen.getByText("Агент отвечает")).toBeInTheDocument();
     expect(
-      screen.getByText("Агент готовит ответ по задаче"),
+      screen.getByText("Ответ формируется в фоне и появится в этой ветке чата."),
     ).toBeInTheDocument();
   });
 
@@ -94,8 +106,6 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(
-      screen.queryByText("Агент готовит ответ по задаче"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Агент отвечает")).not.toBeInTheDocument();
   });
 });

@@ -187,7 +187,7 @@ export function Layout() {
       </aside>
 
       <main
-        className="min-h-[100svh] min-w-0 px-4 py-4 sm:px-6 sm:py-6 lg:pl-[19.5rem] lg:pr-8"
+        className="min-h-[calc(100svh-4.125rem)] min-w-0 px-4 py-4 sm:px-6 sm:py-6 lg:min-h-[100svh] lg:pl-[19.5rem] lg:pr-8"
         id="main-content"
       >
         <div className="mx-auto min-w-0 max-w-[1480px]">

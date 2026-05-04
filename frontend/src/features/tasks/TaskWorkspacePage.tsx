@@ -87,6 +87,18 @@ function mergeMessages(current: MessageRead[], incoming: MessageRead[]) {
   });
 }
 
+function shouldShowAgentPending(message: MessageRead) {
+  if (message.author_id === null) {
+    return false;
+  }
+
+  return (
+    message.message_type === "question" ||
+    message.message_type === "change_proposal" ||
+    message.content.trim().startsWith("/")
+  );
+}
+
 function InspectorCard({
   children,
   title,
@@ -131,6 +143,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [agentPendingMessageId, setAgentPendingMessageId] = useState<
+    string | null
+  >(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState(false);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(
     null,
@@ -165,6 +180,24 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const canConnectToChat = task
     ? canUserAccessChat(task, user?.id, user?.role)
     : false;
+  const agentPendingMessage = useMemo(() => {
+    if (!agentPendingMessageId) {
+      return null;
+    }
+
+    const pendingIndex = messages.findIndex(
+      (message) => message.id === agentPendingMessageId,
+    );
+    if (pendingIndex < 0) {
+      return null;
+    }
+
+    const hasAgentResponse = messages
+      .slice(pendingIndex + 1)
+      .some((message) => message.author_id === null);
+
+    return hasAgentResponse ? null : messages[pendingIndex];
+  }, [agentPendingMessageId, messages]);
 
   useEffect(() => {
     setDeveloperSelection(task?.developer_id ?? "");
@@ -449,6 +482,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
       setError(null);
       const created = await chatApi.send(taskId, { content });
       setMessages((current) => mergeMessages(current, created));
+      setAgentPendingMessageId(
+        [...created].reverse().find(shouldShowAgentPending)?.id ?? null,
+      );
 
       if (
         created.some((message) => message.message_type === "agent_proposal")
@@ -490,6 +526,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
 
   const onRealtimeMessages = useEffectEvent(async (incoming: MessageRead[]) => {
     setMessages((current) => mergeMessages(current, incoming));
+    if (incoming.some((message) => message.author_id === null)) {
+      setAgentPendingMessageId(null);
+    }
 
     if (!taskId) {
       return;
@@ -702,7 +741,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
 
   const chatSection = canAccessChat ? (
     <ChatWindow
-      className="min-h-[40rem]"
+      agentPendingMessage={agentPendingMessage}
+      className="h-full"
+      compactInput
       currentUserId={user?.id}
       description="Рабочее обсуждение задачи: уточнения, решения, изменения и вопросы агенту."
       disabled={!canAccessChat}
@@ -720,10 +761,33 @@ export default function TaskWorkspacePage({ mode }: Props) {
   );
 
   return (
-    <section className="min-w-0 space-y-5">
-      <header className="rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-[#626f86]">
+    <section
+      className={
+        activeTab === "chat"
+          ? "flex h-[calc(100svh-6.625rem)] min-w-0 flex-col gap-3 overflow-hidden sm:h-[calc(100svh-7.625rem)] lg:h-[calc(100svh-3rem)]"
+          : "min-w-0 space-y-5"
+      }
+    >
+      <header
+        className={[
+          "shrink-0 rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06)]",
+          activeTab === "chat" ? "px-4 py-3 sm:px-5" : "px-6 py-5",
+        ].join(" ")}
+      >
+        <div
+          className={
+            activeTab === "chat"
+              ? "flex flex-col gap-2"
+              : "flex flex-col gap-5"
+          }
+        >
+          <div
+            className={
+              activeTab === "chat"
+                ? "hidden"
+                : "flex flex-wrap items-center gap-2 text-sm text-[#626f86]"
+            }
+          >
             <Link className="hover:text-[#0c66e4]" to={tasksHref}>
               Задачи
             </Link>
@@ -731,13 +795,38 @@ export default function TaskWorkspacePage({ mode }: Props) {
             <span>Карточка задачи</span>
           </div>
 
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div
+            className={
+              activeTab === "chat"
+                ? "flex min-w-0 items-start justify-between gap-3"
+                : "flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between"
+            }
+          >
             <div className="min-w-0">
-              <p className="section-eyebrow">Рабочая область задачи</p>
-              <h2 className="text-anywhere mt-2 text-balance text-3xl font-semibold leading-tight text-[#172b4d] sm:text-[2.25rem]">
+              <p
+                className={
+                  activeTab === "chat" ? "hidden" : "section-eyebrow"
+                }
+              >
+                Рабочая область задачи
+              </p>
+              <h2
+                className={[
+                  "text-anywhere mt-2 text-balance font-semibold leading-tight text-[#172b4d]",
+                  activeTab === "chat"
+                    ? "mt-0 line-clamp-1 text-xl sm:text-2xl"
+                    : "text-3xl sm:text-[2.25rem]",
+                ].join(" ")}
+              >
                 {task.title}
               </h2>
-              <p className="text-anywhere mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
+              <p
+                className={
+                  activeTab === "chat"
+                    ? "hidden"
+                    : "text-anywhere mt-3 max-w-4xl text-sm leading-7 text-[#44546f]"
+                }
+              >
                 Пространство разделено на три рабочие вкладки: основной текст
                 задачи, чат по задаче и история изменений. Это убирает
                 перегрузку и позволяет работать с каждым контекстом отдельно.
@@ -745,7 +834,11 @@ export default function TaskWorkspacePage({ mode }: Props) {
             </div>
             {canDeleteTask ? (
               <button
-                className="ui-button-danger shrink-0"
+                className={
+                  activeTab === "chat"
+                    ? "ui-button-danger hidden shrink-0 sm:inline-flex"
+                    : "ui-button-danger shrink-0"
+                }
                 disabled={deletingTask}
                 onClick={() => setTaskPendingDeletion(true)}
                 type="button"
@@ -755,7 +848,13 @@ export default function TaskWorkspacePage({ mode }: Props) {
             ) : null}
           </div>
 
-          <div className="flex min-w-0 flex-wrap gap-2 text-xs font-medium text-[#44546f]">
+          <div
+            className={
+              activeTab === "chat"
+                ? "hidden"
+                : "flex min-w-0 flex-wrap gap-2 text-xs font-medium text-[#44546f]"
+            }
+          >
             <span className="text-anywhere max-w-full rounded-full bg-[#e9f2ff] px-3 py-1.5 text-[#0c66e4]">
               {getTaskStatusLabel(task.status)}
             </span>
@@ -791,8 +890,8 @@ export default function TaskWorkspacePage({ mode }: Props) {
                 key={tab.key}
                 className={
                   activeTab === tab.key
-                    ? "rounded-[10px] border border-[#bfd4f6] bg-[#e9f2ff] px-4 py-2.5 text-sm font-medium text-[#0c66e4]"
-                    : "rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-2.5 text-sm font-medium text-[#44546f] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    ? "rounded-[10px] border border-[#bfd4f6] bg-[#e9f2ff] px-3 py-2 text-sm font-medium text-[#0c66e4] sm:px-4"
+                    : "rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-3 py-2 text-sm font-medium text-[#44546f] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
                 }
                 disabled={tab.disabled}
                 onClick={() => setActiveTab(tab.key)}
@@ -808,7 +907,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
       {error ? (
         <p
           aria-live="polite"
-          className="rounded-[14px] border border-[rgba(174,46,36,0.16)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]"
+          className="shrink-0 rounded-[14px] border border-[rgba(174,46,36,0.16)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]"
         >
           {error}
         </p>
@@ -1206,9 +1305,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
         )}
       </div>
 
-      <div className={activeTab === "chat" ? "block" : "hidden"}>
-        {chatSection}
-      </div>
+      {activeTab === "chat" ? (
+        <div className="min-h-0 flex-1">{chatSection}</div>
+      ) : null}
 
       <ConfirmDialog
         busy={deletingTask}
