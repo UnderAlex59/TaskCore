@@ -42,6 +42,30 @@ def test_split_text_for_rag_drops_empty_chunks() -> None:
     assert split_text_for_rag(" \n\t ", target_tokens=5, overlap_tokens=1) == []
 
 
+def test_split_text_for_rag_hard_splits_long_unbroken_text() -> None:
+    chunks = split_text_for_rag(
+        "x" * 12,
+        target_tokens=50,
+        overlap_tokens=5,
+        max_chars=5,
+    )
+
+    assert chunks == ["x" * 5, "x" * 5, "x" * 2]
+    assert all(len(chunk) <= 5 for chunk in chunks)
+
+
+def test_split_text_for_rag_respects_max_chars_after_word_split() -> None:
+    chunks = split_text_for_rag(
+        "alpha beta gamma delta",
+        target_tokens=4,
+        overlap_tokens=1,
+        max_chars=10,
+    )
+
+    assert chunks == ["alpha beta", "gamma", "delta"]
+    assert all(len(chunk) <= 10 for chunk in chunks)
+
+
 def test_attachment_text_extraction_supports_utf8_and_cp1251(tmp_path) -> None:
     utf8_path = tmp_path / "note.txt"
     utf8_path.write_text("Русский текст в UTF-8", encoding="utf-8")

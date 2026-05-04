@@ -274,10 +274,6 @@ export default function AttachmentUpload({
           <p className="text-sm font-semibold text-[#172b4d]">
             Прикрепленные материалы
           </p>
-          <p className="mt-1 text-sm leading-6 text-[#626f86]">
-            Загрузите файлы, макеты, исследования или спецификации, которые
-            должны участвовать в обсуждении и индексации задачи.
-          </p>
         </div>
         <label className="ui-button-secondary cursor-pointer whitespace-nowrap">
           <span>{busy ? "Загружаем..." : "Загрузить файл"}</span>

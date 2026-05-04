@@ -504,6 +504,7 @@ Chunk ID:
 | --- | --- |
 | `RAG_CHUNK_TARGET_TOKENS` | Целевой размер chunk в токенах-словах |
 | `RAG_CHUNK_OVERLAP_TOKENS` | Перекрытие между соседними chunks |
+| `RAG_CHUNK_MAX_CHARS` | Жесткий лимит длины одного chunk перед embeddings |
 
 Поведение split:
 

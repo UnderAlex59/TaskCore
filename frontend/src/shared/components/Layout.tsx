@@ -72,10 +72,6 @@ export function Layout() {
         </button>
       </div>
 
-      <p className="mt-4 text-sm leading-6 text-[#626f86]">
-        Проекты, требования, проверка и командная работа в одном продукте.
-      </p>
-
       <nav
         aria-label="Основная навигация"
         className="mt-8 flex min-w-0 flex-1 flex-col gap-1.5"

@@ -803,13 +803,6 @@ export default function TaskWorkspacePage({ mode }: Props) {
             }
           >
             <div className="min-w-0">
-              <p
-                className={
-                  activeTab === "chat" ? "hidden" : "section-eyebrow"
-                }
-              >
-                Рабочая область задачи
-              </p>
               <h2
                 className={[
                   "text-anywhere mt-2 text-balance font-semibold leading-tight text-[#172b4d]",
@@ -820,17 +813,6 @@ export default function TaskWorkspacePage({ mode }: Props) {
               >
                 {task.title}
               </h2>
-              <p
-                className={
-                  activeTab === "chat"
-                    ? "hidden"
-                    : "text-anywhere mt-3 max-w-4xl text-sm leading-7 text-[#44546f]"
-                }
-              >
-                Пространство разделено на три рабочие вкладки: основной текст
-                задачи, чат по задаче и история изменений. Это убирает
-                перегрузку и позволяет работать с каждым контекстом отдельно.
-              </p>
             </div>
             {canDeleteTask ? (
               <button

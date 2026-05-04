@@ -219,7 +219,7 @@ Qdrant-коллекции:
 - `project_questions` - вопросы валидации.
 - `task_proposals` - предложения изменений.
 
-RAG-параметры задаются через `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS`, `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES`.
+RAG-параметры задаются через `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_CHUNK_MAX_CHARS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS`, `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES`.
 
 ## Переменные окружения
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { TaskTagOption } from "@/api/taskTagsApi";
 import type {
@@ -8,6 +8,7 @@ import type {
   TaskUpdate,
 } from "@/api/tasksApi";
 import AttachmentUpload from "@/features/tasks/AttachmentUpload";
+import TaskMarkdownPreview from "@/features/tasks/TaskMarkdownPreview";
 import {
   buildTaskDocumentFromEditors,
   normalizeTaskEditorValue,
@@ -41,6 +42,9 @@ interface Props {
   suggestingTags?: boolean;
   task: TaskRead;
 }
+
+const MARKDOWN_TABLE_TEMPLATE =
+  "| Поле | Правило |\n|---|---|\n| Статус | Обязателен |\n| Дата | Не раньше текущей |";
 
 function haveSameTags(left: string[], right: string[]) {
   return (
@@ -101,9 +105,11 @@ export default function TaskForm({
     () => serializeTaskBodyForEditor(initialSections),
     [initialSections],
   );
+  const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [title, setTitle] = useState(task.title);
   const [documentBody, setDocumentBody] = useState(initialDocumentBody);
+  const [documentMode, setDocumentMode] = useState<"edit" | "preview">("edit");
   const [changeHistory, setChangeHistory] = useState(
     initialSections.changeHistory,
   );
@@ -119,6 +125,7 @@ export default function TaskForm({
   useEffect(() => {
     setTitle(task.title);
     setDocumentBody(initialDocumentBody);
+    setDocumentMode("edit");
     setChangeHistory(initialSections.changeHistory);
     setTags(task.tags);
     setTagSuggestions([]);
@@ -193,79 +200,40 @@ export default function TaskForm({
     setTags(tagSuggestions.map((item) => item.tag));
   }
 
+  function insertMarkdownTable() {
+    const textarea = documentTextareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? documentBody.length;
+    const selectionEnd = textarea?.selectionEnd ?? documentBody.length;
+    const beforeSelection = documentBody.slice(0, selectionStart);
+    const afterSelection = documentBody.slice(selectionEnd);
+    const prefix =
+      beforeSelection && !beforeSelection.endsWith("\n")
+        ? "\n\n"
+        : beforeSelection.endsWith("\n\n") || !beforeSelection
+          ? ""
+          : "\n";
+    const suffix =
+      afterSelection && !afterSelection.startsWith("\n") ? "\n\n" : "";
+    const insertedText = `${prefix}${MARKDOWN_TABLE_TEMPLATE}${suffix}`;
+    const nextValue = `${beforeSelection}${insertedText}${afterSelection}`;
+    const nextCursor = beforeSelection.length + insertedText.length;
+
+    setDocumentBody(nextValue);
+    setDocumentMode("edit");
+
+    window.requestAnimationFrame(() => {
+      documentTextareaRef.current?.focus();
+      documentTextareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
   return (
     <form className="min-w-0 space-y-5" onSubmit={handleSubmit}>
-      <section className="min-w-0 rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-[#f7f8fa] px-5 py-4">
-        <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0">
-            <p className="section-eyebrow">Спецификация задачи</p>
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-              <span className="text-anywhere max-w-full rounded-full bg-[#e9f2ff] px-3 py-1 text-xs font-semibold text-[#0c66e4]">
-                {getTaskStatusLabel(task.status)}
-              </span>
-              <span className="text-anywhere max-w-full rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
-                Обновлено {formatDateTime(task.updated_at)}
-              </span>
-              {task.indexed_at ? (
-                <span className="text-anywhere max-w-full rounded-full bg-white px-3 py-1 text-xs font-medium text-[#44546f]">
-                  Индекс {formatDateTime(task.indexed_at)}
-                </span>
-              ) : null}
-            </div>
-            <h3 className="text-anywhere mt-4 text-2xl font-semibold leading-tight text-[#172b4d] sm:text-[2rem]">
-              {activePane === "history"
-                ? "История изменений задачи"
-                : "Текст задачи"}
-            </h3>
-            <p className="text-anywhere mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
-              {activePane === "history"
-                ? "Фиксируйте смысловые правки постановки отдельно от основного текста задачи. Это упрощает чтение текущей версии и помогает команде видеть, что менялось."
-                : "Работайте с задачей как с единым документом без визуального дробления на блоки. При необходимости используйте заголовки и списки прямо в тексте."}
-            </p>
-          </div>
-
-          <div className="grid min-w-0 gap-3 sm:min-w-[17rem]">
-            <div className="min-w-0 rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-white px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
-                Состояние редактора
-              </p>
-              <p className="text-anywhere mt-2 text-sm leading-6 text-[#172b4d]">
-                {disabled
-                  ? "Редактирование временно недоступно."
-                  : hasUnsavedChanges
-                    ? "Есть несохраненные изменения."
-                    : embeddingsStale && canCommitChanges
-                      ? "Текст уже сохранен, но commit еще не опубликован."
-                      : "Страница синхронизирована с карточкой задачи."}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {isAwaitingApproval ? (
-          <div className="mt-4 rounded-[14px] border border-[rgba(172,107,8,0.18)] bg-[#fff4e5] px-4 py-3 text-sm leading-6 text-[#7f4c00]">
-            Любое изменение на этапе подтверждения возвращает задачу в доработку
-            и потребует повторной проверки.
-          </div>
-        ) : null}
-
-        {isPostApprovalFlow ? (
-          <div className="mt-4 rounded-[14px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] px-4 py-3 text-sm leading-6 text-[#0c66e4]">
-            После передачи в разработку аналитик продолжает обновлять
-            постановку. Для пересчета семантического индекса и публикации новой
-            версии нужен отдельный commit.
-          </div>
-        ) : null}
-      </section>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_320px] xl:items-start">
         <section className="space-y-5">
           <EditorCard
-            helperText={
-              activePane === "history"
-                ? "Коротко фиксируйте, что изменилось, когда и почему. Это отдельная вкладка, чтобы рабочий текст задачи не перегружался."
-                : "Один документ для чтения и редактирования задачи. Заголовки и структура остаются внутри текста, а не в UI."
-            }
+            helperText=""
             title={
               activePane === "history" ? "История изменений" : "Документ задачи"
             }
@@ -315,19 +283,66 @@ export default function TaskForm({
                   </div>
                 </div>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
-                    Текст задачи
-                  </span>
-                  <textarea
-                    className="min-h-[34rem] w-full resize-y rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 text-[15px] leading-8 text-[#172b4d] outline-none transition-colors placeholder:text-[#97a0af] focus:border-[#0c66e4] focus:ring-4 focus:ring-[#dbeafe]"
-                    disabled={disabled}
-                    name="task-document"
-                    onChange={(event) => setDocumentBody(event.target.value)}
-                    placeholder="Опишите задачу как единый документ. При желании используйте заголовки и списки."
-                    value={documentBody}
-                  />
-                </label>
+                <div>
+                  <div className="mb-3 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <span className="block text-sm font-semibold text-[#172b4d]">
+                      Текст задачи
+                    </span>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                      <button
+                        aria-pressed={documentMode === "edit"}
+                        className={
+                          documentMode === "edit"
+                            ? "ui-button-primary px-3 py-2"
+                            : "ui-button-secondary px-3 py-2"
+                        }
+                        onClick={() => setDocumentMode("edit")}
+                        type="button"
+                      >
+                        Редактирование
+                      </button>
+                      <button
+                        aria-pressed={documentMode === "preview"}
+                        className={
+                          documentMode === "preview"
+                            ? "ui-button-primary px-3 py-2"
+                            : "ui-button-secondary px-3 py-2"
+                        }
+                        onClick={() => setDocumentMode("preview")}
+                        type="button"
+                      >
+                        Предпросмотр
+                      </button>
+                      <button
+                        className="ui-button-secondary px-3 py-2"
+                        disabled={disabled}
+                        onClick={insertMarkdownTable}
+                        type="button"
+                      >
+                        Вставить таблицу
+                      </button>
+                    </div>
+                  </div>
+
+                  {documentMode === "edit" ? (
+                    <label className="block">
+                      <span className="sr-only">Текст задачи</span>
+                      <textarea
+                        className="min-h-[34rem] w-full resize-y rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 font-mono text-[14px] leading-7 text-[#172b4d] outline-none transition-colors placeholder:text-[#97a0af] focus:border-[#0c66e4] focus:ring-4 focus:ring-[#dbeafe]"
+                        disabled={disabled}
+                        name="task-document"
+                        onChange={(event) =>
+                          setDocumentBody(event.target.value)
+                        }
+                        placeholder="Опишите задачу как единый документ. При желании используйте заголовки, списки и Markdown-таблицы."
+                        ref={documentTextareaRef}
+                        value={documentBody}
+                      />
+                    </label>
+                  ) : (
+                    <TaskMarkdownPreview markdown={documentBody} />
+                  )}
+                </div>
 
                 {onUploadAttachment ? (
                   <AttachmentUpload
@@ -378,7 +393,7 @@ export default function TaskForm({
                   helperText={
                     availableTags.length === 0
                       ? "Администратор еще не добавил теги в справочник."
-                      : "Теги управляют правилами, валидацией и поиском связанных задач."
+                      : ""
                   }
                   label="Теги"
                   name="task-tags"
@@ -400,8 +415,7 @@ export default function TaskForm({
                       </p>
                       <p className="mt-3 text-sm leading-7 text-[#44546f]">
                         Подбирает до 5 тегов из справочника проекта по текущей
-                        версии задачи. Предлагаются только теги с ожидаемым
-                        совпадением не ниже 80%.
+                        версии задачи.
                       </p>
                     </div>
                     <button
@@ -480,23 +494,6 @@ export default function TaskForm({
                   ) : null}
                 </section>
               ) : null}
-
-              <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
-                  Как работать с документом
-                </p>
-                <ul className="mt-3 space-y-3 text-sm leading-6 text-[#44546f]">
-                  <li>Держите текущую постановку в одном связанном тексте.</li>
-                  <li>
-                    Используйте заголовки и списки внутри документа, если это
-                    помогает чтению.
-                  </li>
-                  <li>
-                    Историю изменений переносите на отдельную вкладку, чтобы не
-                    перегружать основную версию.
-                  </li>
-                </ul>
-              </section>
             </>
           ) : (
             <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
@@ -531,11 +528,6 @@ export default function TaskForm({
                 : isPostApprovalFlow
                   ? "Документ синхронизирован. Новые правки можно публиковать отдельным commit."
                   : "Страница синхронизирована с текущей карточкой задачи."}
-          </p>
-          <p className="text-anywhere text-xs text-[#626f86]">
-            {activePane === "history"
-              ? "История изменений хранится отдельно от основного текста, но сохраняется в ту же задачу."
-              : "Переход задачи в разработку больше не блокирует работу аналитика над постановкой."}
           </p>
         </div>
 

@@ -110,6 +110,7 @@ draft -> validating -> needs_rework / awaiting_approval -> ready_for_dev -> in_p
 
 - `RAG_CHUNK_TARGET_TOKENS`;
 - `RAG_CHUNK_OVERLAP_TOKENS`;
+- `RAG_CHUNK_MAX_CHARS`;
 - `RAG_ATTACHMENT_MAX_TEXT_CHARS`;
 - `RAG_VISION_ENABLED`;
 - `RAG_VISION_MAX_IMAGE_BYTES`.

@@ -1,9 +1,10 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { projectsApi, type ProjectRead } from "@/api/projectsApi";
 import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
 import { tasksApi } from "@/api/tasksApi";
+import TaskMarkdownPreview from "@/features/tasks/TaskMarkdownPreview";
 import { buildTaskDocumentFromEditors } from "@/features/tasks/taskDocument";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import TagMultiSelect from "@/shared/components/TagMultiSelect";
@@ -11,6 +12,8 @@ import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { useAuthStore } from "@/store/authStore";
 
 const TASK_CREATORS = new Set(["ADMIN", "ANALYST"]);
+const MARKDOWN_TABLE_TEMPLATE =
+  "| Поле | Правило |\n|---|---|\n| Статус | Обязателен |\n| Дата | Не раньше текущей |";
 
 export default function TaskCreatePage() {
   const { projectId } = useParams();
@@ -21,6 +24,7 @@ export default function TaskCreatePage() {
   const [taskTags, setTaskTags] = useState<TaskTagOption[]>([]);
   const [title, setTitle] = useState("");
   const [documentBody, setDocumentBody] = useState("");
+  const [documentMode, setDocumentMode] = useState<"edit" | "preview">("edit");
   const [tags, setTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -31,6 +35,7 @@ export default function TaskCreatePage() {
   const hasTitle = title.trim().length > 0;
   const hasDraftContent =
     hasTitle || documentBody.trim().length > 0 || tags.length > 0;
+  const documentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +116,33 @@ export default function TaskCreatePage() {
     }
   }
 
+  function insertMarkdownTable() {
+    const textarea = documentTextareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? documentBody.length;
+    const selectionEnd = textarea?.selectionEnd ?? documentBody.length;
+    const beforeSelection = documentBody.slice(0, selectionStart);
+    const afterSelection = documentBody.slice(selectionEnd);
+    const prefix =
+      beforeSelection && !beforeSelection.endsWith("\n")
+        ? "\n\n"
+        : beforeSelection.endsWith("\n\n") || !beforeSelection
+          ? ""
+          : "\n";
+    const suffix =
+      afterSelection && !afterSelection.startsWith("\n") ? "\n\n" : "";
+    const insertedText = `${prefix}${MARKDOWN_TABLE_TEMPLATE}${suffix}`;
+    const nextValue = `${beforeSelection}${insertedText}${afterSelection}`;
+    const nextCursor = beforeSelection.length + insertedText.length;
+
+    setDocumentBody(nextValue);
+    setDocumentMode("edit");
+
+    window.requestAnimationFrame(() => {
+      documentTextareaRef.current?.focus();
+      documentTextareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
   if (loading) {
     return <LoadingSpinner label="Загрузка формы создания задачи" />;
   }
@@ -149,14 +181,9 @@ export default function TaskCreatePage() {
 
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
-              <p className="section-eyebrow">Рабочая область задачи</p>
               <h2 className="mt-2 text-balance text-3xl font-semibold leading-tight text-[#172b4d] sm:text-[2.25rem]">
                 Новая задача
               </h2>
-              <p className="mt-3 max-w-4xl text-sm leading-7 text-[#44546f]">
-                Работайте над постановкой сразу в полном пространстве: название,
-                документ задачи и теги доступны до первого сохранения.
-              </p>
             </div>
 
             <Link className="ui-button-secondary" to={tasksHref}>
@@ -215,18 +242,62 @@ export default function TaskCreatePage() {
               />
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[#172b4d]">
-                Текст задачи
-              </span>
-              <textarea
-                className="min-h-[36rem] w-full resize-y rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 text-[15px] leading-8 text-[#172b4d] outline-none transition-colors placeholder:text-[#97a0af] focus:border-[#0c66e4] focus:ring-4 focus:ring-[#dbeafe]"
-                name="task-document"
-                onChange={(event) => setDocumentBody(event.target.value)}
-                placeholder="Опишите задачу как единый документ. Можно использовать заголовки, списки, бизнес-правила и критерии приемки."
-                value={documentBody}
-              />
-            </label>
+            <div>
+              <div className="mb-3 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <span className="block text-sm font-semibold text-[#172b4d]">
+                  Текст задачи
+                </span>
+                <div className="flex min-w-0 flex-wrap gap-2">
+                  <button
+                    aria-pressed={documentMode === "edit"}
+                    className={
+                      documentMode === "edit"
+                        ? "ui-button-primary px-3 py-2"
+                        : "ui-button-secondary px-3 py-2"
+                    }
+                    onClick={() => setDocumentMode("edit")}
+                    type="button"
+                  >
+                    Редактирование
+                  </button>
+                  <button
+                    aria-pressed={documentMode === "preview"}
+                    className={
+                      documentMode === "preview"
+                        ? "ui-button-primary px-3 py-2"
+                        : "ui-button-secondary px-3 py-2"
+                    }
+                    onClick={() => setDocumentMode("preview")}
+                    type="button"
+                  >
+                    Предпросмотр
+                  </button>
+                  <button
+                    className="ui-button-secondary px-3 py-2"
+                    onClick={insertMarkdownTable}
+                    type="button"
+                  >
+                    Вставить таблицу
+                  </button>
+                </div>
+              </div>
+
+              {documentMode === "edit" ? (
+                <label className="block">
+                  <span className="sr-only">Текст задачи</span>
+                  <textarea
+                    className="min-h-[36rem] w-full resize-y rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white px-5 py-4 font-mono text-[14px] leading-7 text-[#172b4d] outline-none transition-colors placeholder:text-[#97a0af] focus:border-[#0c66e4] focus:ring-4 focus:ring-[#dbeafe]"
+                    name="task-document"
+                    onChange={(event) => setDocumentBody(event.target.value)}
+                    placeholder="Опишите задачу как единый документ. Можно использовать заголовки, списки, бизнес-правила, критерии приемки и Markdown-таблицы."
+                    ref={documentTextareaRef}
+                    value={documentBody}
+                  />
+                </label>
+              ) : (
+                <TaskMarkdownPreview markdown={documentBody} />
+              )}
+            </div>
           </div>
         </section>
 

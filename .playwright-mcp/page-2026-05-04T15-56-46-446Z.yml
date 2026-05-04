@@ -1,0 +1,64 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - paragraph [ref=e7]: Платформа задач
+        - paragraph [ref=e8]: Рабочая система для требований, проверки и командной передачи задач.
+      - generic [ref=e9]:
+        - link "Войти" [ref=e10] [cursor=pointer]:
+          - /url: /login
+        - link "Создать аккаунт" [ref=e11] [cursor=pointer]:
+          - /url: /register
+  - main [ref=e12]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - paragraph [ref=e16]: Рабочая область
+        - heading "Управляйте жизненным циклом задачи как единым рабочим документом." [level=1] [ref=e17]
+        - paragraph [ref=e18]: Платформа объединяет постановку, проверку, обсуждение и передачу задачи в разработку. Интерфейс ориентирован на рабочий процесс команды, а не на витринную демонстрацию функций.
+        - generic [ref=e19]:
+          - link "Создать аккаунт" [ref=e20] [cursor=pointer]:
+            - /url: /register
+          - link "Войти" [ref=e21] [cursor=pointer]:
+            - /url: /login
+      - complementary [ref=e22]:
+        - paragraph [ref=e23]: Подход
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - paragraph [ref=e26]: Структура
+            - paragraph [ref=e27]: Задача оформляется как рабочая страница, а не как разрозненная карточка.
+          - generic [ref=e28]:
+            - paragraph [ref=e29]: Контроль
+            - paragraph [ref=e30]: Изменения после старта разработки публикуются в индекс только через commit.
+          - generic [ref=e31]:
+            - paragraph [ref=e32]: Команда
+            - paragraph [ref=e33]: Аналитик, разработчик и тестировщик работают в одной истории задачи.
+    - generic [ref=e34]:
+      - article [ref=e35]:
+        - heading "Требования в одном контуре" [level=2] [ref=e36]
+        - paragraph [ref=e37]: Постановка, уточнения, проверка, материалы и история изменений живут внутри одной задачи.
+      - article [ref=e38]:
+        - heading "Командная передача без потери контекста" [level=2] [ref=e39]
+        - paragraph [ref=e40]: После согласования задача уходит в разработку вместе с полным рабочим контекстом и сохраненными решениями.
+      - article [ref=e41]:
+        - heading "Управляемый поток изменений" [level=2] [ref=e42]
+        - paragraph [ref=e43]: Изменения после старта разработки сохраняются отдельно и публикуются в семантический индекс через явный commit.
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - paragraph [ref=e47]: Рабочий процесс
+        - heading "От постановки до передачи в работу без переключения контекста." [level=2] [ref=e48]
+      - generic [ref=e49]:
+        - article [ref=e50]:
+          - generic [ref=e51]: "01"
+          - generic [ref=e52]:
+            - heading "Создайте проект и постановку" [level=3] [ref=e53]
+            - paragraph [ref=e54]: Оформите задачу как структурированный документ, добавьте участников и зафиксируйте исходный контекст.
+        - article [ref=e55]:
+          - generic [ref=e56]: "02"
+          - generic [ref=e57]:
+            - heading "Пройдите проверку и согласование" [level=3] [ref=e58]
+            - paragraph [ref=e59]: Запустите валидацию, устраните замечания и подтвердите задачу до передачи в реализацию.
+        - article [ref=e60]:
+          - generic [ref=e61]: "03"
+          - generic [ref=e62]:
+            - heading "Ведите задачу в одном рабочем потоке" [level=3] [ref=e63]
+            - paragraph [ref=e64]: Обсуждение, review артефакты и последующие уточнения остаются частью той же истории задачи.

@@ -113,7 +113,7 @@ Fallback-subgraph. Используется, когда forced agent не най
 - `alt_text` для изображений, если Vision-обработка включена и доступна;
 - результатом валидации.
 
-Параметры chunking и вложений задаются через `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS`, `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES`.
+Параметры chunking и вложений задаются через `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_CHUNK_MAX_CHARS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS`, `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES`.
 
 ### Attachment Vision Graph
 

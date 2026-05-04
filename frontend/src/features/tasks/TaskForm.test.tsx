@@ -77,6 +77,34 @@ describe("TaskForm", () => {
     });
   });
 
+  it("inserts a Markdown table and renders it in preview mode", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TaskForm
+        availableTags={availableTags}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        task={baseTask}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Вставить таблицу" }));
+
+    const documentInput = screen.getByRole("textbox", {
+      name: "Текст задачи",
+    }) as HTMLTextAreaElement;
+    expect(documentInput.value).toContain("| Поле | Правило |");
+    expect(documentInput.value).toContain("| Статус | Обязателен |");
+
+    await user.click(screen.getByRole("button", { name: "Предпросмотр" }));
+
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Поле" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Обязателен" })).toBeInTheDocument();
+  });
+
   it("keeps history changes in a separate pane and blocks commit when they are unsaved", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);

@@ -26,7 +26,49 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def split_text_for_rag(text: str, *, target_tokens: int, overlap_tokens: int) -> list[str]:
+def _split_text_by_max_chars(text: str, *, max_chars: int) -> list[str]:
+    limit = max(int(max_chars), 1)
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+    if len(normalized) <= limit:
+        return [normalized]
+
+    chunks: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+    for token in normalized.split(" "):
+        token_parts = [
+            token[start : start + limit]
+            for start in range(0, len(token), limit)
+        ] or [token]
+        for token_part in token_parts:
+            separator_len = 1 if current_parts else 0
+            next_len = current_len + separator_len + len(token_part)
+            if current_parts and next_len > limit:
+                chunks.append(" ".join(current_parts).strip())
+                current_parts = []
+                current_len = 0
+
+            current_parts.append(token_part)
+            current_len = (
+                len(token_part)
+                if current_len == 0
+                else current_len + 1 + len(token_part)
+            )
+
+    if current_parts:
+        chunks.append(" ".join(current_parts).strip())
+    return [chunk for chunk in chunks if chunk]
+
+
+def split_text_for_rag(
+    text: str,
+    *,
+    target_tokens: int,
+    overlap_tokens: int,
+    max_chars: int | None = None,
+) -> list[str]:
     normalized = _normalize_text(text)
     if not normalized:
         return []
@@ -35,7 +77,9 @@ def split_text_for_rag(text: str, *, target_tokens: int, overlap_tokens: int) ->
     target = max(target_tokens, 1)
     overlap = max(min(overlap_tokens, target - 1), 0)
     if len(tokens) <= target:
-        return [normalized]
+        if max_chars is None:
+            return [normalized]
+        return _split_text_by_max_chars(normalized, max_chars=max_chars)
 
     chunks: list[str] = []
     step = max(target - overlap, 1)
@@ -46,7 +90,13 @@ def split_text_for_rag(text: str, *, target_tokens: int, overlap_tokens: int) ->
         if end >= len(tokens):
             break
         start += step
-    return [chunk for chunk in chunks if chunk]
+    if max_chars is None:
+        return [chunk for chunk in chunks if chunk]
+
+    limited_chunks: list[str] = []
+    for chunk in chunks:
+        limited_chunks.extend(_split_text_by_max_chars(chunk, max_chars=max_chars))
+    return [chunk for chunk in limited_chunks if chunk]
 
 
 def _source(
@@ -181,6 +231,7 @@ def _finalize_rag_index(state: RagPipelineState) -> RagPipelineState:
             str(source_doc.get("content", "")),
             target_tokens=settings.RAG_CHUNK_TARGET_TOKENS,
             overlap_tokens=settings.RAG_CHUNK_OVERLAP_TOKENS,
+            max_chars=settings.RAG_CHUNK_MAX_CHARS,
         )
         for chunk_index, content in enumerate(split_chunks):
             source_type = str(source_doc["source_type"])

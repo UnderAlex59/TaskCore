@@ -335,3 +335,43 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
         "task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
     )
     assert str(uuid.UUID(str(ids[0]))) == str(ids[0])
+
+
+@pytest.mark.asyncio
+async def test_replace_task_knowledge_upserts_before_deleting_stale_chunks(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeClient:
+        def delete(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append("delete")
+
+    class FakeStore:
+        async def aadd_documents(self, *, documents, ids):  # type: ignore[no-untyped-def]
+            calls.append("add")
+            return None
+
+    monkeypatch.setattr(QdrantService, "ensure_collections", AsyncMock(return_value=True))
+    monkeypatch.setattr(QdrantService, "_get_client", Mock(return_value=FakeClient()))
+    monkeypatch.setattr(QdrantService, "_get_store", Mock(return_value=FakeStore()))
+
+    indexed = await REAL_REPLACE_TASK_KNOWLEDGE(
+        task_id="task-1",
+        project_id="project-1",
+        task_title="Large task",
+        task_status="ready_for_dev",
+        tags=[],
+        chunks=[
+            {
+                "chunk_id": "task-1:task_content:task-1:0",
+                "chunk_index": 0,
+                "chunk_kind": "task_content",
+                "content": "Index this task",
+                "source_id": "task-1",
+                "source_total_chunks": 1,
+                "source_type": "task_content",
+            }
+        ],
+    )
+
+    assert indexed is True
+    assert calls == ["add", "delete"]

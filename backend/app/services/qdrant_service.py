@@ -28,6 +28,7 @@ _VECTOR_SIZE_BY_MODEL = {
     "mxbai-embed-large": 1024,
 }
 _DUPLICATE_PROPOSAL_SCORE_THRESHOLD = 0.92
+_TASK_KNOWLEDGE_ADD_BATCH_SIZE = 16
 _POINT_ID_NAMESPACE = uuid.UUID("a1fc4b4f-8c2d-4dcb-8a77-0f7a52465b62")
 
 
@@ -342,28 +343,17 @@ class QdrantService:
             if not await QdrantService.ensure_collections():
                 return False
 
-            client = QdrantService._get_client()
-            client.delete(
-                collection_name=TASK_KNOWLEDGE_COLLECTION,
-                points_selector=QdrantService._filter_selector(
-                    models.Filter(
-                        must=[
-                            QdrantService._metadata_value_condition("task_id", task_id)
-                        ]
-                    )
-                ),
-                wait=True,
-            )
-
             documents: list[Document] = []
             ids: list[int | str] = []
+            chunk_ids: list[str] = []
             for chunk in chunks:
                 content = str(chunk.get("content", "")).strip()
                 if not content:
                     continue
+                chunk_id = str(chunk["chunk_id"])
 
                 metadata: dict[str, Any] = {
-                    "chunk_id": str(chunk["chunk_id"]),
+                    "chunk_id": chunk_id,
                     "chunk_index": int(chunk.get("chunk_index", 0)),
                     "chunk_kind": str(chunk.get("chunk_kind", "task")),
                     "project_id": project_id,
@@ -379,18 +369,36 @@ class QdrantService:
                     metadata["filename"] = str(chunk["filename"])
 
                 documents.append(Document(page_content=content, metadata=metadata))
+                chunk_ids.append(chunk_id)
                 ids.append(
                     QdrantService._normalize_point_id(
                         TASK_KNOWLEDGE_COLLECTION,
-                        chunk["chunk_id"],
+                        chunk_id,
                     )
                 )
             if not documents:
-                return True
+                return await QdrantService.delete_task_knowledge(task_id=task_id)
 
-            await QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION).aadd_documents(
-                documents=documents,
-                ids=ids,
+            store = QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION)
+            for start in range(0, len(documents), _TASK_KNOWLEDGE_ADD_BATCH_SIZE):
+                end = start + _TASK_KNOWLEDGE_ADD_BATCH_SIZE
+                await store.aadd_documents(
+                    documents=documents[start:end],
+                    ids=ids[start:end],
+                )
+
+            client = QdrantService._get_client()
+            client.delete(
+                collection_name=TASK_KNOWLEDGE_COLLECTION,
+                points_selector=QdrantService._filter_selector(
+                    models.Filter(
+                        must=[QdrantService._metadata_value_condition("task_id", task_id)],
+                        must_not=[
+                            QdrantService._metadata_any_condition("chunk_id", chunk_ids)
+                        ],
+                    )
+                ),
+                wait=True,
             )
             return True
         except Exception:

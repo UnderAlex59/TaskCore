@@ -161,7 +161,7 @@ Backend:
 - `GIGACHAT_VERIFY_SSL`, `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CA_BUNDLE_PEM` - параметры GigaChat TLS.
 - `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `EMBEDDING_DIMENSION` - embeddings для RAG.
 - `LLM_SETTINGS_ENCRYPTION_KEY` - ключ шифрования сохраняемых LLM-настроек.
-- `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS` - параметры RAG-подготовки.
+- `RAG_CHUNK_TARGET_TOKENS`, `RAG_CHUNK_OVERLAP_TOKENS`, `RAG_CHUNK_MAX_CHARS`, `RAG_ATTACHMENT_MAX_TEXT_CHARS` - параметры RAG-подготовки.
 - `RAG_VISION_ENABLED`, `RAG_VISION_MAX_IMAGE_BYTES` - включение и ограничения Vision-обработки вложений.
 - `UPLOAD_DIR` - каталог файловых вложений.
 - `LANGGRAPH_IMAGES_DIR` - каталог экспорта схем графов.
