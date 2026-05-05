@@ -28,7 +28,7 @@ def test_compiled_langgraph_shapes_are_exportable() -> None:
     vision_test_mermaid = get_vision_test_graph().get_graph().draw_mermaid()
 
     assert "invoke_agent_subgraph" in chat_mermaid
-    assert "invoke_qa_planner" in qa_mermaid
+    assert "collect_qa_context" in qa_mermaid
     assert "invoke_qa_answer" in qa_mermaid
     assert "invoke_change_tracker_llm" in change_tracker_mermaid
     assert "build_manager_response" in manager_mermaid

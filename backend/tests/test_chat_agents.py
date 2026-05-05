@@ -33,6 +33,25 @@ def test_builtin_agent_subgraphs_are_discoverable() -> None:
     assert {"qa", "change-tracker", "manager"} <= agent_keys
 
 
+def _qa_verifier_result(final_answer: str = "Verified answer.") -> LLMInvocationResult:
+    return LLMInvocationResult(
+        ok=True,
+        text=(
+            '{"final_answer":"'
+            + final_answer
+            + '","confidence":"high","grounded":true,"canonical_question":null}'
+        ),
+        provider_config_id="provider-1",
+        provider_kind="openai",
+        model="gpt-4o-mini",
+        latency_ms=20,
+        prompt_tokens=6,
+        completion_tokens=8,
+        total_tokens=14,
+        estimated_cost_usd=None,
+    )
+
+
 def test_parse_requested_agent_prefix() -> None:
     requested_agent, routed_content = parse_requested_agent("@change Update the API contract")
 
@@ -204,7 +223,7 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
     )
     assert result.source_ref["provider_kind"] == "openrouter"
     assert result.source_ref["answer_confidence"] == "high"
-    assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
+    assert llm_calls == ["qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
@@ -252,6 +271,8 @@ async def test_question_agent_marks_low_confidence_answers_for_validation_backlo
                 total_tokens=30,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     monkeypatch.setattr(
@@ -280,7 +301,7 @@ async def test_question_agent_marks_low_confidence_answers_for_validation_backlo
         == "Какие статусы синхронизируются между системами?"
     )
     assert "Вопрос сохранён в базе вопросов" in result.response
-    assert llm_calls == ["qa-planner", "qa-answer"]
+    assert llm_calls == ["qa-answer"]
 
 
 @pytest.mark.asyncio
@@ -342,6 +363,8 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
                 total_tokens=14,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
@@ -386,7 +409,7 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
     assert result.source_ref["chunk_ids"] == ["task-1:attachment:file-1:0"]
     assert result.source_ref["rag_context_scope"] == "attachments"
     assert result.source_ref["attachment_filenames"] == ["integration.md"]
-    assert llm_calls == ["qa-planner", "qa-answer", "qa-verifier"]
+    assert llm_calls == ["qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
@@ -431,6 +454,8 @@ async def test_question_agent_excludes_current_task_text_chunks_from_qa_rag(
                 total_tokens=16,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
@@ -518,6 +543,8 @@ async def test_question_agent_uses_attachment_text_chunks_from_qdrant(
                 total_tokens=16,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
@@ -574,7 +601,7 @@ async def test_question_agent_uses_attachment_text_chunks_from_qdrant(
 
 
 @pytest.mark.asyncio
-async def test_question_agent_falls_back_to_text_attachment_file_when_qdrant_is_empty(
+async def test_question_agent_does_not_use_unscored_attachment_fallback_when_qdrant_is_empty(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -621,6 +648,8 @@ async def test_question_agent_falls_back_to_text_attachment_file_when_qdrant_is_
                 total_tokens=16,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
@@ -670,10 +699,10 @@ async def test_question_agent_falls_back_to_text_attachment_file_when_qdrant_is_
         )
     )
 
-    assert "Fallback attachment says timeout is 30 seconds." in captured_answer_prompt
+    assert "Fallback attachment says timeout is 30 seconds." not in captured_answer_prompt
     assert result.source_ref["chunk_ids"] == []
-    assert result.source_ref["rag_context_scope"] == "attachments"
-    assert result.source_ref["attachment_filenames"] == ["policy.txt"]
+    assert result.source_ref["rag_context_scope"] == "none"
+    assert result.source_ref["attachment_filenames"] == []
 
 
 @pytest.mark.asyncio
@@ -718,18 +747,18 @@ async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed
                 total_tokens=16,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
     async def fake_search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
-        assert kwargs == {
-            "project_id": "project-1",
-            "query_text": "status.changed event",
-            "exclude_task_id": "task-1",
-            "limit": 4,
-        }
+        assert kwargs["project_id"] == "project-1"
+        assert kwargs["exclude_task_id"] == "task-1"
+        assert kwargs["limit"] == 5
+        assert "event" in kwargs["query_text"]
         return [
             Document(
                 page_content="Previous task requires publishing status.changed after persistence.",
@@ -794,7 +823,7 @@ async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed
 
 
 @pytest.mark.asyncio
-async def test_question_agent_skips_cross_task_search_when_rag_is_not_needed(
+async def test_question_agent_uses_fixed_rag_settings_for_direct_questions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
@@ -831,13 +860,19 @@ async def test_question_agent_skips_cross_task_search_when_rag_is_not_needed(
                 total_tokens=16,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["limit"] == 5
         return []
 
+    cross_task_calls: list[dict[str, object]] = []
+
     async def fake_search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("cross-task RAG should not run when needs_rag=false")
+        cross_task_calls.append(dict(kwargs))
+        return []
 
     monkeypatch.setattr(
         "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
@@ -872,6 +907,7 @@ async def test_question_agent_skips_cross_task_search_when_rag_is_not_needed(
     assert result.source_ref["cross_task_chunk_ids"] == []
     assert result.source_ref["cross_task_ids"] == []
     assert result.source_ref["rag_context_scope"] == "none"
+    assert cross_task_calls[0]["limit"] == 5
 
 
 @pytest.mark.asyncio
@@ -1151,6 +1187,8 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
                 total_tokens=38,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     class FakeDB:
@@ -1252,6 +1290,8 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
                 total_tokens=30,
                 estimated_cost_usd=None,
             )
+        if kwargs["agent_key"] == "qa-verifier":
+            return _qa_verifier_result()
         raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
 
     audit_events: list[str] = []

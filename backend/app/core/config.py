@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP_TOKENS: int = 50
     RAG_CHUNK_MAX_CHARS: int = 3000
     RAG_ATTACHMENT_MAX_TEXT_CHARS: int = 20000
+    RAG_CHUNK_MIN_SCORE: float = 0.7
     RAG_VISION_ENABLED: bool = True
     RAG_VISION_MAX_IMAGE_BYTES: int = 5242880
 

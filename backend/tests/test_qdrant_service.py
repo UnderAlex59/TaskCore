@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.documents import Document
 from qdrant_client import models
 
 from app.services.qdrant_service import QdrantService
@@ -204,7 +205,7 @@ async def test_search_task_knowledge_filters_by_included_source_types(monkeypatc
         def __init__(self) -> None:
             self.filter_: models.Filter | None = None
 
-        async def asimilarity_search(  # type: ignore[no-untyped-def]
+        async def asimilarity_search_with_score(  # type: ignore[no-untyped-def]
             self,
             query_text,
             *,
@@ -237,6 +238,42 @@ async def test_search_task_knowledge_filters_by_included_source_types(monkeypatc
         == {"attachment_text", "attachment_image_alt_text"}
         for condition in conditions
     )
+
+
+@pytest.mark.asyncio
+async def test_search_task_knowledge_filters_by_min_score(monkeypatch) -> None:
+    high_score_document = Document(
+        page_content="Relevant attachment context.",
+        metadata={"chunk_id": "high"},
+    )
+    low_score_document = Document(
+        page_content="Weak attachment context.",
+        metadata={"chunk_id": "low"},
+    )
+
+    class FakeStore:
+        async def asimilarity_search_with_score(  # type: ignore[no-untyped-def]
+            self,
+            query_text,
+            *,
+            k,
+            filter,
+        ):
+            return [
+                (low_score_document, 0.65),
+                (high_score_document, 0.86),
+            ]
+
+    monkeypatch.setattr(QdrantService, "ensure_collections", AsyncMock(return_value=True))
+    monkeypatch.setattr(QdrantService, "_get_store", Mock(return_value=FakeStore()))
+
+    documents = await REAL_SEARCH_TASK_KNOWLEDGE(
+        task_id="task-1",
+        query_text="attachment context",
+        min_score=0.8,
+    )
+
+    assert documents == [high_score_document]
 
 
 @pytest.mark.asyncio

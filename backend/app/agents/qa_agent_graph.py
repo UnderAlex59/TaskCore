@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Literal
 
 from langchain_core.documents import Document
@@ -12,7 +11,6 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.state import ChatState
 from app.agents.system_prompts import (
     QA_ANSWER_SYSTEM_PROMPT,
-    QA_PLANNER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
 )
 from app.services.llm_runtime_service import LLMRuntimeService
@@ -24,13 +22,6 @@ QA_AGENT_DESCRIPTION = (
     "Отвечает на вопросы по требованиям с учётом контекста задачи, Qdrant RAG и последней проверки."
 )
 QA_AGENT_ALIASES = ("question", "analyst", "qaagent", "qa-agent")
-
-QA_PLANNER_AGENT_KEY = "qa-planner"
-QA_PLANNER_AGENT_NAME = "QAPlannerAgent"
-QA_PLANNER_AGENT_DESCRIPTION = (
-    "Планирует глубину анализа для вопроса по задаче и выбирает контекст для извлечения."
-)
-QA_PLANNER_AGENT_ALIASES: tuple[str, ...] = ()
 
 QA_ANSWER_AGENT_KEY = "qa-answer"
 QA_ANSWER_AGENT_NAME = "QAAnswerAgent"
@@ -58,8 +49,11 @@ _LOW_CONFIDENCE_MARKERS = (
     "не описано",
 )
 _BACKLOG_NOTICE = "Вопрос сохранён в базе вопросов для последующей валидации задачи."
-_ALLOWED_ANALYSIS_MODES = {"direct", "deep"}
 _ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
+_FIXED_ANALYSIS_MODE = "deep"
+_FIXED_NEEDS_RAG = True
+_FIXED_NEEDS_VERIFICATION = True
+_FIXED_RETRIEVAL_LIMIT = 5
 
 
 class QAAgentGraphState(ChatState, total=False):
@@ -77,13 +71,6 @@ class QAAgentGraphState(ChatState, total=False):
     related_titles: str
     issues: list[object]
     questions: list[object]
-    planner_system_prompt: str
-    planner_user_prompt: str
-    planner_payload: dict[str, object] | None
-    planner_ok: bool
-    planner_error_message: str | None
-    planner_provider_kind: str | None
-    planner_model: str | None
     analysis_mode: str
     needs_rag: bool
     needs_verification: bool
@@ -161,27 +148,6 @@ def _append_backlog_notice(response: str) -> str:
     return f"{response}{separator} {_BACKLOG_NOTICE}".strip()
 
 
-def _normalize_analysis_mode(value: object) -> str:
-    normalized = str(value).strip().lower()
-    if normalized in _ALLOWED_ANALYSIS_MODES:
-        return normalized
-    return "direct"
-
-
-def _normalize_focus_points(candidate: object) -> list[str]:
-    if not isinstance(candidate, list):
-        return []
-    return [str(item).strip() for item in candidate if str(item).strip()]
-
-
-def _normalize_retrieval_limit(value: object, *, analysis_mode: str) -> int:
-    try:
-        limit = int(value)
-    except (TypeError, ValueError):
-        limit = 4 if analysis_mode == "deep" else 2
-    return max(1, min(limit, 6))
-
-
 def _build_llm_stage_ref(
     *,
     provider_kind: str | None,
@@ -200,55 +166,6 @@ def _is_attachment_document(document: Document) -> bool:
     source_type = str(metadata.get("source_type") or "").strip()
     chunk_kind = str(metadata.get("chunk_kind") or "").strip()
     return source_type in _ATTACHMENT_SOURCE_TYPES or chunk_kind in _ATTACHMENT_SOURCE_TYPES
-
-
-async def _load_attachment_context_from_db(
-    db: Any,
-    *,
-    task_id: str,
-) -> tuple[list[str], list[str]]:
-    if db is None or not hasattr(db, "execute"):
-        return [], []
-
-    try:
-        from sqlalchemy import select
-
-        from app.models.task import TaskAttachment
-        from app.services.attachment_content_service import AttachmentContentService
-
-        result = await db.execute(
-            select(TaskAttachment)
-            .where(TaskAttachment.task_id == task_id)
-            .order_by(TaskAttachment.created_at.asc())
-        )
-        attachments = list(result.scalars().all())
-    except Exception:
-        return [], []
-
-    snippets: list[str] = []
-    filenames: list[str] = []
-    for attachment in attachments:
-        filename = str(getattr(attachment, "filename", "") or "attachment").strip()
-        content_type = str(getattr(attachment, "content_type", "") or "").strip()
-        storage_path = str(getattr(attachment, "storage_path", "") or "").strip()
-        if not storage_path:
-            continue
-
-        extracted_text = AttachmentContentService.extract_text(Path(storage_path), content_type)
-        if extracted_text:
-            snippets.append(f"Вложение {filename}:\n{extracted_text}")
-            filenames.append(filename)
-            continue
-
-        if AttachmentContentService.is_image(content_type):
-            alt_text = AttachmentContentService._meaningful_alt_text(
-                getattr(attachment, "alt_text", None)
-            )
-            if alt_text:
-                snippets.append(f"Изображение {filename}:\n{alt_text}")
-                filenames.append(filename)
-
-    return snippets, filenames
 
 
 def _format_cross_task_document(document: Document) -> tuple[str, dict[str, str]] | None:
@@ -291,99 +208,22 @@ def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
     )
     issues = list(validation_result.get("issues", []))
     questions = list(validation_result.get("questions", []))
+    message_content = str(state.get("message_content", "")).strip()
 
     return {
         "related_titles": related_titles,
         "issues": issues,
         "questions": questions,
-        "planner_system_prompt": QA_PLANNER_SYSTEM_PROMPT,
-        "planner_user_prompt": (
-            f"Название задачи: {state.get('task_title', '')}\n"
-            f"Статус задачи: {state.get('task_status', '')}\n"
-            f"Описание задачи:\n{state.get('task_content', '')}\n\n"
-            f"Вопрос пользователя:\n{state.get('message_content', '')}\n\n"
-            f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
-            f"Замечания проверки: {issues}\n"
-            f"Открытые вопросы проверки: {questions}\n"
-            f"Связанные задачи: {related_titles or 'нет'}"
-        ),
-    }
-
-
-async def _invoke_qa_planner(state: QAAgentGraphState) -> QAAgentGraphState:
-    db = state.get("db")
-    if db is None:
-        message_content = str(state.get("message_content", "")).strip()
-        return {
-            "planner_ok": False,
-            "planner_error_message": None,
-            "planner_provider_kind": None,
-            "planner_model": None,
-            "planner_payload": None,
-            "analysis_mode": "direct",
-            "needs_rag": True,
-            "needs_verification": False,
-            "retrieval_query": message_content,
-            "retrieval_limit": 3,
-            "focus_points": [],
-            "canonical_question_hint": _normalize_validation_question(
-                None,
-                fallback_question=message_content,
-            ),
-        }
-
-    result = await LLMRuntimeService.invoke_chat(
-        db,
-        agent_key=QA_PLANNER_AGENT_KEY,
-        actor_user_id=state.get("actor_user_id"),
-        task_id=state.get("task_id"),
-        project_id=state.get("project_id"),
-        system_prompt=str(state.get("planner_system_prompt", "")),
-        user_prompt=str(state.get("planner_user_prompt", "")),
-        prompt_key=QA_PLANNER_AGENT_KEY,
-    )
-    payload = _extract_json_payload(result.text or "") if result.ok and result.text else None
-    analysis_mode = _normalize_analysis_mode(
-        payload.get("analysis_mode") if payload else None
-    )
-    message_content = str(state.get("message_content", "")).strip()
-    needs_rag = bool(payload.get("needs_rag")) if payload is not None else True
-    needs_verification = (
-        bool(payload.get("needs_verification"))
-        if payload is not None
-        else False
-    )
-    retrieval_query = (
-        str(payload.get("retrieval_query") or "").strip()
-        if payload is not None
-        else ""
-    )
-    focus_points = _normalize_focus_points(payload.get("focus_points") if payload else None)
-    canonical_question_hint = (
-        _normalize_validation_question(
-            payload.get("canonical_question_hint"),
+        "analysis_mode": _FIXED_ANALYSIS_MODE,
+        "needs_rag": _FIXED_NEEDS_RAG,
+        "needs_verification": _FIXED_NEEDS_VERIFICATION,
+        "retrieval_query": message_content,
+        "retrieval_limit": _FIXED_RETRIEVAL_LIMIT,
+        "focus_points": [],
+        "canonical_question_hint": _normalize_validation_question(
+            None,
             fallback_question=message_content,
-        )
-        if payload is not None and payload.get("canonical_question_hint")
-        else None
-    )
-
-    return {
-        "planner_ok": bool(result.ok),
-        "planner_error_message": result.error_message,
-        "planner_provider_kind": result.provider_kind,
-        "planner_model": result.model,
-        "planner_payload": payload,
-        "analysis_mode": analysis_mode,
-        "needs_rag": needs_rag,
-        "needs_verification": needs_verification,
-        "retrieval_query": retrieval_query or message_content,
-        "retrieval_limit": _normalize_retrieval_limit(
-            payload.get("retrieval_limit") if payload else None,
-            analysis_mode=analysis_mode,
         ),
-        "focus_points": focus_points,
-        "canonical_question_hint": canonical_question_hint,
     }
 
 
@@ -422,18 +262,12 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
         for document in attachment_documents
         if document.metadata.get("filename")
     ]
-    if collect_attachments and not rag_snippets:
-        rag_snippets, attachment_filenames = await _load_attachment_context_from_db(
-            state.get("db"),
-            task_id=task_id,
-        )
-
     cross_task_documents = (
         await QdrantService.search_project_task_knowledge(
             project_id=project_id,
             query_text=query_text,
             exclude_task_id=task_id or None,
-            limit=min(retrieval_limit, 4),
+            limit=retrieval_limit,
         )
         if needs_rag and project_id
         else []
@@ -706,11 +540,6 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
         response = _append_backlog_notice(response)
 
     llm_stages = {
-        "planner": _build_llm_stage_ref(
-            provider_kind=state.get("planner_provider_kind"),
-            model=state.get("planner_model"),
-            ok=bool(state.get("planner_ok")),
-        ),
         "answer": _build_llm_stage_ref(
             provider_kind=state.get("answer_provider_kind"),
             model=state.get("answer_model"),
@@ -766,15 +595,13 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
 def get_qa_agent_graph():
     graph = StateGraph(QAAgentGraphState)
     graph.add_node("prepare_qa_request", _prepare_qa_request)
-    graph.add_node("invoke_qa_planner", _invoke_qa_planner)
     graph.add_node("collect_qa_context", _collect_qa_context)
     graph.add_node("invoke_qa_answer", _invoke_qa_answer)
     graph.add_node("prepare_qa_verification", _prepare_qa_verification)
     graph.add_node("invoke_qa_verifier", _invoke_qa_verifier)
     graph.add_node("finalize_qa_response", _finalize_qa_response)
     graph.add_edge(START, "prepare_qa_request")
-    graph.add_edge("prepare_qa_request", "invoke_qa_planner")
-    graph.add_edge("invoke_qa_planner", "collect_qa_context")
+    graph.add_edge("prepare_qa_request", "collect_qa_context")
     graph.add_edge("collect_qa_context", "invoke_qa_answer")
     graph.add_conditional_edges(
         "invoke_qa_answer",

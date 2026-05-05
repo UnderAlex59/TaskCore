@@ -1,20 +1,5 @@
 from __future__ import annotations
 
-QA_PLANNER_SYSTEM_PROMPT = (
-    "Ты планируешь аналитический ответ по задаче. "
-    "Реши, нужен ли только прямой ответ из текущего описания или глубокий разбор "
-    "с RAG-контекстом и отдельной проверкой groundedness. "
-    "Верни строго JSON с ключами: "
-    "analysis_mode (direct|deep), "
-    "needs_rag (boolean), "
-    "needs_verification (boolean), "
-    "retrieval_query (string|null), "
-    "retrieval_limit (integer), "
-    "focus_points (array of strings), "
-    "canonical_question_hint (string|null). "
-    "Не добавляй текст вне JSON."
-)
-
 QA_ANSWER_SYSTEM_PROMPT = (
     "Ты опытный продуктовый аналитик. "
     "Ответь на вопрос пользователя только на русском языке. "

@@ -26,10 +26,6 @@ from app.agents.qa_agent_graph import (
     QA_ANSWER_AGENT_DESCRIPTION,
     QA_ANSWER_AGENT_KEY,
     QA_ANSWER_AGENT_NAME,
-    QA_PLANNER_AGENT_ALIASES,
-    QA_PLANNER_AGENT_DESCRIPTION,
-    QA_PLANNER_AGENT_KEY,
-    QA_PLANNER_AGENT_NAME,
     QA_VERIFIER_AGENT_ALIASES,
     QA_VERIFIER_AGENT_DESCRIPTION,
     QA_VERIFIER_AGENT_KEY,
@@ -53,25 +49,18 @@ from app.agents.validation_graph import (
 def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
     return (
         ChatAgentMetadata(
-            key=QA_PLANNER_AGENT_KEY,
-            name=QA_PLANNER_AGENT_NAME,
-            description=QA_PLANNER_AGENT_DESCRIPTION,
-            aliases=QA_PLANNER_AGENT_ALIASES,
-            priority=20,
-        ),
-        ChatAgentMetadata(
             key=QA_ANSWER_AGENT_KEY,
             name=QA_ANSWER_AGENT_NAME,
             description=QA_ANSWER_AGENT_DESCRIPTION,
             aliases=QA_ANSWER_AGENT_ALIASES,
-            priority=30,
+            priority=20,
         ),
         ChatAgentMetadata(
             key=QA_VERIFIER_AGENT_KEY,
             name=QA_VERIFIER_AGENT_NAME,
             description=QA_VERIFIER_AGENT_DESCRIPTION,
             aliases=QA_VERIFIER_AGENT_ALIASES,
-            priority=40,
+            priority=30,
         ),
         ChatAgentMetadata(
             key=CHANGE_TRACKER_AGENT_KEY,

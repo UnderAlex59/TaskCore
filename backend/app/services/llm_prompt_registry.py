@@ -7,7 +7,6 @@ from app.agents.system_prompts import (
     CHANGE_TRACKER_SYSTEM_PROMPT,
     CHAT_ROUTING_SYSTEM_PROMPT,
     QA_ANSWER_SYSTEM_PROMPT,
-    QA_PLANNER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
     VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
     VALIDATION_CONTEXT_QUESTIONS_SYSTEM_PROMPT,
@@ -33,17 +32,6 @@ class LLMPromptDefinition:
 def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
     return (
         LLMPromptDefinition(
-            prompt_key="qa-planner",
-            agent_key="qa-planner",
-            name="QAPlannerAgent",
-            description=(
-                "Планирует, насколько глубокий анализ нужен для вопроса по задаче "
-                "и какой контекст стоит извлекать."
-            ),
-            default_system_prompt=QA_PLANNER_SYSTEM_PROMPT,
-            priority=20,
-        ),
-        LLMPromptDefinition(
             prompt_key="qa-answer",
             agent_key="qa-answer",
             name="QAAnswerAgent",
@@ -52,7 +40,7 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
                 "валидации и RAG-данных."
             ),
             default_system_prompt=QA_ANSWER_SYSTEM_PROMPT,
-            priority=30,
+            priority=20,
         ),
         LLMPromptDefinition(
             prompt_key="qa-verifier",
@@ -63,7 +51,7 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
                 "на доступный контекст и не содержит догадок."
             ),
             default_system_prompt=QA_VERIFIER_SYSTEM_PROMPT,
-            priority=40,
+            priority=30,
         ),
         LLMPromptDefinition(
             prompt_key="change-tracker",

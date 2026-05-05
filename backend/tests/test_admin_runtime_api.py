@@ -187,7 +187,6 @@ async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
     payload = response.json()
     keys = {item["key"] for item in payload}
     assert {
-        "qa-planner",
         "qa-answer",
         "qa-verifier",
         "change-tracker",

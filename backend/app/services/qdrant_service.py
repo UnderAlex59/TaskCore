@@ -433,6 +433,7 @@ class QdrantService:
         query_text: str,
         limit: int = 4,
         include_source_types: list[str] | None = None,
+        min_score: float | None = None,
     ) -> list[Document]:
         try:
             if not await QdrantService.ensure_collections():
@@ -454,11 +455,19 @@ class QdrantService:
                     )
                 )
 
-            return await QdrantService._get_store(TASK_KNOWLEDGE_COLLECTION).asimilarity_search(
+            threshold = get_settings().RAG_CHUNK_MIN_SCORE if min_score is None else min_score
+            hits = await QdrantService._get_store(
+                TASK_KNOWLEDGE_COLLECTION
+            ).asimilarity_search_with_score(
                 query_text,
                 k=limit,
                 filter=models.Filter(must=must_conditions),
             )
+            return [
+                document
+                for document, score in hits
+                if float(score) >= threshold
+            ]
         except Exception:
             logger.exception("Failed to search task knowledge for task %s", task_id)
             return []
@@ -470,12 +479,13 @@ class QdrantService:
         query_text: str,
         exclude_task_id: str | None = None,
         limit: int = 4,
+        min_score: float | None = None,
     ) -> list[Document]:
         try:
             if not await QdrantService.ensure_collections():
                 return []
 
-            normalized_limit = max(1, min(int(limit), 4))
+            normalized_limit = max(1, min(int(limit), 5))
             must_conditions: list[models.FieldCondition] = [
                 QdrantService._metadata_value_condition("project_id", project_id)
             ]
@@ -496,9 +506,12 @@ class QdrantService:
                 ),
             )
 
+            threshold = get_settings().RAG_CHUNK_MIN_SCORE if min_score is None else min_score
             documents: list[Document] = []
             per_task_count: dict[str, int] = {}
-            for document, _score in hits:
+            for document, score in hits:
+                if float(score) < threshold:
+                    continue
                 task_id = str(document.metadata.get("task_id", "")).strip()
                 if not task_id or task_id == exclude_task_id:
                     continue
