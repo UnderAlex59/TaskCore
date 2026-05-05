@@ -25,6 +25,103 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _normalize_structured_text(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [re.sub(r"[ \t]+$", "", line) for line in normalized.split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _looks_structured_for_chunking(text: str) -> bool:
+    return bool(
+        re.search(r"(?m)^#{1,6}\s+\S", text)
+        or re.search(r"(?m)^\s*[-*+]\s+\S", text)
+        or re.search(r"(?m)^\s*\d+[.)]\s+\S", text)
+        or re.search(r"(?m)^\s*\|.+\|\s*$", text)
+        or "\n\n" in text
+    )
+
+
+def _is_heading(line: str) -> bool:
+    return bool(re.match(r"^#{1,6}\s+\S", line.strip()))
+
+
+def _is_list_line(line: str) -> bool:
+    stripped = line.strip()
+    return bool(re.match(r"^([-*+]|\d+[.)])\s+\S", stripped))
+
+
+def _is_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _split_structured_blocks(text: str) -> list[str]:
+    normalized = _normalize_structured_text(text)
+    if not normalized:
+        return []
+
+    blocks: list[str] = []
+    buffer: list[str] = []
+    current_heading = ""
+
+    def flush_buffer() -> None:
+        nonlocal buffer
+        content = "\n".join(buffer).strip()
+        buffer = []
+        if not content:
+            return
+        if current_heading and not content.startswith(current_heading):
+            content = f"{current_heading}\n{content}"
+        blocks.append(content)
+
+    lines = normalized.split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            flush_buffer()
+            index += 1
+            continue
+
+        if _is_heading(stripped):
+            flush_buffer()
+            current_heading = stripped
+            index += 1
+            continue
+
+        if _is_table_line(stripped):
+            flush_buffer()
+            table_lines = [line]
+            index += 1
+            while index < len(lines) and _is_table_line(lines[index]):
+                table_lines.append(lines[index])
+                index += 1
+            content = "\n".join(table_lines).strip()
+            blocks.append(f"{current_heading}\n{content}".strip() if current_heading else content)
+            continue
+
+        if _is_list_line(stripped):
+            flush_buffer()
+            list_lines = [line]
+            index += 1
+            while index < len(lines) and (
+                _is_list_line(lines[index])
+                or (lines[index].startswith((" ", "\t")) and lines[index].strip())
+            ):
+                list_lines.append(lines[index])
+                index += 1
+            content = "\n".join(list_lines).strip()
+            blocks.append(f"{current_heading}\n{content}".strip() if current_heading else content)
+            continue
+
+        buffer.append(line)
+        index += 1
+
+    flush_buffer()
+    return [block for block in blocks if block.strip()]
+
+
 def _split_text_by_max_chars(text: str, *, max_chars: int) -> list[str]:
     limit = max(int(max_chars), 1)
     normalized = _normalize_text(text)
@@ -37,10 +134,9 @@ def _split_text_by_max_chars(text: str, *, max_chars: int) -> list[str]:
     current_parts: list[str] = []
     current_len = 0
     for token in normalized.split(" "):
-        token_parts = [
-            token[start : start + limit]
-            for start in range(0, len(token), limit)
-        ] or [token]
+        token_parts = [token[start : start + limit] for start in range(0, len(token), limit)] or [
+            token
+        ]
         for token_part in token_parts:
             separator_len = 1 if current_parts else 0
             next_len = current_len + separator_len + len(token_part)
@@ -50,11 +146,7 @@ def _split_text_by_max_chars(text: str, *, max_chars: int) -> list[str]:
                 current_len = 0
 
             current_parts.append(token_part)
-            current_len = (
-                len(token_part)
-                if current_len == 0
-                else current_len + 1 + len(token_part)
-            )
+            current_len = len(token_part) if current_len == 0 else current_len + 1 + len(token_part)
 
     if current_parts:
         chunks.append(" ".join(current_parts).strip())
@@ -68,6 +160,17 @@ def split_text_for_rag(
     overlap_tokens: int,
     max_chars: int | None = None,
 ) -> list[str]:
+    structured_text = _normalize_structured_text(text)
+    if structured_text and _looks_structured_for_chunking(structured_text):
+        structured_chunks = _split_structured_text_for_rag(
+            structured_text,
+            target_tokens=target_tokens,
+            overlap_tokens=overlap_tokens,
+            max_chars=max_chars,
+        )
+        if structured_chunks:
+            return structured_chunks
+
     normalized = _normalize_text(text)
     if not normalized:
         return []
@@ -96,6 +199,73 @@ def split_text_for_rag(
     for chunk in chunks:
         limited_chunks.extend(_split_text_by_max_chars(chunk, max_chars=max_chars))
     return [chunk for chunk in limited_chunks if chunk]
+
+
+def _split_structured_text_for_rag(
+    text: str,
+    *,
+    target_tokens: int,
+    overlap_tokens: int,
+    max_chars: int | None = None,
+) -> list[str]:
+    blocks = _split_structured_blocks(text)
+    if not blocks:
+        return []
+
+    target = max(target_tokens, 1)
+    overlap = max(min(overlap_tokens, target - 1), 0)
+    chunks: list[str] = []
+    current_blocks: list[str] = []
+    current_tokens = 0
+
+    def flush_current() -> None:
+        nonlocal current_blocks, current_tokens
+        if not current_blocks:
+            return
+        chunk = "\n\n".join(current_blocks).strip()
+        if max_chars is not None and len(chunk) > max_chars:
+            chunks.extend(_split_text_by_max_chars(chunk, max_chars=max_chars))
+        else:
+            chunks.append(chunk)
+        if overlap > 0:
+            overlap_blocks: list[str] = []
+            overlap_tokens_total = 0
+            for block in reversed(current_blocks):
+                block_tokens = len(_normalize_text(block).split())
+                if overlap_blocks and overlap_tokens_total + block_tokens > overlap:
+                    break
+                overlap_blocks.insert(0, block)
+                overlap_tokens_total += block_tokens
+            current_blocks = overlap_blocks
+            current_tokens = overlap_tokens_total
+        else:
+            current_blocks = []
+            current_tokens = 0
+
+    for block in blocks:
+        block_tokens = len(_normalize_text(block).split())
+        if block_tokens > target:
+            flush_current()
+            chunks.extend(
+                split_text_for_rag(
+                    _normalize_text(block),
+                    target_tokens=target_tokens,
+                    overlap_tokens=overlap_tokens,
+                    max_chars=max_chars,
+                )
+            )
+            current_blocks = []
+            current_tokens = 0
+            continue
+
+        if current_blocks and current_tokens + block_tokens > target:
+            flush_current()
+
+        current_blocks.append(block)
+        current_tokens += block_tokens
+
+    flush_current()
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
 def _source(

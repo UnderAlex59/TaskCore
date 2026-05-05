@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.chat_graph import get_chat_graph
 from app.agents.provider_test_graph import get_provider_test_graph
 from app.agents.rag_pipeline import get_rag_pipeline_graph
+from app.agents.rag_retrieval_graph import get_rag_retrieval_graph
 from app.agents.subgraph_registry import get_exportable_agent_subgraphs
 from app.agents.validation_graph import get_validation_graph
 from app.agents.vision_test_graph import get_vision_test_graph
@@ -31,6 +32,7 @@ def _static_graph_export_specs() -> tuple[GraphExportSpec, ...]:
         GraphExportSpec(name="chat_graph", factory=get_chat_graph),
         GraphExportSpec(name="validation_graph", factory=get_validation_graph),
         GraphExportSpec(name="rag_pipeline", factory=get_rag_pipeline_graph),
+        GraphExportSpec(name="rag_retrieval_graph", factory=get_rag_retrieval_graph),
         GraphExportSpec(name="provider_test_graph", factory=get_provider_test_graph),
         GraphExportSpec(name="vision_test_graph", factory=get_vision_test_graph),
     )
@@ -101,8 +103,8 @@ def _write_index_html(output_dir: Path, exported_paths: list[Path]) -> None:
         (
             "<li>"
             f"<h2>{escape(path.stem)}</h2>"
-            f"<p><a href=\"{escape(path.name)}\">{escape(path.name)}</a></p>"
-            f"<img src=\"{escape(path.name)}\" alt=\"{escape(path.stem)}\" loading=\"lazy\">"
+            f'<p><a href="{escape(path.name)}">{escape(path.name)}</a></p>'
+            f'<img src="{escape(path.name)}" alt="{escape(path.stem)}" loading="lazy">'
             "</li>"
         )
         for path in exported_paths

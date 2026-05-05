@@ -5,16 +5,15 @@ import re
 from functools import lru_cache
 from typing import Any, Literal
 
-from langchain_core.documents import Document
 from langgraph.graph import END, START, StateGraph
 
+from app.agents.rag_retrieval_graph import run_rag_retrieval_graph
 from app.agents.state import ChatState
 from app.agents.system_prompts import (
     QA_ANSWER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
 )
 from app.services.llm_runtime_service import LLMRuntimeService
-from app.services.qdrant_service import QdrantService
 
 QA_AGENT_KEY = "qa"
 QA_AGENT_NAME = "QAAgent"
@@ -49,7 +48,6 @@ _LOW_CONFIDENCE_MARKERS = (
     "не описано",
 )
 _BACKLOG_NOTICE = "Вопрос сохранён в базе вопросов для последующей валидации задачи."
-_ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
 _FIXED_ANALYSIS_MODE = "deep"
 _FIXED_NEEDS_RAG = True
 _FIXED_NEEDS_VERIFICATION = True
@@ -86,6 +84,13 @@ class QAAgentGraphState(ChatState, total=False):
     cross_task_ids: list[str]
     cross_task_sources: list[dict[str, str]]
     rag_context_scope: str
+    retrieval_queries: list[str]
+    retrieval_keywords: list[str]
+    query_rewriter_ok: bool
+    query_rewriter_error_message: str | None
+    query_rewriter_provider_kind: str | None
+    query_rewriter_model: str | None
+    reranked_chunks: list[dict[str, object]]
     answer_system_prompt: str
     answer_user_prompt: str
     answer_payload: dict[str, object] | None
@@ -101,6 +106,7 @@ class QAAgentGraphState(ChatState, total=False):
     verify_error_message: str | None
     verify_provider_kind: str | None
     verify_model: str | None
+    qa_task_content: str
 
 
 def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
@@ -141,6 +147,34 @@ def _normalize_validation_question(candidate: object, *, fallback_question: str)
     return question
 
 
+def _strip_empty_markdown_sections(content: str) -> str:
+    normalized_content = content.replace("\r\n", "\n").strip()
+    if not normalized_content:
+        return ""
+
+    heading_matches = list(
+        re.finditer(r"^##[ \t]+(.+?)\s*$", normalized_content, re.MULTILINE),
+    )
+    if not heading_matches:
+        return normalized_content
+
+    cleaned_blocks: list[str] = []
+    prefix = normalized_content[: heading_matches[0].start()].strip()
+    if prefix:
+        cleaned_blocks.append(prefix)
+
+    for index, current_match in enumerate(heading_matches):
+        next_match = heading_matches[index + 1] if index + 1 < len(heading_matches) else None
+        section_body = normalized_content[
+            current_match.end() : next_match.start() if next_match else len(normalized_content)
+        ].strip()
+        if not section_body:
+            continue
+        cleaned_blocks.append(f"{current_match.group(0).strip()}\n{section_body}")
+
+    return "\n\n".join(cleaned_blocks).strip()
+
+
 def _append_backlog_notice(response: str) -> str:
     if _BACKLOG_NOTICE.casefold() in response.casefold():
         return response
@@ -161,50 +195,10 @@ def _build_llm_stage_ref(
     }
 
 
-def _is_attachment_document(document: Document) -> bool:
-    metadata = document.metadata or {}
-    source_type = str(metadata.get("source_type") or "").strip()
-    chunk_kind = str(metadata.get("chunk_kind") or "").strip()
-    return source_type in _ATTACHMENT_SOURCE_TYPES or chunk_kind in _ATTACHMENT_SOURCE_TYPES
-
-
-def _format_cross_task_document(document: Document) -> tuple[str, dict[str, str]] | None:
-    content = document.page_content.strip()
-    if not content:
-        return None
-
-    metadata = document.metadata or {}
-    source = {
-        "task_id": str(metadata.get("task_id") or "").strip(),
-        "task_title": str(metadata.get("task_title") or "").strip(),
-        "task_status": str(metadata.get("status") or metadata.get("task_status") or "").strip(),
-        "source_type": str(metadata.get("source_type") or "").strip(),
-        "chunk_id": str(metadata.get("chunk_id") or "").strip(),
-    }
-    source_text = (
-        f"Задача: {source['task_title'] or source['task_id'] or 'неизвестно'} "
-        f"(id: {source['task_id'] or 'нет'}, статус: {source['task_status'] or 'нет'}, "
-        f"source_type: {source['source_type'] or 'нет'}, chunk_id: {source['chunk_id'] or 'нет'})"
-    )
-    return f"{source_text}\n{content}", source
-
-
-def _resolve_rag_context_scope(*, has_attachments: bool, has_cross_task: bool) -> str:
-    if has_attachments and has_cross_task:
-        return "attachments+cross_task"
-    if has_attachments:
-        return "attachments"
-    if has_cross_task:
-        return "cross_task"
-    return "none"
-
-
 def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
     validation_result = state.get("validation_result") or {}
     related_titles = ", ".join(
-        str(item["title"])
-        for item in list(state.get("related_tasks", []))[:3]
-        if "title" in item
+        str(item["title"]) for item in list(state.get("related_tasks", []))[:3] if "title" in item
     )
     issues = list(validation_result.get("issues", []))
     questions = list(validation_result.get("questions", []))
@@ -233,81 +227,62 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
     needs_rag = bool(state.get("needs_rag"))
     retrieval_query = str(state.get("retrieval_query", "")).strip()
     retrieval_limit = int(state.get("retrieval_limit", 3))
-    collect_attachments = bool(task_id)
     query_text = retrieval_query or str(state.get("message_content", ""))
 
-    rag_documents = (
-        await QdrantService.search_task_knowledge(
-            task_id=task_id,
-            query_text=query_text,
-            limit=retrieval_limit,
-            include_source_types=sorted(_ATTACHMENT_SOURCE_TYPES),
+    retrieval_state = (
+        await run_rag_retrieval_graph(
+            db=state.get("db"),
+            actor_user_id=state.get("actor_user_id"),
+            task_id=task_id or None,
+            project_id=project_id or None,
+            task_title=str(state.get("task_title", "")),
+            task_status=str(state.get("task_status", "")),
+            task_content=str(state.get("task_content", "")),
+            task_tags=[],
+            question=query_text,
+            retrieval_limit=retrieval_limit,
         )
-        if collect_attachments
-        else []
+        if needs_rag and query_text
+        else {
+            "query_rewriter_ok": False,
+            "query_rewriter_error_message": None,
+            "query_rewriter_provider_kind": None,
+            "query_rewriter_model": None,
+            "retrieval_queries": [query_text] if query_text else [],
+            "retrieval_keywords": [],
+            "rag_snippets": [],
+            "rag_chunk_ids": [],
+            "attachment_filenames": [],
+            "cross_task_snippets": [],
+            "cross_task_chunk_ids": [],
+            "cross_task_ids": [],
+            "cross_task_sources": [],
+            "rag_context_scope": "none",
+            "reranked_chunks": [],
+        }
     )
-    attachment_documents = [
-        document
-        for document in rag_documents
-        if _is_attachment_document(document) and document.page_content.strip()
-    ]
-    rag_snippets = [document.page_content for document in attachment_documents]
-    rag_chunk_ids = [
-        str(document.metadata.get("chunk_id"))
-        for document in attachment_documents
-        if document.metadata.get("chunk_id")
-    ]
-    attachment_filenames = [
-        str(document.metadata.get("filename"))
-        for document in attachment_documents
-        if document.metadata.get("filename")
-    ]
-    cross_task_documents = (
-        await QdrantService.search_project_task_knowledge(
-            project_id=project_id,
-            query_text=query_text,
-            exclude_task_id=task_id or None,
-            limit=retrieval_limit,
-        )
-        if needs_rag and project_id
-        else []
-    )
-    cross_task_snippets: list[str] = []
-    cross_task_sources: list[dict[str, str]] = []
-    for document in cross_task_documents:
-        formatted = _format_cross_task_document(document)
-        if formatted is None:
-            continue
-        snippet, source = formatted
-        source_task_id = source.get("task_id", "")
-        if task_id and source_task_id == task_id:
-            continue
-        cross_task_snippets.append(snippet)
-        cross_task_sources.append(source)
-
-    cross_task_chunk_ids = [
-        source["chunk_id"] for source in cross_task_sources if source.get("chunk_id")
-    ]
-    cross_task_ids = list(
-        dict.fromkeys(source["task_id"] for source in cross_task_sources if source.get("task_id"))
-    )
+    rag_snippets = list(retrieval_state.get("rag_snippets", []))
+    rag_chunk_ids = list(retrieval_state.get("rag_chunk_ids", []))
+    attachment_filenames = list(retrieval_state.get("attachment_filenames", []))
+    cross_task_snippets = list(retrieval_state.get("cross_task_snippets", []))
+    cross_task_chunk_ids = list(retrieval_state.get("cross_task_chunk_ids", []))
+    cross_task_ids = list(retrieval_state.get("cross_task_ids", []))
+    cross_task_sources = list(retrieval_state.get("cross_task_sources", []))
 
     validation_result = state.get("validation_result") or {}
     issues = list(state.get("issues", []))
     questions = list(state.get("questions", []))
     related_titles = str(state.get("related_titles", ""))
     focus_points = list(state.get("focus_points", []))
+    qa_task_content = _strip_empty_markdown_sections(str(state.get("task_content", "")))
     rag_context = "\n\n".join(f"- {snippet}" for snippet in rag_snippets) if rag_snippets else "нет"
     cross_task_context = (
         "\n\n".join(f"- {snippet}" for snippet in cross_task_snippets)
         if cross_task_snippets
         else "нет"
     )
-    rag_context_scope = _resolve_rag_context_scope(
-        has_attachments=bool(rag_snippets),
-        has_cross_task=bool(cross_task_snippets),
-    )
-    all_chunk_ids = [*rag_chunk_ids, *cross_task_chunk_ids]
+    rag_context_scope = str(retrieval_state.get("rag_context_scope", "none"))
+    all_chunk_ids = list(rag_chunk_ids)
 
     return {
         "rag_snippets": rag_snippets,
@@ -318,18 +293,25 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
         "cross_task_ids": cross_task_ids,
         "cross_task_sources": cross_task_sources,
         "rag_context_scope": rag_context_scope,
+        "retrieval_queries": list(retrieval_state.get("retrieval_queries", [])),
+        "retrieval_keywords": list(retrieval_state.get("retrieval_keywords", [])),
+        "query_rewriter_ok": bool(retrieval_state.get("query_rewriter_ok", False)),
+        "query_rewriter_error_message": retrieval_state.get("query_rewriter_error_message"),
+        "query_rewriter_provider_kind": retrieval_state.get("query_rewriter_provider_kind"),
+        "query_rewriter_model": retrieval_state.get("query_rewriter_model"),
+        "reranked_chunks": list(retrieval_state.get("reranked_chunks", [])),
+        "qa_task_content": qa_task_content,
         "answer_system_prompt": QA_ANSWER_SYSTEM_PROMPT,
         "answer_user_prompt": (
             f"Режим анализа: {state.get('analysis_mode', 'direct')}\n"
             f"Фокус анализа: {focus_points or 'не задан'}\n"
             f"Название задачи: {state.get('task_title', '')}\n"
             f"Статус задачи: {state.get('task_status', '')}\n"
-            f"Описание задачи:\n{state.get('task_content', '')}\n\n"
+            f"Описание задачи:\n{qa_task_content}\n\n"
             f"Дополнительный контекст из вложений:\n{rag_context}\n\n"
             "Контекст из других задач проекта:\n"
             "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
-            "приоритет у текущей задачи. Не переноси требования из другой задачи "
-            "без явного основания.\n"
+            "приоритет у текущей задачи."
             f"{cross_task_context}\n\n"
             f"Вопрос пользователя:\n{state.get('message_content', '')}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
@@ -368,9 +350,7 @@ async def _invoke_qa_answer(state: QAAgentGraphState) -> QAAgentGraphState:
         "answer_provider_kind": result.provider_kind,
         "answer_model": result.model,
         "answer_payload": (
-            _extract_json_payload(result.text or "")
-            if result.ok and result.text
-            else None
+            _extract_json_payload(result.text or "") if result.ok and result.text else None
         ),
         "response": result.text or "",
     }
@@ -406,13 +386,16 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
         if state.get("cross_task_snippets")
         else "нет"
     )
+    qa_task_content = str(state.get("qa_task_content") or "").strip()
+    if not qa_task_content:
+        qa_task_content = _strip_empty_markdown_sections(str(state.get("task_content", "")))
     validation_result = state.get("validation_result") or {}
 
     return {
         "verify_system_prompt": QA_VERIFIER_SYSTEM_PROMPT,
         "verify_user_prompt": (
             f"Название задачи: {state.get('task_title', '')}\n"
-            f"Описание задачи:\n{state.get('task_content', '')}\n\n"
+            f"Описание задачи:\n{qa_task_content}\n\n"
             f"Дополнительный контекст из вложений:\n{rag_context}\n\n"
             "Контекст из других задач проекта:\n"
             "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
@@ -453,21 +436,22 @@ async def _invoke_qa_verifier(state: QAAgentGraphState) -> QAAgentGraphState:
         "verify_provider_kind": result.provider_kind,
         "verify_model": result.model,
         "verify_payload": (
-            _extract_json_payload(result.text or "")
-            if result.ok and result.text
-            else None
+            _extract_json_payload(result.text or "") if result.ok and result.text else None
         ),
     }
 
 
 def _build_fallback_response(state: QAAgentGraphState) -> tuple[str, str]:
     validation_result = state.get("validation_result") or {}
+    qa_task_content = str(state.get("qa_task_content") or "").strip()
+    if not qa_task_content:
+        qa_task_content = _strip_empty_markdown_sections(str(state.get("task_content", "")))
     fallback_parts = [
         (
             f"Контекст задачи: «{state.get('task_title', '')}», "
             f"текущий статус `{state.get('task_status', '')}`."
         ),
-        "Базовое описание: " + str(state.get("task_content", ""))[:280],
+        "Базовое описание: " + qa_task_content[:280],
     ]
     rag_snippets = list(state.get("rag_snippets", []))
     if rag_snippets:
@@ -477,8 +461,7 @@ def _build_fallback_response(state: QAAgentGraphState) -> tuple[str, str]:
     cross_task_snippets = list(state.get("cross_task_snippets", []))
     if cross_task_snippets:
         fallback_parts.append(
-            "Найден справочный контекст из других задач проекта: "
-            + cross_task_snippets[0][:220]
+            "Найден справочный контекст из других задач проекта: " + cross_task_snippets[0][:220]
         )
     verdict = validation_result.get("verdict")
     if verdict:
@@ -492,9 +475,7 @@ def _build_fallback_response(state: QAAgentGraphState) -> tuple[str, str]:
     if related_titles:
         fallback_parts.append("Связанные задачи: " + related_titles)
     if state.get("answer_error_message") or state.get("verify_error_message"):
-        fallback_parts.append(
-            "LLM временно недоступна, поэтому ниже краткое резервное резюме."
-        )
+        fallback_parts.append("LLM временно недоступна, поэтому ниже краткое резервное резюме.")
 
     message_content = str(state.get("message_content", ""))
     canonical_question_hint = state.get("canonical_question_hint")
@@ -545,6 +526,11 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
             model=state.get("answer_model"),
             ok=bool(state.get("answer_ok")),
         ),
+        "query_rewriter": _build_llm_stage_ref(
+            provider_kind=state.get("query_rewriter_provider_kind"),
+            model=state.get("query_rewriter_model"),
+            ok=bool(state.get("query_rewriter_ok")),
+        ),
     }
     if state.get("verify_ok") or state.get("verify_payload") is not None:
         llm_stages["verifier"] = _build_llm_stage_ref(
@@ -574,6 +560,13 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
             "validation_backlog_question": validation_backlog_question,
             "chunk_ids": list(state.get("rag_chunk_ids", [])),
             "rag_context_scope": rag_context_scope,
+            "retrieval_queries": list(state.get("retrieval_queries", [])),
+            "retrieval_keywords": list(state.get("retrieval_keywords", [])),
+            "query_rewriter_ok": bool(state.get("query_rewriter_ok", False)),
+            "query_rewriter_model": state.get("query_rewriter_model"),
+            "query_rewriter_error_message": state.get("query_rewriter_error_message"),
+            "rerank_strategy": "hybrid",
+            "reranked_chunks": list(state.get("reranked_chunks", [])),
             "attachment_filenames": list(state.get("attachment_filenames", [])),
             "cross_task_chunk_ids": list(state.get("cross_task_chunk_ids", [])),
             "cross_task_ids": list(state.get("cross_task_ids", [])),

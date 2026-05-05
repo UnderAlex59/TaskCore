@@ -526,6 +526,7 @@ class QdrantService:
         query_text: str,
         exclude_task_id: str | None = None,
         limit: int = 4,
+        include_source_types: list[str] | None = None,
         min_score: float | None = None,
     ) -> list[Document]:
         try:
@@ -540,6 +541,18 @@ class QdrantService:
             if exclude_task_id:
                 must_not_conditions.append(
                     QdrantService._metadata_value_condition("task_id", exclude_task_id)
+                )
+            normalized_source_types = [
+                str(item).strip()
+                for item in (include_source_types or [])
+                if str(item).strip()
+            ]
+            if normalized_source_types:
+                must_conditions.append(
+                    QdrantService._metadata_any_condition(
+                        "source_type",
+                        normalized_source_types,
+                    )
                 )
 
             hits = await QdrantService._get_store(
@@ -584,6 +597,7 @@ class QdrantService:
         query_text: str,
         exclude_task_id: str | None = None,
         limit: int = 12,
+        include_source_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         try:
             if not await QdrantService.ensure_collections():
@@ -597,6 +611,18 @@ class QdrantService:
             if exclude_task_id:
                 must_not_conditions.append(
                     QdrantService._metadata_value_condition("task_id", exclude_task_id)
+                )
+            normalized_source_types = [
+                str(item).strip()
+                for item in (include_source_types or [])
+                if str(item).strip()
+            ]
+            if normalized_source_types:
+                must_conditions.append(
+                    QdrantService._metadata_any_condition(
+                        "source_type",
+                        normalized_source_types,
+                    )
                 )
 
             hits = await QdrantService._get_store(

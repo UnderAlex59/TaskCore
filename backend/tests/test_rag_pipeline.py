@@ -66,6 +66,31 @@ def test_split_text_for_rag_respects_max_chars_after_word_split() -> None:
     assert all(len(chunk) <= 10 for chunk in chunks)
 
 
+def test_split_text_for_rag_preserves_markdown_headings() -> None:
+    chunks = split_text_for_rag(
+        "## Описание\nНужно реализовать вход.\n\n## Ограничения\nТолько корпоративная почта.",
+        target_tokens=6,
+        overlap_tokens=0,
+        max_chars=200,
+    )
+
+    assert chunks == [
+        "## Описание\nНужно реализовать вход.",
+        "## Ограничения\nТолько корпоративная почта.",
+    ]
+
+
+def test_split_text_for_rag_keeps_table_rows_together() -> None:
+    chunks = split_text_for_rag(
+        "## SLA\n| Канал | Время |\n| --- | --- |\n| Email | 15 минут |",
+        target_tokens=20,
+        overlap_tokens=0,
+        max_chars=200,
+    )
+
+    assert chunks == ["## SLA\n| Канал | Время |\n| --- | --- |\n| Email | 15 минут |"]
+
+
 def test_attachment_text_extraction_supports_utf8_and_cp1251(tmp_path) -> None:
     utf8_path = tmp_path / "note.txt"
     utf8_path.write_text("Русский текст в UTF-8", encoding="utf-8")

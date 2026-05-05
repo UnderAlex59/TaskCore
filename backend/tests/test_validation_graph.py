@@ -174,6 +174,9 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
     )
 
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["prompt_key"] == "task-validation-context-questions":
+            assert "Исторические вопросы проекта" in kwargs["user_prompt"]
+            assert "Какие статусы считаются терминальными?" in kwargs["user_prompt"]
         return LLMInvocationResult(
             ok=True,
             text=next(llm_stage_payloads),
@@ -225,12 +228,11 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
     assert result["questions"] == [
         "Нужно ли фиксировать SLA обновления?",
         "Какие статусы считаются источником истины?",
-        "Какие статусы считаются терминальными?",
     ]
 
 
 @pytest.mark.asyncio
-async def test_validation_graph_appends_qdrant_project_questions(
+async def test_validation_graph_uses_qdrant_questions_as_fallback_without_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_search_project_questions(**kwargs):  # type: ignore[no-untyped-def]

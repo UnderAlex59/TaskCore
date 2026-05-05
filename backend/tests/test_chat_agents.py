@@ -223,7 +223,7 @@ async def test_question_agent_uses_live_llm_when_available(monkeypatch: pytest.M
     )
     assert result.source_ref["provider_kind"] == "openrouter"
     assert result.source_ref["answer_confidence"] == "high"
-    assert llm_calls == ["qa-answer", "qa-verifier"]
+    assert llm_calls == ["qa-query-rewriter", "qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
@@ -301,7 +301,7 @@ async def test_question_agent_marks_low_confidence_answers_for_validation_backlo
         == "Какие статусы синхронизируются между системами?"
     )
     assert "Вопрос сохранён в базе вопросов" in result.response
-    assert llm_calls == ["qa-answer"]
+    assert llm_calls == ["qa-query-rewriter", "qa-answer"]
 
 
 @pytest.mark.asyncio
@@ -409,7 +409,7 @@ async def test_question_agent_uses_qdrant_task_knowledge_context(
     assert result.source_ref["chunk_ids"] == ["task-1:attachment:file-1:0"]
     assert result.source_ref["rag_context_scope"] == "attachments"
     assert result.source_ref["attachment_filenames"] == ["integration.md"]
-    assert llm_calls == ["qa-answer", "qa-verifier"]
+    assert llm_calls == ["qa-query-rewriter", "qa-answer", "qa-verifier"]
 
 
 @pytest.mark.asyncio
@@ -499,6 +499,88 @@ async def test_question_agent_excludes_current_task_text_chunks_from_qa_rag(
     assert "Дополнительный контекст из вложений:\nнет" in captured_answer_prompt
     assert result.source_ref["chunk_ids"] == []
     assert result.source_ref["rag_context_scope"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_strips_empty_task_sections_from_qa_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_answer_prompt = ""
+    captured_verify_prompt = ""
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt, captured_verify_prompt
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Описание содержит нужное правило.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-verifier":
+            captured_verify_prompt = str(kwargs["user_prompt"])
+            return _qa_verifier_result("Описание содержит нужное правило.")
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_search_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def fake_search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_task_knowledge",
+        fake_search_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_task_knowledge",
+        fake_search_project_task_knowledge,
+    )
+
+    await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="Workflow",
+            task_status="ready_for_dev",
+            task_content=(
+                "## Описание\n"
+                "Approved workflow body.\n\n"
+                "## Бизнес-правила\n\n\n"
+                "## Acceptance criteria\n\n\n"
+                "## Материал\n\n\n"
+                "## Материалы\n"
+                "Contract draft is attached."
+            ),
+            message_type="question",
+            message_content="Что известно по задаче?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    for prompt in (captured_answer_prompt, captured_verify_prompt):
+        assert "Approved workflow body." in prompt
+        assert "Contract draft is attached." in prompt
+        assert "## Бизнес-правила" not in prompt
+        assert "## Acceptance criteria" not in prompt
+        assert "## Материал\n" not in prompt
 
 
 @pytest.mark.asyncio
@@ -820,6 +902,115 @@ async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed
         }
     ]
     assert result.source_ref["rag_context_scope"] == "cross_task"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_excludes_cross_task_validation_questions_from_qa_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_answer_prompt = ""
+    captured_verify_prompt = ""
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_answer_prompt, captured_verify_prompt
+        if kwargs["agent_key"] == "qa-answer":
+            captured_answer_prompt = str(kwargs["user_prompt"])
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Базовые поля указаны в связанной задаче.", '
+                    '"confidence":"high", "canonical_question":null}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-verifier":
+            captured_verify_prompt = str(kwargs["user_prompt"])
+            return _qa_verifier_result("Базовые поля указаны в связанной задаче.")
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_probe_project_task_knowledge_chunks(**kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["include_source_types"] == [
+            "attachment_image_alt_text",
+            "attachment_text",
+            "task_content",
+        ]
+        return [
+            {
+                "document": Document(
+                    page_content=(
+                        "Вопрос валидации: Какие технологии использовать для проверки email?"
+                    ),
+                    metadata={
+                        "chunk_id": "task-2:validation_result:task-2:0",
+                        "source_type": "validation_result",
+                        "task_id": "task-2",
+                        "task_status": "awaiting_approval",
+                        "task_title": "Создание и редактирование контактов",
+                    },
+                ),
+                "score": 0.95,
+            },
+            {
+                "document": Document(
+                    page_content="Описание: поля контакта: имя, фамилия, email, телефон.",
+                    metadata={
+                        "chunk_id": "task-2:task_content:task-2:0",
+                        "source_type": "task_content",
+                        "task_id": "task-2",
+                        "task_status": "awaiting_approval",
+                        "task_title": "Создание и редактирование контактов",
+                    },
+                ),
+                "score": 0.9,
+            },
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.probe_project_task_knowledge_chunks",
+        fake_probe_project_task_knowledge_chunks,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="Кастомные поля для контактов",
+            task_status="draft",
+            task_content="Администратор добавляет дополнительные поля контакта.",
+            message_type="question",
+            message_content="Какие базовые поля есть у контактов сейчас?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert "Описание: поля контакта: имя, фамилия, email, телефон." in captured_answer_prompt
+    assert "Описание: поля контакта: имя, фамилия, email, телефон." in captured_verify_prompt
+    assert "Вопрос валидации" not in captured_answer_prompt
+    assert "Вопрос валидации" not in captured_verify_prompt
+    assert result.source_ref["cross_task_chunk_ids"] == ["task-2:task_content:task-2:0"]
+    assert result.source_ref["cross_task_sources"] == [
+        {
+            "task_id": "task-2",
+            "task_title": "Создание и редактирование контактов",
+            "task_status": "awaiting_approval",
+            "source_type": "task_content",
+            "chunk_id": "task-2:task_content:task-2:0",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1205,6 +1396,7 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
         "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
         fake_invoke_chat,
     )
+
     async def fake_record_chat_question(*args, **kwargs):  # type: ignore[no-untyped-def]
         return None
 

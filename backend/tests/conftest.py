@@ -69,6 +69,12 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _search_project_task_knowledge(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
+    async def _probe_task_knowledge_chunks(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
+    async def _probe_project_task_knowledge_chunks(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
     async def _search_related_tasks(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
@@ -109,6 +115,14 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.qdrant_service.QdrantService.search_project_task_knowledge",
         _search_project_task_knowledge,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.probe_task_knowledge_chunks",
+        _probe_task_knowledge_chunks,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.probe_project_task_knowledge_chunks",
+        _probe_project_task_knowledge_chunks,
     )
     monkeypatch.setattr(
         "app.services.qdrant_service.QdrantService.search_related_tasks",

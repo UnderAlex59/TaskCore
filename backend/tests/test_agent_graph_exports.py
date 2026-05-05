@@ -12,6 +12,7 @@ from app.agents.manager_agent_graph import get_manager_agent_graph
 from app.agents.provider_test_graph import get_provider_test_graph, run_provider_test_graph
 from app.agents.qa_agent_graph import get_qa_agent_graph
 from app.agents.rag_pipeline import get_rag_pipeline_graph
+from app.agents.rag_retrieval_graph import get_rag_retrieval_graph
 from app.agents.validation_graph import get_validation_graph
 from app.agents.vision_test_graph import get_vision_test_graph, run_vision_test_graph
 from app.services.llm_runtime_service import LLMInvocationResult
@@ -24,6 +25,7 @@ def test_compiled_langgraph_shapes_are_exportable() -> None:
     manager_mermaid = get_manager_agent_graph().get_graph().draw_mermaid()
     validation_mermaid = get_validation_graph().get_graph().draw_mermaid()
     rag_mermaid = get_rag_pipeline_graph().get_graph().draw_mermaid()
+    rag_retrieval_mermaid = get_rag_retrieval_graph().get_graph().draw_mermaid()
     provider_test_mermaid = get_provider_test_graph().get_graph().draw_mermaid()
     vision_test_mermaid = get_vision_test_graph().get_graph().draw_mermaid()
 
@@ -34,6 +36,7 @@ def test_compiled_langgraph_shapes_are_exportable() -> None:
     assert "build_manager_response" in manager_mermaid
     assert "evaluate_core_rules" in validation_mermaid
     assert "collect_task_sources" in rag_mermaid
+    assert "invoke_query_rewriter" in rag_retrieval_mermaid
     assert "invoke_provider_test" in provider_test_mermaid
     assert "invoke_vision_test" in vision_test_mermaid
 
@@ -57,6 +60,7 @@ def test_export_agent_graph_images_refreshes_output_dir(
         "manager_agent_graph.png",
         "validation_graph.png",
         "rag_pipeline.png",
+        "rag_retrieval_graph.png",
         "provider_test_graph.png",
         "vision_test_graph.png",
     }

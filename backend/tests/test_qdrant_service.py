@@ -305,6 +305,7 @@ async def test_search_project_task_knowledge_filters_project_and_excludes_curren
         query_text="shared integration behavior",
         exclude_task_id="task-1",
         limit=4,
+        include_source_types=["task_content", "attachment_text"],
     )
 
     assert store.filter_ is not None
@@ -320,6 +321,11 @@ async def test_search_project_task_knowledge_filters_project_and_excludes_curren
         condition.key == "metadata.task_id"
         and getattr(condition.match, "value", None) == "task-1"
         for condition in must_not_conditions
+    )
+    assert any(
+        condition.key == "metadata.source_type"
+        and getattr(condition.match, "any", None) == ["task_content", "attachment_text"]
+        for condition in must_conditions
     )
     assert not any(condition.key == "metadata.task_status" for condition in must_conditions)
 

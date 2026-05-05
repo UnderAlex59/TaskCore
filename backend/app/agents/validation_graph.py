@@ -473,10 +473,7 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
     questions = (
         _fallback_context_questions(state)
         if payload is None
-        else _dedupe_questions(
-            _normalize_question_list(payload.get("questions"))
-            + _normalize_question_list(list(state.get("rag_questions", [])))
-        )
+        else _normalize_question_list(payload.get("questions"))
     )
     return {"context_questions": questions}
 

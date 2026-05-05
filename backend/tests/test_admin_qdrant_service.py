@@ -382,10 +382,13 @@ async def test_probe_qa_rag_chunks_marks_prompt_selection(
             "probe_task_knowledge_chunks",
             AsyncMock(return_value=[{"document": attachment_document, "score": 0.81}]),
         )
+        probe_project_mock = AsyncMock(
+            return_value=[{"document": cross_task_document, "score": 0.62}]
+        )
         monkeypatch.setattr(
             QdrantService,
             "probe_project_task_knowledge_chunks",
-            AsyncMock(return_value=[{"document": cross_task_document, "score": 0.62}]),
+            probe_project_mock,
         )
 
         probe = await AdminQdrantService.probe_qa_rag_chunks(
@@ -405,6 +408,11 @@ async def test_probe_qa_rag_chunks_marks_prompt_selection(
         assert probe.rag_chunks[0].filename == "login.txt"
         assert probe.rag_chunks[1].selected_for_prompt is False
         assert probe.rag_chunks[1].match_band == "near_threshold"
+        assert probe_project_mock.await_args.kwargs["include_source_types"] == [
+            "attachment_image_alt_text",
+            "attachment_text",
+            "task_content",
+        ]
 
 
 @pytest.mark.asyncio

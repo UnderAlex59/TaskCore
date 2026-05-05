@@ -44,6 +44,11 @@ from app.services.validation_question_service import ValidationQuestionService
 _DUPLICATE_PROPOSAL_NEAR_THRESHOLD_DELTA = 0.05
 _RAG_CHUNK_NEAR_THRESHOLD_DELTA = 0.1
 _QA_ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
+_QA_CROSS_TASK_SOURCE_TYPES = {
+    "task_content",
+    "attachment_text",
+    "attachment_image_alt_text",
+}
 
 
 class AdminQdrantService:
@@ -633,6 +638,7 @@ class AdminQdrantService:
             query_text=question,
             exclude_task_id=task.id if task is not None else None,
             limit=raw_cross_task_limit,
+            include_source_types=sorted(_QA_CROSS_TASK_SOURCE_TYPES),
         )
 
         rag_chunks: list[QdrantRagChunkResultRead] = []
