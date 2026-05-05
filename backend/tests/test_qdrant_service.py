@@ -331,9 +331,11 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
     class FakeStore:
         def __init__(self) -> None:
             self.ids: list[int | str] | None = None
+            self.documents: list[Document] | None = None
 
         async def aadd_documents(self, *, documents, ids):  # type: ignore[no-untyped-def]
             self.ids = ids
+            self.documents = documents
             return None
 
     store = FakeStore()
@@ -372,6 +374,9 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
         "task_title:f1248baf-ee60-4867-bf43-d0e614b19717:0"
     )
     assert str(uuid.UUID(str(ids[0]))) == str(ids[0])
+    assert store.documents is not None
+    assert store.documents[0].metadata["status"] == "ready_for_dev"
+    assert "task_status" not in store.documents[0].metadata
 
 
 @pytest.mark.asyncio

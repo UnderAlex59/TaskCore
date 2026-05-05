@@ -401,7 +401,7 @@ class AdminQdrantService:
             content=str(getattr(document, "page_content", "")).strip(),
             task_id=str(metadata.get("task_id") or "") or None,
             task_title=str(metadata.get("task_title") or "") or None,
-            task_status=str(metadata.get("task_status") or "") or None,
+            task_status=str(metadata.get("status") or metadata.get("task_status") or "") or None,
             source_type=str(metadata.get("source_type") or "") or None,
             chunk_kind=str(metadata.get("chunk_kind") or "") or None,
             chunk_index=int(chunk_index) if chunk_index is not None else None,

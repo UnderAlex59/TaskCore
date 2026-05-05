@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from functools import lru_cache
 from typing import Any
@@ -118,29 +117,22 @@ def _source(
 
 def _collect_task_sources(state: RagPipelineState) -> RagPipelineState:
     task_id = str(state["task_id"])
-    sources = [
-        _source(
-            chunk_kind="task_title",
-            content=str(state.get("title", "")).strip(),
-            source_id=task_id,
-            source_type="task_title",
-        ),
-        _source(
-            chunk_kind="task_content",
-            content=str(state.get("content", "")).strip(),
-            source_id=task_id,
-            source_type="task_content",
-        ),
-    ]
+    title = str(state.get("title", "")).strip()
+    content = str(state.get("content", "")).strip()
+    content_parts = []
+    if title:
+        content_parts.append(f"Название: {title}")
+    if content:
+        content_parts.append(f"Описание: {content}")
 
-    tags = [str(tag).strip() for tag in state.get("tags", []) if str(tag).strip()]
-    if tags:
+    sources = []
+    if content_parts:
         sources.append(
             _source(
-                chunk_kind="task_tags",
-                content="Теги задачи: " + ", ".join(tags),
+                chunk_kind="task_content",
+                content="\n".join(content_parts),
                 source_id=task_id,
-                source_type="task_tags",
+                source_type="task_content",
             )
         )
     return {"task_sources": sources}
@@ -150,10 +142,7 @@ def _collect_attachment_sources(state: RagPipelineState) -> RagPipelineState:
     sources: list[dict[str, Any]] = []
     for index, item in enumerate(list(state.get("attachments", [])), start=1):
         filename = str(item.get("filename") or "attachment").strip()
-        content_type = str(item.get("content_type") or "application/octet-stream").strip()
-        basename = str(item.get("basename") or "").strip()
         source_id = str(item.get("id") or index)
-        metadata_text = f"Вложение: {filename} ({content_type}), stored as {basename}."
 
         alt_text = str(item.get("alt_text") or "").strip()
         extracted_text = str(item.get("extracted_text") or "").strip()
@@ -163,7 +152,7 @@ def _collect_attachment_sources(state: RagPipelineState) -> RagPipelineState:
             sources.append(
                 _source(
                     chunk_kind="attachment_image_alt_text",
-                    content=f"{metadata_text}\nОписание изображения: {alt_text}",
+                    content=f"Описание изображения: {alt_text}",
                     filename=filename,
                     source_id=source_id,
                     source_type="attachment_image_alt_text",
@@ -175,7 +164,7 @@ def _collect_attachment_sources(state: RagPipelineState) -> RagPipelineState:
             sources.append(
                 _source(
                     chunk_kind="attachment_text",
-                    content=f"{metadata_text}\nСодержимое вложения:\n{extracted_text}",
+                    content=f"Содержимое вложения:\n{extracted_text}",
                     filename=filename,
                     source_id=source_id,
                     source_type="attachment_text",
@@ -183,16 +172,31 @@ def _collect_attachment_sources(state: RagPipelineState) -> RagPipelineState:
             )
             continue
 
-        sources.append(
-            _source(
-                chunk_kind="attachment_metadata",
-                content=f"{metadata_text}\nСодержимое вложения не извлечено.",
-                filename=filename,
-                source_id=source_id,
-                source_type="attachment_metadata",
-            )
-        )
     return {"attachment_sources": sources}
+
+
+def _validation_text_items(items: object, *, prefix: str) -> list[str]:
+    if not isinstance(items, list):
+        return []
+
+    text_items: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            message = str(item.get("message", "")).strip()
+            if not message:
+                continue
+            severity = str(item.get("severity", "")).strip()
+            if severity:
+                text_items.append(f"{prefix}: {message} ({severity})")
+            else:
+                text_items.append(f"{prefix}: {message}")
+            continue
+
+        text = str(item).strip()
+        if text:
+            text_items.append(f"{prefix}: {text}")
+
+    return text_items
 
 
 def _collect_validation_sources(state: RagPipelineState) -> RagPipelineState:
@@ -200,16 +204,18 @@ def _collect_validation_sources(state: RagPipelineState) -> RagPipelineState:
     if not validation_result:
         return {"validation_sources": []}
 
-    validation_payload = {
-        "verdict": str(validation_result.get("verdict", "")),
-        "issues": list(validation_result.get("issues", [])),
-        "questions": list(validation_result.get("questions", [])),
-    }
+    validation_lines = [
+        *_validation_text_items(validation_result.get("issues"), prefix="Замечание валидации"),
+        *_validation_text_items(validation_result.get("questions"), prefix="Вопрос валидации"),
+    ]
+    if not validation_lines:
+        return {"validation_sources": []}
+
     return {
         "validation_sources": [
             _source(
                 chunk_kind="validation_result",
-                content="Контекст валидации: " + json.dumps(validation_payload, ensure_ascii=False),
+                content="\n".join(validation_lines),
                 source_id=str(state["task_id"]),
                 source_type="validation_result",
             )

@@ -361,9 +361,9 @@ class QdrantService:
                     "source_id": str(chunk.get("source_id", task_id)),
                     "source_total_chunks": int(chunk.get("source_total_chunks", 1)),
                     "source_type": str(chunk.get("source_type", chunk.get("chunk_kind", "task"))),
+                    "status": task_status,
                     "tags": list(tags),
                     "task_id": task_id,
-                    "task_status": task_status,
                     "task_title": task_title,
                 }
                 if chunk.get("filename") is not None:
@@ -659,7 +659,9 @@ class QdrantService:
                 ranked_by_task[task_id] = {
                     "task_id": task_id,
                     "title": str(document.metadata.get("task_title", task_id)),
-                    "status": str(document.metadata.get("task_status", "")),
+                    "status": str(
+                        document.metadata.get("status") or document.metadata.get("task_status", "")
+                    ),
                     "score": round(float(score), 4),
                 }
 

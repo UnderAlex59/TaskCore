@@ -33,7 +33,7 @@ def test_compiled_langgraph_shapes_are_exportable() -> None:
     assert "invoke_change_tracker_llm" in change_tracker_mermaid
     assert "build_manager_response" in manager_mermaid
     assert "evaluate_core_rules" in validation_mermaid
-    assert "collect_base_chunks" in rag_mermaid
+    assert "collect_task_sources" in rag_mermaid
     assert "invoke_provider_test" in provider_test_mermaid
     assert "invoke_vision_test" in vision_test_mermaid
 

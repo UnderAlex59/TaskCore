@@ -177,7 +177,7 @@ def _format_cross_task_document(document: Document) -> tuple[str, dict[str, str]
     source = {
         "task_id": str(metadata.get("task_id") or "").strip(),
         "task_title": str(metadata.get("task_title") or "").strip(),
-        "task_status": str(metadata.get("task_status") or "").strip(),
+        "task_status": str(metadata.get("status") or metadata.get("task_status") or "").strip(),
         "source_type": str(metadata.get("source_type") or "").strip(),
         "chunk_id": str(metadata.get("chunk_id") or "").strip(),
     }

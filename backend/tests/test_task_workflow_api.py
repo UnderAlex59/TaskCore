@@ -1122,4 +1122,5 @@ async def test_image_attachment_upload_does_not_fail_when_vision_fails(
 
     assert upload_response.status_code == 201
     assert upload_response.json()["alt_text"] is None
-    assert any(chunk["source_type"] == "attachment_metadata" for chunk in captured_chunks)
+    assert not any(chunk["source_type"] == "attachment_metadata" for chunk in captured_chunks)
+    assert not any("mockup.png" in chunk["content"] for chunk in captured_chunks)
