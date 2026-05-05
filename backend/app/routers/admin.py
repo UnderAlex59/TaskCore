@@ -38,6 +38,7 @@ from app.schemas.admin_qdrant import (
     QdrantOverviewRead,
     QdrantProjectCoverageRead,
     QdrantProjectQuestionsProbePayload,
+    QdrantQaRagChunksProbePayload,
     QdrantRelatedTasksProbePayload,
     QdrantScenarioProbeRead,
     QdrantTaskResyncRead,
@@ -262,6 +263,15 @@ async def qdrant_probe_project_questions(
     db: DBSession,
 ) -> QdrantScenarioProbeRead:
     return await AdminQdrantService.probe_project_questions(payload, db)
+
+
+@router.post("/qdrant/scenarios/qa-rag-chunks", response_model=QdrantScenarioProbeRead)
+async def qdrant_probe_qa_rag_chunks(
+    payload: QdrantQaRagChunksProbePayload,
+    _: AdminUser,
+    db: DBSession,
+) -> QdrantScenarioProbeRead:
+    return await AdminQdrantService.probe_qa_rag_chunks(payload, db)
 
 
 @router.post("/qdrant/scenarios/duplicate-proposal", response_model=QdrantScenarioProbeRead)

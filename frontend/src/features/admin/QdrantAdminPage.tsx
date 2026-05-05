@@ -28,6 +28,7 @@ const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
 const SCENARIO_OPTIONS: Array<{ key: QdrantScenario; label: string }> = [
   { key: "related_tasks", label: "Related tasks" },
   { key: "project_questions", label: "Project questions" },
+  { key: "qa_rag_chunks", label: "QA RAG chunks" },
   { key: "duplicate_proposal", label: "Duplicate proposal" },
 ];
 
@@ -72,6 +73,17 @@ function reviewLabel(state: ReviewState) {
   return "Нерелевантно";
 }
 
+function ragScopeLabel(scope: string) {
+  if (scope === "current_task_attachment") {
+    return "Вложения текущей задачи";
+  }
+  return "Другие задачи проекта";
+}
+
+function promptSelectionLabel(selected: boolean) {
+  return selected ? "Попал бы в prompt" : "Ниже рабочего отбора";
+}
+
 export default function QdrantAdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [selectedScenario, setSelectedScenario] =
@@ -94,9 +106,9 @@ export default function QdrantAdminPage() {
     useState<QdrantScenarioProbeRead | null>(null);
   const [scenarioLoading, setScenarioLoading] = useState(false);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
-  const [manualReviews, setManualReviews] = useState<Record<string, ReviewState>>(
-    {},
-  );
+  const [manualReviews, setManualReviews] = useState<
+    Record<string, ReviewState>
+  >({});
   const [resyncingTaskId, setResyncingTaskId] = useState<string | null>(null);
   const [lastResync, setLastResync] = useState<QdrantTaskResyncRead | null>(
     null,
@@ -200,6 +212,21 @@ export default function QdrantAdminPage() {
           project_id: selectedProjectId,
           task_id: taskId,
           query_text: customQuery.trim() || undefined,
+          limit: 5,
+        });
+      } else if (selectedScenario === "qa_rag_chunks") {
+        const question = customQuery.trim();
+        if (!question) {
+          setScenarioError(
+            "Введите вопрос, для которого нужно проверить RAG-чанки.",
+          );
+          setScenarioLoading(false);
+          return;
+        }
+        nextResult = await adminApi.probeQdrantQaRagChunks({
+          project_id: selectedProjectId,
+          task_id: taskId,
+          question,
           limit: 5,
         });
       } else {
@@ -419,7 +446,8 @@ export default function QdrantAdminPage() {
             </h3>
             <p className="mt-3 text-sm leading-7 text-ink/70">
               Выберите проект, задачу и сценарий. Запрос можно оставить пустым,
-              тогда backend возьмёт контекст задачи автоматически.
+              тогда backend возьмёт контекст задачи автоматически. Для QA RAG
+              chunks укажите конкретный вопрос: этот сценарий не вызывает LLM.
             </p>
           </div>
 
@@ -502,23 +530,33 @@ export default function QdrantAdminPage() {
           ) : (
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-ink/70">
-                Переопределить query
+                {selectedScenario === "qa_rag_chunks"
+                  ? "Вопрос для retrieval"
+                  : "Переопределить query"}
               </span>
               <textarea
                 className="ui-field min-h-[180px]"
                 onChange={(event) => setCustomQuery(event.target.value)}
-                placeholder="Можно оставить пустым и использовать title/content выбранной задачи."
+                placeholder={
+                  selectedScenario === "qa_rag_chunks"
+                    ? "Введите вопрос пользователя. Backend покажет найденные чанки без отправки в LLM."
+                    : "Можно оставить пустым и использовать title/content выбранной задачи."
+                }
                 value={customQuery}
               />
             </label>
           )}
 
           <button
-            className={scenarioLoading ? "ui-button-secondary" : "ui-button-primary"}
+            className={
+              scenarioLoading ? "ui-button-secondary" : "ui-button-primary"
+            }
             disabled={scenarioLoading || !selectedProjectId}
             type="submit"
           >
-            {scenarioLoading ? "Запускаем live-проверку..." : "Запустить сценарий"}
+            {scenarioLoading
+              ? "Запускаем live-проверку..."
+              : "Запустить сценарий"}
           </button>
         </form>
 
@@ -534,8 +572,8 @@ export default function QdrantAdminPage() {
 
           {!scenarioResult ? (
             <div className="mt-5 rounded-[24px] border border-dashed border-black/10 bg-white/60 px-5 py-8 text-sm leading-7 text-ink/55">
-              После запуска сценария здесь появятся top-k результаты, предупреждения
-              и локальная ручная оценка релевантности.
+              После запуска сценария здесь появятся top-k результаты,
+              предупреждения и локальная ручная оценка релевантности.
             </div>
           ) : (
             <div className="mt-5 space-y-4">
@@ -572,7 +610,95 @@ export default function QdrantAdminPage() {
                 </p>
               )}
 
-              {(scenarioResult.results ?? []).length === 0 ? (
+              {scenarioResult.scenario === "qa_rag_chunks" ? (
+                (scenarioResult.rag_chunks ?? []).length === 0 ? (
+                  <p className="rounded-[22px] border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-ink/55">
+                    Retrieval отработал, но Qdrant не вернул чанков для вопроса.
+                  </p>
+                ) : (
+                  scenarioResult.rag_chunks.map((chunk) => (
+                    <article
+                      key={`${chunk.scope}-${chunk.id}`}
+                      className="rounded-[24px] border border-black/10 bg-white/80 p-5"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-bold text-ink">
+                            {chunk.task_title ?? chunk.filename ?? chunk.id}
+                          </p>
+                          <p className="mt-1 text-sm text-ink/65">
+                            {ragScopeLabel(chunk.scope)}
+                            {" · "}confidence:{" "}
+                            {Math.round(chunk.confidence * 100)}%{" · "}score:{" "}
+                            {formatScore(chunk.score)}
+                            {" · "}
+                            {matchBandLabel(chunk.match_band)}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-ink/75">
+                            {promptSelectionLabel(chunk.selected_for_prompt)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(
+                            [
+                              "relevant",
+                              "partial",
+                              "irrelevant",
+                            ] as ReviewState[]
+                          ).map((state) => (
+                            <button
+                              key={state}
+                              className={
+                                manualReviews[chunk.id] === state
+                                  ? "ui-button-primary"
+                                  : "ui-button-secondary"
+                              }
+                              onClick={() =>
+                                setManualReviews((current) => ({
+                                  ...current,
+                                  [chunk.id]: state,
+                                }))
+                              }
+                              type="button"
+                            >
+                              {reviewLabel(state)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <pre className="mt-4 whitespace-pre-wrap break-words rounded-[20px] bg-[#f8fafc] p-4 font-mono text-sm leading-7 text-ink">
+                        {chunk.content}
+                      </pre>
+
+                      <details className="mt-4 rounded-[20px] border border-black/10 bg-white/70 p-4">
+                        <summary className="cursor-pointer text-sm font-semibold text-ink">
+                          Chunk metadata
+                        </summary>
+                        <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-ink/75">
+                          {JSON.stringify(
+                            {
+                              chunk_id: chunk.id,
+                              source_type: chunk.source_type,
+                              chunk_kind: chunk.chunk_kind,
+                              chunk_index: chunk.chunk_index,
+                              source_id: chunk.source_id,
+                              filename: chunk.filename,
+                              task_id: chunk.task_id,
+                              task_status: chunk.task_status,
+                              threshold: chunk.threshold,
+                              selected_for_prompt: chunk.selected_for_prompt,
+                              metadata: chunk.metadata,
+                            },
+                            null,
+                            2,
+                          )}
+                        </pre>
+                      </details>
+                    </article>
+                  ))
+                )
+              ) : (scenarioResult.results ?? []).length === 0 ? (
                 <p className="rounded-[22px] border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-ink/55">
                   Сценарий отработал, но Qdrant не вернул результатов.
                 </p>
@@ -601,27 +727,27 @@ export default function QdrantAdminPage() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {(["relevant", "partial", "irrelevant"] as ReviewState[]).map(
-                          (state) => (
-                            <button
-                              key={state}
-                              className={
-                                manualReviews[result.id] === state
-                                  ? "ui-button-primary"
-                                  : "ui-button-secondary"
-                              }
-                              onClick={() =>
-                                setManualReviews((current) => ({
-                                  ...current,
-                                  [result.id]: state,
-                                }))
-                              }
-                              type="button"
-                            >
-                              {reviewLabel(state)}
-                            </button>
-                          ),
-                        )}
+                        {(
+                          ["relevant", "partial", "irrelevant"] as ReviewState[]
+                        ).map((state) => (
+                          <button
+                            key={state}
+                            className={
+                              manualReviews[result.id] === state
+                                ? "ui-button-primary"
+                                : "ui-button-secondary"
+                            }
+                            onClick={() =>
+                              setManualReviews((current) => ({
+                                ...current,
+                                [result.id]: state,
+                              }))
+                            }
+                            type="button"
+                          >
+                            {reviewLabel(state)}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
@@ -742,12 +868,16 @@ export default function QdrantAdminPage() {
                   </p>
                   <p className="mt-2 text-sm text-ink/60">
                     Indexed at:{" "}
-                    {item.indexed_at ? formatDateTimeFull(item.indexed_at) : "не индексировалась"}
+                    {item.indexed_at
+                      ? formatDateTimeFull(item.indexed_at)
+                      : "не индексировалась"}
                     {" · "}Updated at: {formatDateTimeFull(item.updated_at)}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs">
                     <span className="rounded-full bg-[#e9f2ff] px-3 py-1 text-[#0c66e4]">
-                      {item.embeddings_stale ? "embeddings stale" : "embeddings synced"}
+                      {item.embeddings_stale
+                        ? "embeddings stale"
+                        : "embeddings synced"}
                     </span>
                     {item.requires_revalidation ? (
                       <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">
@@ -813,7 +943,11 @@ export default function QdrantAdminPage() {
             {ADMIN_TABS.map((tab) => (
               <button
                 key={tab.key}
-                className={activeTab === tab.key ? "ui-button-primary" : "ui-button-secondary"}
+                className={
+                  activeTab === tab.key
+                    ? "ui-button-primary"
+                    : "ui-button-secondary"
+                }
                 onClick={() => setActiveTab(tab.key)}
                 type="button"
               >

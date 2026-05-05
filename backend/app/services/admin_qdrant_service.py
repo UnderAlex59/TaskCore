@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import HTTPException, status
 from qdrant_client import models
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.change_proposal import ChangeProposal
 from app.models.task import Task, TaskAttachment
 from app.models.user import User
@@ -19,6 +21,8 @@ from app.schemas.admin_qdrant import (
     QdrantProjectCoverageRead,
     QdrantProjectCoverageSummaryRead,
     QdrantProjectQuestionsProbePayload,
+    QdrantQaRagChunksProbePayload,
+    QdrantRagChunkResultRead,
     QdrantRelatedTasksProbePayload,
     QdrantScenarioHeuristicRead,
     QdrantScenarioProbeRead,
@@ -38,6 +42,8 @@ from app.services.task_service import TaskService
 from app.services.validation_question_service import ValidationQuestionService
 
 _DUPLICATE_PROPOSAL_NEAR_THRESHOLD_DELTA = 0.05
+_RAG_CHUNK_NEAR_THRESHOLD_DELTA = 0.1
+_QA_ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
 
 
 class AdminQdrantService:
@@ -351,6 +357,60 @@ class AdminQdrantService:
         return "warning" if heuristics else "ok"
 
     @staticmethod
+    def _chunk_match_band(
+        score: float,
+        *,
+        threshold: float,
+    ) -> Literal["above_threshold", "near_threshold", "below_threshold"]:
+        near_threshold = max(threshold - _RAG_CHUNK_NEAR_THRESHOLD_DELTA, 0.0)
+        if score >= threshold:
+            return "above_threshold"
+        if score >= near_threshold:
+            return "near_threshold"
+        return "below_threshold"
+
+    @staticmethod
+    def _score_confidence(score: float) -> float:
+        return round(max(0.0, min(score, 1.0)), 4)
+
+    @staticmethod
+    def _serialize_rag_chunk_result(
+        hit: dict[str, object],
+        *,
+        scope: Literal["current_task_attachment", "cross_task"],
+        selected_for_prompt: bool,
+        threshold: float,
+        fallback_id: str,
+    ) -> QdrantRagChunkResultRead:
+        document = hit["document"]
+        score = float(hit["score"])
+        metadata = dict(getattr(document, "metadata", {}) or {})
+        chunk_id = str(metadata.get("chunk_id") or fallback_id)
+        chunk_index = metadata.get("chunk_index")
+        return QdrantRagChunkResultRead(
+            id=chunk_id,
+            scope=scope,
+            selected_for_prompt=selected_for_prompt,
+            confidence=AdminQdrantService._score_confidence(score),
+            score=round(score, 4),
+            threshold=threshold,
+            match_band=AdminQdrantService._chunk_match_band(
+                score,
+                threshold=threshold,
+            ),
+            content=str(getattr(document, "page_content", "")).strip(),
+            task_id=str(metadata.get("task_id") or "") or None,
+            task_title=str(metadata.get("task_title") or "") or None,
+            task_status=str(metadata.get("task_status") or "") or None,
+            source_type=str(metadata.get("source_type") or "") or None,
+            chunk_kind=str(metadata.get("chunk_kind") or "") or None,
+            chunk_index=int(chunk_index) if chunk_index is not None else None,
+            source_id=str(metadata.get("source_id") or "") or None,
+            filename=str(metadata.get("filename") or "") or None,
+            metadata=metadata,
+        )
+
+    @staticmethod
     async def probe_related_tasks(
         payload: QdrantRelatedTasksProbePayload,
         db: AsyncSession,
@@ -538,6 +598,123 @@ class AdminQdrantService:
             heuristic_status=AdminQdrantService._probe_status(heuristics),
             heuristics=heuristics,
             results=results,
+        )
+
+    @staticmethod
+    async def probe_qa_rag_chunks(
+        payload: QdrantQaRagChunksProbePayload,
+        db: AsyncSession,
+    ) -> QdrantScenarioProbeRead:
+        task: Task | None = None
+        if payload.task_id:
+            task = await AdminQdrantService._get_task_in_project_or_404(
+                payload.project_id,
+                payload.task_id,
+                db,
+            )
+
+        question = payload.question.strip()
+        threshold = float(get_settings().RAG_CHUNK_MIN_SCORE)
+        retrieval_limit = int(payload.limit)
+        raw_cross_task_limit = max(retrieval_limit * 6, 12)
+
+        attachment_hits = (
+            await QdrantService.probe_task_knowledge_chunks(
+                task_id=task.id,
+                query_text=question,
+                limit=retrieval_limit,
+                include_source_types=sorted(_QA_ATTACHMENT_SOURCE_TYPES),
+            )
+            if task is not None
+            else []
+        )
+        cross_task_hits = await QdrantService.probe_project_task_knowledge_chunks(
+            project_id=payload.project_id,
+            query_text=question,
+            exclude_task_id=task.id if task is not None else None,
+            limit=raw_cross_task_limit,
+        )
+
+        rag_chunks: list[QdrantRagChunkResultRead] = []
+        for index, hit in enumerate(attachment_hits, start=1):
+            score = float(hit["score"])
+            content = str(getattr(hit["document"], "page_content", "")).strip()
+            selected = bool(content) and score >= threshold
+            rag_chunks.append(
+                AdminQdrantService._serialize_rag_chunk_result(
+                    hit,
+                    scope="current_task_attachment",
+                    selected_for_prompt=selected,
+                    threshold=threshold,
+                    fallback_id=f"attachment-{index}",
+                )
+            )
+
+        selected_cross_task_total = 0
+        per_task_count: dict[str, int] = {}
+        for index, hit in enumerate(cross_task_hits, start=1):
+            document = hit["document"]
+            score = float(hit["score"])
+            content = str(getattr(document, "page_content", "")).strip()
+            metadata = dict(getattr(document, "metadata", {}) or {})
+            hit_task_id = str(metadata.get("task_id") or "").strip()
+            eligible = bool(content) and bool(hit_task_id) and score >= threshold
+            eligible = eligible and per_task_count.get(hit_task_id, 0) < 2
+            eligible = eligible and selected_cross_task_total < retrieval_limit
+            if eligible:
+                per_task_count[hit_task_id] = per_task_count.get(hit_task_id, 0) + 1
+                selected_cross_task_total += 1
+            rag_chunks.append(
+                AdminQdrantService._serialize_rag_chunk_result(
+                    hit,
+                    scope="cross_task",
+                    selected_for_prompt=eligible,
+                    threshold=threshold,
+                    fallback_id=f"cross-task-{index}",
+                )
+            )
+
+        heuristics: list[QdrantScenarioHeuristicRead] = []
+        if task is None:
+            heuristics.append(
+                QdrantScenarioHeuristicRead(
+                    code="task_not_selected",
+                    status="warning",
+                    message=(
+                        "Задача не выбрана, поэтому проверяется только cross-task RAG "
+                        "по проекту. Контекст вложений текущей задачи не участвует."
+                    ),
+                )
+            )
+        if not rag_chunks:
+            heuristics.append(
+                QdrantScenarioHeuristicRead(
+                    code="empty_rag_chunks",
+                    status="warning",
+                    message="Qdrant не вернул чанки для этого вопроса.",
+                )
+            )
+        elif not any(item.selected_for_prompt for item in rag_chunks):
+            heuristics.append(
+                QdrantScenarioHeuristicRead(
+                    code="no_chunks_above_threshold",
+                    status="warning",
+                    message=(
+                        "Чанки найдены, но ни один не проходит рабочий порог RAG. "
+                        "В ответ QA-агента они не попали бы."
+                    ),
+                )
+            )
+
+        return QdrantScenarioProbeRead(
+            scenario="qa_rag_chunks",
+            project_id=payload.project_id,
+            task_id=task.id if task is not None else payload.task_id,
+            query_text=question,
+            heuristic_status=AdminQdrantService._probe_status(heuristics),
+            heuristics=heuristics,
+            raw_threshold=threshold,
+            rag_chunks=rag_chunks,
         )
 
     @staticmethod

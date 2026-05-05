@@ -7,7 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.task import TaskStatus
 
-QdrantScenario = Literal["related_tasks", "project_questions", "duplicate_proposal"]
+QdrantScenario = Literal[
+    "related_tasks",
+    "project_questions",
+    "duplicate_proposal",
+    "qa_rag_chunks",
+]
 QdrantHeuristicStatus = Literal["ok", "warning"]
 
 
@@ -59,6 +64,26 @@ class QdrantScenarioResultRead(BaseModel):
     match_band: Literal["above_threshold", "near_threshold", "below_threshold"] | None = None
 
 
+class QdrantRagChunkResultRead(BaseModel):
+    id: str
+    scope: Literal["current_task_attachment", "cross_task"]
+    selected_for_prompt: bool
+    confidence: float
+    score: float
+    threshold: float
+    match_band: Literal["above_threshold", "near_threshold", "below_threshold"]
+    content: str
+    task_id: str | None = None
+    task_title: str | None = None
+    task_status: str | None = None
+    source_type: str | None = None
+    chunk_kind: str | None = None
+    chunk_index: int | None = None
+    source_id: str | None = None
+    filename: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class QdrantScenarioProbeRead(BaseModel):
     scenario: QdrantScenario
     project_id: str
@@ -68,6 +93,7 @@ class QdrantScenarioProbeRead(BaseModel):
     heuristics: list[QdrantScenarioHeuristicRead] = Field(default_factory=list)
     results: list[QdrantScenarioResultRead] = Field(default_factory=list)
     raw_threshold: float | None = None
+    rag_chunks: list[QdrantRagChunkResultRead] = Field(default_factory=list)
 
 
 class QdrantRelatedTasksProbePayload(BaseModel):
@@ -94,6 +120,15 @@ class QdrantDuplicateProposalProbePayload(BaseModel):
     project_id: str
     proposal_text: str = Field(min_length=1)
     task_id: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class QdrantQaRagChunksProbePayload(BaseModel):
+    project_id: str
+    question: str = Field(min_length=1)
+    task_id: str | None = None
+    limit: int = Field(default=5, ge=1, le=10)
 
     model_config = ConfigDict(extra="forbid")
 

@@ -279,7 +279,11 @@ export interface ValidationQuestionListParams {
   verdict?: ValidationResult["verdict"];
 }
 
-export type QdrantScenario = "related_tasks" | "project_questions" | "duplicate_proposal";
+export type QdrantScenario =
+  | "related_tasks"
+  | "project_questions"
+  | "duplicate_proposal"
+  | "qa_rag_chunks";
 export type QdrantHeuristicStatus = "ok" | "warning";
 export type QdrantMatchBand =
   | "above_threshold"
@@ -334,6 +338,26 @@ export interface QdrantScenarioResultRead {
   match_band: QdrantMatchBand | null;
 }
 
+export interface QdrantRagChunkResultRead {
+  id: string;
+  scope: "current_task_attachment" | "cross_task";
+  selected_for_prompt: boolean;
+  confidence: number;
+  score: number;
+  threshold: number;
+  match_band: QdrantMatchBand;
+  content: string;
+  task_id: string | null;
+  task_title: string | null;
+  task_status: string | null;
+  source_type: string | null;
+  chunk_kind: string | null;
+  chunk_index: number | null;
+  source_id: string | null;
+  filename: string | null;
+  metadata: Record<string, unknown>;
+}
+
 export interface QdrantScenarioProbeRead {
   scenario: QdrantScenario;
   project_id: string;
@@ -343,6 +367,7 @@ export interface QdrantScenarioProbeRead {
   heuristics: QdrantScenarioHeuristicRead[];
   results: QdrantScenarioResultRead[];
   raw_threshold: number | null;
+  rag_chunks: QdrantRagChunkResultRead[];
 }
 
 export interface QdrantCoverageTaskRead {
@@ -410,9 +435,13 @@ export const adminApi = {
     formData.append("file", file);
     formData.append("prompt", prompt);
     return (
-      await apiClient.post<VisionTestResult>("/admin/llm/vision-test", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      await apiClient.post<VisionTestResult>(
+        "/admin/llm/vision-test",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        },
+      )
     ).data;
   },
   setDefaultProvider: async (providerConfigId: string) =>
@@ -573,6 +602,18 @@ export const adminApi = {
     (
       await apiClient.post<QdrantScenarioProbeRead>(
         "/admin/qdrant/scenarios/project-questions",
+        payload,
+      )
+    ).data,
+  probeQdrantQaRagChunks: async (payload: {
+    project_id: string;
+    question: string;
+    task_id?: string;
+    limit?: number;
+  }) =>
+    (
+      await apiClient.post<QdrantScenarioProbeRead>(
+        "/admin/qdrant/scenarios/qa-rag-chunks",
         payload,
       )
     ).data,

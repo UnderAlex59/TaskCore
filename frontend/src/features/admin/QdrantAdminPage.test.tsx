@@ -7,6 +7,7 @@ const adminApiMock = vi.hoisted(() => ({
   getQdrantOverview: vi.fn(),
   getQdrantProjectCoverage: vi.fn(),
   probeQdrantDuplicateProposal: vi.fn(),
+  probeQdrantQaRagChunks: vi.fn(),
   probeQdrantProjectQuestions: vi.fn(),
   probeQdrantRelatedTasks: vi.fn(),
   resyncQdrantTask: vi.fn(),
@@ -159,6 +160,37 @@ describe("QdrantAdminPage", () => {
       ],
       raw_threshold: null,
     });
+    adminApiMock.probeQdrantQaRagChunks.mockResolvedValue({
+      scenario: "qa_rag_chunks",
+      project_id: "project-1",
+      task_id: "task-1",
+      query_text: "Какие требования к синхронизации?",
+      heuristic_status: "ok",
+      heuristics: [],
+      results: [],
+      raw_threshold: 0.7,
+      rag_chunks: [
+        {
+          id: "chunk-1",
+          scope: "cross_task",
+          selected_for_prompt: true,
+          confidence: 0.91,
+          score: 0.91,
+          threshold: 0.7,
+          match_band: "above_threshold",
+          content: "Экспорт статусов во внешнюю систему.",
+          task_id: "task-2",
+          task_title: "Экспорт статусов",
+          task_status: "ready_for_dev",
+          source_type: "task_content",
+          chunk_kind: "task_content",
+          chunk_index: 0,
+          source_id: "task-2",
+          filename: null,
+          metadata: { chunk_id: "chunk-1" },
+        },
+      ],
+    });
     adminApiMock.resyncQdrantTask.mockResolvedValue({
       task_id: "task-1",
       project_id: "project-1",
@@ -208,6 +240,30 @@ describe("QdrantAdminPage", () => {
     );
   });
 
+  it("runs the QA RAG chunks scenario without sending to LLM", async () => {
+    render(<QdrantAdminPage />);
+
+    await screen.findByText("task_knowledge");
+    fireEvent.click(screen.getByRole("button", { name: "Сценарии" }));
+    fireEvent.click(screen.getByRole("button", { name: "QA RAG chunks" }));
+    fireEvent.change(screen.getByLabelText("Вопрос для retrieval"), {
+      target: { value: "Какие требования к синхронизации?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Запустить сценарий" }));
+
+    await waitFor(() => {
+      expect(adminApiMock.probeQdrantQaRagChunks).toHaveBeenCalledWith({
+        project_id: "project-1",
+        task_id: "task-1",
+        question: "Какие требования к синхронизации?",
+        limit: 5,
+      });
+    });
+
+    expect(await screen.findByText("Попал бы в prompt")).toBeInTheDocument();
+    expect(screen.getByText(/confidence: 91%/)).toBeInTheDocument();
+  });
+
   it("resyncs a task from the coverage tab and shows warnings", async () => {
     render(<QdrantAdminPage />);
 
@@ -223,7 +279,9 @@ describe("QdrantAdminPage", () => {
       expect(adminApiMock.resyncQdrantTask).toHaveBeenCalledWith("task-1");
     });
 
-    expect(await screen.findByText("Индекс задачи пересобран")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Индекс задачи пересобран"),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("У вложения diagram.png нет сохранённого alt-text."),
     ).toBeInTheDocument();

@@ -151,3 +151,69 @@ async def test_admin_can_probe_duplicate_proposal_scenario(
     assert payload["heuristic_status"] == "warning"
     assert payload["results"][0]["match_band"] == "near_threshold"
     assert payload["raw_threshold"] == 0.92
+
+
+@pytest.mark.asyncio
+async def test_admin_can_probe_qa_rag_chunks_without_llm(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-qdrant-rag-chunks@example.com",
+        full_name="Admin RAG Chunks",
+    )
+
+    async def fake_probe(payload, db):  # type: ignore[no-untyped-def]
+        return {
+            "scenario": "qa_rag_chunks",
+            "project_id": payload.project_id,
+            "task_id": payload.task_id,
+            "query_text": payload.question,
+            "heuristic_status": "ok",
+            "heuristics": [],
+            "results": [],
+            "raw_threshold": 0.7,
+            "rag_chunks": [
+                {
+                    "id": "chunk-1",
+                    "scope": "cross_task",
+                    "selected_for_prompt": True,
+                    "confidence": 0.91,
+                    "score": 0.91,
+                    "threshold": 0.7,
+                    "match_band": "above_threshold",
+                    "content": "Требование описывает синхронизацию статусов.",
+                    "task_id": "task-2",
+                    "task_title": "Синхронизация статусов",
+                    "task_status": "in_progress",
+                    "source_type": "task_content",
+                    "chunk_kind": "task_content",
+                    "chunk_index": 0,
+                    "source_id": "task-2",
+                    "filename": None,
+                    "metadata": {"chunk_id": "chunk-1"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.services.admin_qdrant_service.AdminQdrantService.probe_qa_rag_chunks",
+        fake_probe,
+    )
+
+    response = await client.post(
+        "/admin/qdrant/scenarios/qa-rag-chunks",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "project_id": "project-1",
+            "task_id": "task-1",
+            "question": "Какие требования есть к синхронизации статусов?",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scenario"] == "qa_rag_chunks"
+    assert payload["rag_chunks"][0]["selected_for_prompt"] is True
+    assert payload["rag_chunks"][0]["confidence"] == 0.91

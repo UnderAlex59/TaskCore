@@ -473,6 +473,53 @@ class QdrantService:
             return []
 
     @staticmethod
+    async def probe_task_knowledge_chunks(
+        *,
+        task_id: str,
+        query_text: str,
+        limit: int = 5,
+        include_source_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            if not await QdrantService.ensure_collections():
+                return []
+
+            normalized_limit = max(1, min(int(limit), 20))
+            must_conditions: list[models.FieldCondition] = [
+                QdrantService._metadata_value_condition("task_id", task_id)
+            ]
+            normalized_source_types = [
+                str(item).strip()
+                for item in (include_source_types or [])
+                if str(item).strip()
+            ]
+            if normalized_source_types:
+                must_conditions.append(
+                    QdrantService._metadata_any_condition(
+                        "source_type",
+                        normalized_source_types,
+                    )
+                )
+
+            hits = await QdrantService._get_store(
+                TASK_KNOWLEDGE_COLLECTION
+            ).asimilarity_search_with_score(
+                query_text,
+                k=normalized_limit,
+                filter=models.Filter(must=must_conditions),
+            )
+            return [
+                {
+                    "document": document,
+                    "score": float(score),
+                }
+                for document, score in hits
+            ]
+        except Exception:
+            logger.exception("Failed to probe task knowledge chunks for task %s", task_id)
+            return []
+
+    @staticmethod
     async def search_project_task_knowledge(
         *,
         project_id: str,
@@ -528,6 +575,52 @@ class QdrantService:
             return documents
         except Exception:
             logger.exception("Failed to search task knowledge for project %s", project_id)
+            return []
+
+    @staticmethod
+    async def probe_project_task_knowledge_chunks(
+        *,
+        project_id: str,
+        query_text: str,
+        exclude_task_id: str | None = None,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        try:
+            if not await QdrantService.ensure_collections():
+                return []
+
+            normalized_limit = max(1, min(int(limit), 40))
+            must_conditions: list[models.FieldCondition] = [
+                QdrantService._metadata_value_condition("project_id", project_id)
+            ]
+            must_not_conditions: list[models.FieldCondition] = []
+            if exclude_task_id:
+                must_not_conditions.append(
+                    QdrantService._metadata_value_condition("task_id", exclude_task_id)
+                )
+
+            hits = await QdrantService._get_store(
+                TASK_KNOWLEDGE_COLLECTION
+            ).asimilarity_search_with_score(
+                query_text,
+                k=normalized_limit,
+                filter=models.Filter(
+                    must=must_conditions,
+                    must_not=must_not_conditions or None,
+                ),
+            )
+            return [
+                {
+                    "document": document,
+                    "score": float(score),
+                }
+                for document, score in hits
+            ]
+        except Exception:
+            logger.exception(
+                "Failed to probe project task knowledge chunks for project %s",
+                project_id,
+            )
             return []
 
     @staticmethod

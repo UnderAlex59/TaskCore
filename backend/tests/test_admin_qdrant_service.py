@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.documents import Document
 from qdrant_client import models
 
 from app.core.database import AsyncSessionLocal
@@ -14,7 +15,10 @@ from app.models.project import Project
 from app.models.task import Task, TaskAttachment, TaskStatus
 from app.models.user import User, UserRole
 from app.models.validation_question import ValidationQuestion
-from app.schemas.admin_qdrant import QdrantDuplicateProposalProbePayload
+from app.schemas.admin_qdrant import (
+    QdrantDuplicateProposalProbePayload,
+    QdrantQaRagChunksProbePayload,
+)
 from app.services.admin_qdrant_service import AdminQdrantService
 from app.services.qdrant_service import (
     PROJECT_QUESTIONS_COLLECTION,
@@ -308,6 +312,99 @@ async def test_probe_duplicate_proposal_marks_near_threshold(
         assert probe.raw_threshold == 0.92
         assert probe.results[0].match_band == "near_threshold"
         assert probe.results[0].task_title == "Синхронизация статусов"
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_probe_qa_rag_chunks_marks_prompt_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        admin = User(
+            email="rag-chunks-admin@example.com",
+            password_hash="hash",
+            full_name="RAG Chunks Admin",
+            role=UserRole.ADMIN,
+        )
+        db.add(admin)
+        await db.flush()
+
+        project = Project(name="RAG Debug", description=None, created_by=admin.id)
+        db.add(project)
+        await db.flush()
+
+        task = Task(
+            project_id=project.id,
+            title="Авторизация",
+            content="Нужно уточнить требования к входу.",
+            tags=["auth"],
+            status=TaskStatus.DRAFT,
+            created_by=admin.id,
+            analyst_id=admin.id,
+        )
+        db.add(task)
+        await db.commit()
+
+        attachment_document = Document(
+            page_content="Макет входа содержит поля email и пароль.",
+            metadata={
+                "chunk_id": "attachment-chunk",
+                "task_id": task.id,
+                "task_title": task.title,
+                "task_status": task.status.value,
+                "source_type": "attachment_text",
+                "chunk_kind": "attachment_text",
+                "chunk_index": 0,
+                "source_id": "attachment-1",
+                "filename": "login.txt",
+            },
+        )
+        cross_task_document = Document(
+            page_content="В похожей задаче вход подтверждается кодом из SMS.",
+            metadata={
+                "chunk_id": "cross-task-chunk",
+                "task_id": "task-2",
+                "task_title": "Подтверждение входа",
+                "task_status": "approved",
+                "source_type": "task_content",
+                "chunk_kind": "task_content",
+                "chunk_index": 0,
+                "source_id": "task-2",
+            },
+        )
+
+        monkeypatch.setattr(
+            "app.services.admin_qdrant_service.get_settings",
+            lambda: SimpleNamespace(RAG_CHUNK_MIN_SCORE=0.7),
+        )
+        monkeypatch.setattr(
+            QdrantService,
+            "probe_task_knowledge_chunks",
+            AsyncMock(return_value=[{"document": attachment_document, "score": 0.81}]),
+        )
+        monkeypatch.setattr(
+            QdrantService,
+            "probe_project_task_knowledge_chunks",
+            AsyncMock(return_value=[{"document": cross_task_document, "score": 0.62}]),
+        )
+
+        probe = await AdminQdrantService.probe_qa_rag_chunks(
+            QdrantQaRagChunksProbePayload(
+                project_id=project.id,
+                task_id=task.id,
+                question="Какие требования к входу?",
+            ),
+            db,
+        )
+
+        assert probe.scenario == "qa_rag_chunks"
+        assert probe.raw_threshold == 0.7
+        assert len(probe.rag_chunks) == 2
+        assert probe.rag_chunks[0].selected_for_prompt is True
+        assert probe.rag_chunks[0].confidence == 0.81
+        assert probe.rag_chunks[0].filename == "login.txt"
+        assert probe.rag_chunks[1].selected_for_prompt is False
+        assert probe.rag_chunks[1].match_band == "near_threshold"
 
 
 @pytest.mark.asyncio
