@@ -24,6 +24,7 @@ _VECTOR_SIZE_BY_MODEL = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,
+    "bge-m3": 1024,
     "nomic-embed-text": 768,
     "mxbai-embed-large": 1024,
 }

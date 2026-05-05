@@ -234,7 +234,7 @@ COOKIE_DOMAIN=
 QDRANT_URL=http://localhost:6333
 OLLAMA_BASE_URL=http://localhost:11434
 EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_EMBEDDING_MODEL=bge-m3
 UPLOAD_DIR=./uploads
 ```
 

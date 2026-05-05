@@ -64,14 +64,6 @@ function EditorCard({
 }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]">
-      <div className="border-b border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-6 py-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
-          {title}
-        </p>
-        <p className="text-anywhere mt-2 text-sm leading-6 text-[#44546f]">
-          {helperText}
-        </p>
-      </div>
       <div className="min-w-0 px-6 py-6 sm:px-8 sm:py-8">{children}</div>
     </section>
   );
@@ -374,17 +366,6 @@ export default function TaskForm({
         </section>
 
         <aside className="space-y-4 xl:sticky xl:top-6">
-          <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
-              Публикация
-            </p>
-            <p className="mt-3 text-sm leading-7 text-[#44546f]">
-              Сохранение обновляет карточку задачи. Commit публикует
-              индексированную версию для поиска, проверки и связанных сценариев
-              работы с задачей.
-            </p>
-          </section>
-
           {activePane === "document" ? (
             <>
               <section className="rounded-[16px] border border-[rgba(9,30,66,0.12)] bg-white p-5 shadow-[0_1px_2px_rgba(9,30,66,0.06)]">

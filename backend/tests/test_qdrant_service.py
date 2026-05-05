@@ -20,7 +20,7 @@ def make_settings(**overrides: object) -> SimpleNamespace:
         "OPENAI_API_KEY": None,
         "OPENAI_BASE_URL": None,
         "EMBEDDING_MODEL": "text-embedding-3-small",
-        "OLLAMA_EMBEDDING_MODEL": "nomic-embed-text",
+        "OLLAMA_EMBEDDING_MODEL": "bge-m3",
         "OLLAMA_BASE_URL": "http://ollama:11434",
         "EMBEDDING_DIMENSION": None,
     }
@@ -89,7 +89,7 @@ def test_vector_size_uses_ollama_model_mapping(monkeypatch) -> None:
         lambda: make_settings(EMBEDDING_PROVIDER="ollama"),
     )
 
-    assert QdrantService._get_vector_size() == 768
+    assert QdrantService._get_vector_size() == 1024
 
 
 def test_embedding_metadata_uses_active_provider_and_model(monkeypatch) -> None:
@@ -97,12 +97,12 @@ def test_embedding_metadata_uses_active_provider_and_model(monkeypatch) -> None:
     monkeypatch.setattr(
         QdrantService,
         "_get_active_embedding_model",
-        Mock(return_value="nomic-embed-text"),
+        Mock(return_value="bge-m3"),
     )
 
     assert QdrantService._get_embedding_metadata() == {
         "embedding_provider": "ollama",
-        "embedding_model": "nomic-embed-text",
+        "embedding_model": "bge-m3",
     }
 
 
@@ -113,19 +113,19 @@ def test_collection_matches_active_embeddings_requires_matching_size_and_metadat
     monkeypatch.setattr(
         QdrantService,
         "_get_active_embedding_model",
-        Mock(return_value="nomic-embed-text"),
+        Mock(return_value="bge-m3"),
     )
     collection_info = SimpleNamespace(
         config=SimpleNamespace(
             params=SimpleNamespace(
                 vectors=models.VectorParams(
-                    size=768,
+                    size=1024,
                     distance=models.Distance.COSINE,
                 )
             ),
             metadata={
                 "embedding_provider": "ollama",
-                "embedding_model": "nomic-embed-text",
+                "embedding_model": "bge-m3",
             },
         )
     )
@@ -133,7 +133,7 @@ def test_collection_matches_active_embeddings_requires_matching_size_and_metadat
     assert (
         QdrantService._collection_matches_active_embeddings(
             collection_info,
-            expected_vector_size=768,
+            expected_vector_size=1024,
         )
         is True
     )
@@ -149,7 +149,7 @@ def test_collection_matches_active_embeddings_requires_matching_size_and_metadat
     assert (
         QdrantService._collection_matches_active_embeddings(
             collection_info,
-            expected_vector_size=768,
+            expected_vector_size=1024,
         )
         is False
     )
@@ -161,19 +161,19 @@ def test_create_collection_writes_embedding_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         QdrantService,
         "_get_active_embedding_model",
-        Mock(return_value="nomic-embed-text"),
+        Mock(return_value="bge-m3"),
     )
 
     QdrantService._create_collection(
         client,
         collection_name="task_knowledge",
-        vector_size=768,
+        vector_size=1024,
     )
 
     client.create_collection.assert_called_once()
     assert client.create_collection.call_args.kwargs["metadata"] == {
         "embedding_provider": "ollama",
-        "embedding_model": "nomic-embed-text",
+        "embedding_model": "bge-m3",
     }
 
 

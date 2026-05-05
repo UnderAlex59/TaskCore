@@ -7,7 +7,10 @@ export interface ValidationResult {
     message: string;
     severity: "low" | "medium" | "high";
   }>;
-  questions: string[];
+  questions: Array<
+    | string
+    | { content?: string; message?: string; question?: string; text?: string }
+  >;
   validated_at: string;
 }
 

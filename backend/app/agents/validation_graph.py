@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from ast import literal_eval
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -147,7 +148,41 @@ def _normalize_issue_list(candidate: object) -> list[dict[str, str]]:
 def _normalize_question_list(candidate: object) -> list[str]:
     if not isinstance(candidate, list):
         return []
-    return _dedupe_questions([str(item).strip() for item in candidate if str(item).strip()])
+
+    questions: list[str] = []
+    for item in candidate:
+        question = _normalize_question_item(item)
+        if question:
+            questions.append(question)
+    return _dedupe_questions(questions)
+
+
+def _normalize_question_item(item: object) -> str:
+    if isinstance(item, dict):
+        for key in ("message", "question", "text", "content"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    if not isinstance(item, str):
+        return str(item).strip()
+
+    value = item.strip()
+    if not value:
+        return ""
+
+    if value.startswith("{") and value.endswith("}"):
+        for parser in (json.loads, literal_eval):
+            try:
+                parsed = parser(value)
+            except (SyntaxError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+            normalized = _normalize_question_item(parsed)
+            if normalized:
+                return normalized
+
+    return value
 
 
 def _fallback_core_analysis(state: ValidationGraphState) -> tuple[list[dict[str, str]], list[str]]:
@@ -389,9 +424,9 @@ async def _search_project_questions(state: ValidationGraphState) -> ValidationGr
         limit=5,
     )
     return {
-        "rag_questions": _dedupe_questions(
+        "rag_questions": _normalize_question_list(
             [
-                str(document.page_content).strip()
+                document.page_content
                 for document in documents
                 if document.page_content.strip()
             ]
@@ -440,7 +475,7 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
         if payload is None
         else _dedupe_questions(
             _normalize_question_list(payload.get("questions"))
-            + [str(item).strip() for item in state.get("rag_questions", [])]
+            + _normalize_question_list(list(state.get("rag_questions", [])))
         )
     )
     return {"context_questions": questions}

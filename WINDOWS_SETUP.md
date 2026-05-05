@@ -84,7 +84,7 @@ Copy-Item backend\.env.example backend\.env
 
 ```env
 EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_EMBEDDING_MODEL=bge-m3
 ```
 
 ### 2. Запустить Compose
@@ -181,7 +181,7 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OLLAMA_BASE_URL=http://localhost:11434
 EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_EMBEDDING_MODEL=bge-m3
 EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=
 LLM_SETTINGS_ENCRYPTION_KEY=

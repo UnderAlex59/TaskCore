@@ -10,6 +10,27 @@ interface Props {
   result: ValidationResult | null;
 }
 
+function getQuestionText(question: ValidationResult["questions"][number]) {
+  if (typeof question === "string") {
+    const trimmed = question.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const match = trimmed.match(
+        /['"](?:message|question|text|content)['"]\s*:\s*['"]([^'"]+)['"]/,
+      );
+      return match?.[1]?.trim() || trimmed;
+    }
+    return trimmed;
+  }
+
+  return (
+    question.message?.trim() ||
+    question.question?.trim() ||
+    question.text?.trim() ||
+    question.content?.trim() ||
+    ""
+  );
+}
+
 export default function ValidationPanel({
   blockedReason,
   result,
@@ -41,6 +62,8 @@ export default function ValidationPanel({
     );
   }
 
+  const questions = result.questions.map(getQuestionText).filter(Boolean);
+
   return (
     <div className="rounded-[16px] border border-[rgba(9,30,66,0.1)] bg-white p-5">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
@@ -64,14 +87,14 @@ export default function ValidationPanel({
         </p>
       )}
 
-      {result.questions.length > 0 ? (
+      {questions.length > 0 ? (
         <div className="mt-4">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
             Открытые вопросы
           </p>
           <ul className="mt-2 space-y-2 text-sm text-[#44546f]">
-            {result.questions.map((question) => (
-              <li key={question}>{question}</li>
+            {questions.map((question, index) => (
+              <li key={`${question}-${index}`}>{question}</li>
             ))}
           </ul>
         </div>
@@ -79,16 +102,13 @@ export default function ValidationPanel({
 
       {requiresRevalidation ? (
         <div className="mt-4 rounded-[12px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] px-3 py-2 text-sm leading-6 text-[#0c66e4]">
-          После апрува в задачу внесены изменения. Перед повторной
-          проверкой должна быть опубликована версия с пересчитанными
-          эмбеддингами.
+          После апрува в задачу внесены изменения. Перед повторной проверкой
+          должна быть опубликована версия с пересчитанными эмбеддингами.
         </div>
       ) : null}
 
       {blockedReason ? (
-        <p className="mt-3 text-sm leading-6 text-[#626f86]">
-          {blockedReason}
-        </p>
+        <p className="mt-3 text-sm leading-6 text-[#626f86]">{blockedReason}</p>
       ) : null}
 
       {canValidate && onValidate ? (

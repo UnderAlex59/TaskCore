@@ -216,16 +216,6 @@ export default function TaskCreatePage() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_320px] xl:items-start">
         <section className="overflow-hidden rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white shadow-[0_1px_2px_rgba(9,30,66,0.06),0_12px_32px_rgba(9,30,66,0.05)]">
-          <div className="border-b border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5e6c84]">
-              Документ задачи
-            </p>
-            <p className="mt-2 text-sm leading-6 text-[#44546f]">
-              Оформите постановку как единый документ. После создания откроются
-              проверка, вложения, история изменений и рабочий чат.
-            </p>
-          </div>
-
           <div className="space-y-6 px-6 py-6 sm:px-8 sm:py-8">
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
