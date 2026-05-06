@@ -13,6 +13,7 @@ from app.agents.system_prompts import (
     QA_ANSWER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
 )
+from app.services.graph_run_tracing import run_traced_graph, traced_condition, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 
 QA_AGENT_KEY = "qa"
@@ -587,18 +588,26 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
 @lru_cache
 def get_qa_agent_graph():
     graph = StateGraph(QAAgentGraphState)
-    graph.add_node("prepare_qa_request", _prepare_qa_request)
-    graph.add_node("collect_qa_context", _collect_qa_context)
-    graph.add_node("invoke_qa_answer", _invoke_qa_answer)
-    graph.add_node("prepare_qa_verification", _prepare_qa_verification)
-    graph.add_node("invoke_qa_verifier", _invoke_qa_verifier)
-    graph.add_node("finalize_qa_response", _finalize_qa_response)
+    graph.add_node("prepare_qa_request", traced_node("prepare_qa_request", _prepare_qa_request))
+    graph.add_node("collect_qa_context", traced_node("collect_qa_context", _collect_qa_context))
+    graph.add_node("invoke_qa_answer", traced_node("invoke_qa_answer", _invoke_qa_answer))
+    graph.add_node("prepare_qa_verification", traced_node("prepare_qa_verification", _prepare_qa_verification))
+    graph.add_node("invoke_qa_verifier", traced_node("invoke_qa_verifier", _invoke_qa_verifier))
+    graph.add_node("finalize_qa_response", traced_node("finalize_qa_response", _finalize_qa_response))
     graph.add_edge(START, "prepare_qa_request")
     graph.add_edge("prepare_qa_request", "collect_qa_context")
     graph.add_edge("collect_qa_context", "invoke_qa_answer")
     graph.add_conditional_edges(
         "invoke_qa_answer",
-        _route_after_qa_answer,
+        traced_condition(
+            "route_after_qa_answer",
+            "invoke_qa_answer",
+            {
+                "prepare_qa_verification": "prepare_qa_verification",
+                "finalize_qa_response": "finalize_qa_response",
+            },
+            _route_after_qa_answer,
+        ),
         {
             "prepare_qa_verification": "prepare_qa_verification",
             "finalize_qa_response": "finalize_qa_response",
@@ -624,7 +633,11 @@ async def run_qa_agent_graph(
     related_tasks: list[dict[str, object]],
     routing_mode: str,
 ) -> ChatState:
-    state = await get_qa_agent_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="qa_agent_graph",
+        graph=get_qa_agent_graph(),
+        source="chat_subgraph",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

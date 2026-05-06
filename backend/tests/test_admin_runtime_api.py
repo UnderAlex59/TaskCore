@@ -460,14 +460,16 @@ async def test_admin_can_update_llm_monitoring_mode(client: AsyncClient) -> None
     get_response = await client.get("/admin/llm/runtime/settings", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["prompt_log_mode"] == "full"
+    assert get_response.json()["graph_monitoring_enabled"] is True
 
     patch_response = await client.patch(
         "/admin/llm/runtime/settings",
         headers=headers,
-        json={"prompt_log_mode": "disabled"},
+        json={"graph_monitoring_enabled": False, "prompt_log_mode": "disabled"},
     )
     assert patch_response.status_code == 200
     assert patch_response.json()["prompt_log_mode"] == "disabled"
+    assert patch_response.json()["graph_monitoring_enabled"] is False
 
 
 @pytest.mark.asyncio

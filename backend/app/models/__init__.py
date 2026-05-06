@@ -1,6 +1,8 @@
 from app.models.audit_event import AuditEvent
 from app.models.change_proposal import ChangeProposal
 from app.models.custom_rule import CustomRule
+from app.models.graph_run_event import GraphRunEvent
+from app.models.graph_run_log import GraphRunLog
 from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_agent_prompt_config import LLMAgentPromptConfig
 from app.models.llm_agent_prompt_version import LLMAgentPromptVersion
@@ -20,6 +22,8 @@ __all__ = [
     "AuditEvent",
     "ChangeProposal",
     "CustomRule",
+    "GraphRunEvent",
+    "GraphRunLog",
     "LLMAgentOverride",
     "LLMAgentPromptConfig",
     "LLMAgentPromptVersion",

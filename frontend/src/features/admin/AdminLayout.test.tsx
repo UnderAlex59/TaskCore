@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import AdminLayout from "@/features/admin/AdminLayout";
 
 describe("AdminLayout", () => {
-  it("renders the Qdrant navigation item and nested route content", () => {
+  it("renders the graph and Qdrant navigation items with nested route content", () => {
     render(
       <MemoryRouter initialEntries={["/admin/qdrant"]}>
         <Routes>
@@ -16,6 +16,10 @@ describe("AdminLayout", () => {
       </MemoryRouter>,
     );
 
+    expect(screen.getByRole("link", { name: "Графы" })).toHaveAttribute(
+      "href",
+      "/admin/graph-runs",
+    );
     expect(screen.getByRole("link", { name: "Qdrant и RAG" })).toHaveAttribute(
       "href",
       "/admin/qdrant",

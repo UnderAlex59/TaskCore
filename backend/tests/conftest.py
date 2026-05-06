@@ -30,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TRUNCATE_TARGETS = [
     "audit_events",
     "llm_request_logs",
+    "graph_run_events",
+    "graph_run_logs",
     "llm_agent_prompt_versions",
     "llm_agent_prompt_configs",
     "llm_agent_overrides",

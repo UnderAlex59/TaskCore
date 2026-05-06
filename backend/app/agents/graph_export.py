@@ -10,11 +10,13 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from app.agents.attachment_vision_graph import get_attachment_vision_graph
 from app.agents.chat_graph import get_chat_graph
 from app.agents.provider_test_graph import get_provider_test_graph
 from app.agents.rag_pipeline import get_rag_pipeline_graph
 from app.agents.rag_retrieval_graph import get_rag_retrieval_graph
 from app.agents.subgraph_registry import get_exportable_agent_subgraphs
+from app.agents.task_tag_suggestion_graph import get_task_tag_suggestion_graph
 from app.agents.validation_graph import get_validation_graph
 from app.agents.vision_test_graph import get_vision_test_graph
 
@@ -33,6 +35,8 @@ def _static_graph_export_specs() -> tuple[GraphExportSpec, ...]:
         GraphExportSpec(name="validation_graph", factory=get_validation_graph),
         GraphExportSpec(name="rag_pipeline", factory=get_rag_pipeline_graph),
         GraphExportSpec(name="rag_retrieval_graph", factory=get_rag_retrieval_graph),
+        GraphExportSpec(name="task_tag_suggestion_graph", factory=get_task_tag_suggestion_graph),
+        GraphExportSpec(name="attachment_vision_graph", factory=get_attachment_vision_graph),
         GraphExportSpec(name="provider_test_graph", factory=get_provider_test_graph),
         GraphExportSpec(name="vision_test_graph", factory=get_vision_test_graph),
     )

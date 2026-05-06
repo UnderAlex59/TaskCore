@@ -26,6 +26,12 @@ class LLMRequestLog(Base):
         ForeignKey("llm_provider_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    graph_run_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("graph_run_logs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    graph_node_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     provider_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)

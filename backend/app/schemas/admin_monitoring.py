@@ -4,13 +4,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.admin_llm import PromptLogMode
 
 
 MonitoringRange = Literal["24h", "7d", "30d", "90d"]
 LLMRequestStatus = Literal["success", "error"]
+GraphRunStatus = Literal["running", "success", "error"]
 
 
 class MonitoringAllTimeTotals(BaseModel):
@@ -111,6 +112,8 @@ class LLMRequestLogRead(BaseModel):
     task_id: str | None
     project_id: str | None
     agent_key: str | None
+    graph_run_id: str | None
+    graph_node_name: str | None
     provider_kind: str
     model: str
     status: LLMRequestStatus
@@ -149,3 +152,121 @@ class AuditPageRead(BaseModel):
     page_size: int
     total: int
     items: list[AuditEventRead]
+
+
+class GraphRunSummaryRead(BaseModel):
+    range: MonitoringRange
+    window_start: datetime
+    runs_total: int
+    success_total: int
+    error_total: int
+    running_total: int
+    error_rate: float
+    avg_latency_ms: float | None
+    slowest_graphs: list[dict[str, int | float | str | None]]
+    recent_failures: list[dict[str, str | int | None]]
+
+
+class GraphRunListItemRead(BaseModel):
+    id: str
+    graph_key: str
+    status: GraphRunStatus
+    actor_name: str
+    actor_user_id: str | None
+    project_id: str | None
+    task_id: str | None
+    source: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    latency_ms: int | None
+    error_message: str | None
+    events_count: int
+    llm_requests_count: int
+
+
+class GraphRunPageRead(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    items: list[GraphRunListItemRead]
+
+
+class GraphRunEventRead(BaseModel):
+    id: str
+    sequence: int
+    event_type: str
+    node_name: str | None
+    namespace: str | None
+    status: GraphRunStatus
+    started_at: datetime
+    finished_at: datetime | None
+    latency_ms: int | None
+    payload: dict[str, Any] | None
+    error_message: str | None
+
+
+class GraphRunNodeRead(BaseModel):
+    id: str
+    sequence: int
+    graph_key: str | None
+    node_name: str
+    namespace: str | None
+    status: GraphRunStatus
+    latency_ms: int | None
+    input_preview: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    result_preview: dict[str, Any] | list[Any] | str | int | float | bool | None
+    error_message: str | None
+    llm_request_ids: list[str] = Field(default_factory=list)
+    children: list["GraphRunNodeRead"] = Field(default_factory=list)
+
+
+class GraphRunTransitionRead(BaseModel):
+    id: str
+    sequence: int
+    graph_key: str | None
+    namespace: str | None
+    source_node: str | None
+    condition: str | None
+    reason: str | None = None
+    condition_input_preview: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    selected: list[str]
+    target_nodes: list[str]
+
+
+class GraphRunGraphNodeRead(BaseModel):
+    mermaid_id: str
+    node_event_id: str | None = None
+    node_name: str
+    graph_key: str
+    executed: bool
+
+
+class GraphRunGraphViewRead(BaseModel):
+    graph_key: str
+    mermaid: str
+    nodes: list[GraphRunGraphNodeRead] = Field(default_factory=list)
+    executed_node_ids: list[str]
+    executed_edge_ids: list[str] = Field(default_factory=list)
+    selected_edge_ids: list[str]
+
+
+class GraphRunDetailRead(BaseModel):
+    id: str
+    graph_key: str
+    status: GraphRunStatus
+    actor_name: str
+    actor_user_id: str | None
+    project_id: str | None
+    task_id: str | None
+    source: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    latency_ms: int | None
+    error_message: str | None
+    input_preview: dict[str, Any] | None
+    final_state_preview: dict[str, Any] | None
+    events: list[GraphRunEventRead]
+    node_tree: list[GraphRunNodeRead]
+    transitions: list[GraphRunTransitionRead]
+    graph_views: list[GraphRunGraphViewRead]
+    llm_requests: list[LLMRequestLogRead]

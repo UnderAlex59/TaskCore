@@ -28,6 +28,10 @@ from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_request_log import LLMRequestLog
 from app.models.llm_runtime_settings import LLMRuntimeSettings
+from app.services.graph_run_tracing import (
+    get_current_graph_node_name,
+    get_current_graph_run_id,
+)
 
 DEFAULT_BASE_URLS: dict[str, str] = {
     "openai": "https://api.openai.com/v1",
@@ -174,6 +178,7 @@ class LLMRuntimeService:
                     id=1,
                     default_provider_config_id=None,
                     prompt_log_mode=PROMPT_LOG_MODE_FULL,
+                    graph_monitoring_enabled=True,
                 )
             )
 
@@ -474,6 +479,8 @@ class LLMRuntimeService:
                 project_id=project_id,
                 agent_key=agent_key,
                 provider_config_id=config.id,
+                graph_run_id=get_current_graph_run_id(),
+                graph_node_name=get_current_graph_node_name(),
                 provider_kind=config.provider_kind,
                 model=config.model,
                 status=status,

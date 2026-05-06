@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
 from app.agents.system_prompts import CHANGE_TRACKER_SYSTEM_PROMPT
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -173,10 +174,10 @@ def _finalize_change_request(state: ChangeTrackerGraphState) -> ChangeTrackerGra
 @lru_cache
 def get_change_tracker_agent_graph():
     graph = StateGraph(ChangeTrackerGraphState)
-    graph.add_node("prepare_change_request", _prepare_change_request)
-    graph.add_node("invoke_change_tracker_llm", _invoke_change_tracker_llm)
-    graph.add_node("detect_duplicate_proposal", _detect_duplicate_proposal)
-    graph.add_node("finalize_change_request", _finalize_change_request)
+    graph.add_node("prepare_change_request", traced_node("prepare_change_request", _prepare_change_request))
+    graph.add_node("invoke_change_tracker_llm", traced_node("invoke_change_tracker_llm", _invoke_change_tracker_llm))
+    graph.add_node("detect_duplicate_proposal", traced_node("detect_duplicate_proposal", _detect_duplicate_proposal))
+    graph.add_node("finalize_change_request", traced_node("finalize_change_request", _finalize_change_request))
     graph.add_edge(START, "prepare_change_request")
     graph.add_edge("prepare_change_request", "invoke_change_tracker_llm")
     graph.add_edge("invoke_change_tracker_llm", "detect_duplicate_proposal")
@@ -197,7 +198,11 @@ async def run_change_tracker_agent_graph(
     message_content: str,
     routing_mode: str,
 ) -> ChatState:
-    state = await get_change_tracker_agent_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="change_tracker_agent_graph",
+        graph=get_change_tracker_agent_graph(),
+        source="chat_subgraph",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

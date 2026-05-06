@@ -26,6 +26,10 @@ from app.schemas.admin_llm import (
 )
 from app.schemas.admin_monitoring import (
     AuditPageRead,
+    GraphRunDetailRead,
+    GraphRunPageRead,
+    GraphRunStatus,
+    GraphRunSummaryRead,
     LLMRequestLogPageRead,
     LLMRequestStatus,
     MonitoringActivityRead,
@@ -308,6 +312,48 @@ async def monitoring_llm_requests(
         page=page,
         page_size=size,
     )
+
+
+@router.get("/monitoring/graphs/summary", response_model=GraphRunSummaryRead)
+async def monitoring_graph_summary(
+    _: AdminUser,
+    db: DBSession,
+    range_value: MonitoringRange = Query(default="7d", alias="range"),
+) -> GraphRunSummaryRead:
+    return await MonitoringService.get_graph_run_summary(db, range_value=range_value)
+
+
+@router.get("/monitoring/graphs/runs", response_model=GraphRunPageRead)
+async def monitoring_graph_runs(
+    _: AdminUser,
+    db: DBSession,
+    range_value: MonitoringRange = Query(default="7d", alias="range"),
+    run_status: GraphRunStatus | None = Query(default=None, alias="status"),
+    graph_key: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=50),
+) -> GraphRunPageRead:
+    return await MonitoringService.get_graph_run_page(
+        db,
+        range_value=range_value,
+        run_status=run_status,
+        graph_key=graph_key,
+        project_id=project_id,
+        task_id=task_id,
+        page=page,
+        page_size=size,
+    )
+
+
+@router.get("/monitoring/graphs/runs/{run_id}", response_model=GraphRunDetailRead)
+async def monitoring_graph_run_detail(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> GraphRunDetailRead:
+    return await MonitoringService.get_graph_run_detail(db, run_id=run_id)
 
 
 @router.get("/audit", response_model=AuditPageRead)

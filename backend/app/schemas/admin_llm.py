@@ -95,10 +95,12 @@ class RuntimeDefaultProviderUpdate(BaseModel):
 
 class RuntimeSettingsRead(BaseModel):
     prompt_log_mode: PromptLogMode
+    graph_monitoring_enabled: bool = True
 
 
 class RuntimeSettingsUpdate(BaseModel):
-    prompt_log_mode: PromptLogMode
+    prompt_log_mode: PromptLogMode | None = None
+    graph_monitoring_enabled: bool | None = None
 
 
 class AgentOverrideUpdate(BaseModel):
@@ -118,6 +120,7 @@ class AgentOverrideRead(BaseModel):
 class RuntimeOverviewRead(BaseModel):
     default_provider_config_id: str | None
     prompt_log_mode: PromptLogMode
+    graph_monitoring_enabled: bool = True
     providers: list[ProviderConfigRead]
     overrides: list[AgentOverrideRead]
 

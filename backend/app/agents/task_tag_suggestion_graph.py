@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.task import TaskTagSuggestionItem, TaskTagSuggestionResponse
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 
 TASK_TAG_SUGGESTER_AGENT_KEY = "task_tag_suggester"
@@ -119,9 +120,9 @@ def _parse_suggestions(state: TaskTagSuggestionState) -> TaskTagSuggestionState:
 @lru_cache
 def get_task_tag_suggestion_graph():
     graph = StateGraph(TaskTagSuggestionState)
-    graph.add_node("build_prompts", _build_prompts)
-    graph.add_node("invoke_llm", _invoke_llm)
-    graph.add_node("parse_suggestions", _parse_suggestions)
+    graph.add_node("build_prompts", traced_node("build_prompts", _build_prompts))
+    graph.add_node("invoke_llm", traced_node("invoke_llm", _invoke_llm))
+    graph.add_node("parse_suggestions", traced_node("parse_suggestions", _parse_suggestions))
     graph.add_edge(START, "build_prompts")
     graph.add_edge("build_prompts", "invoke_llm")
     graph.add_edge("invoke_llm", "parse_suggestions")
@@ -140,7 +141,11 @@ async def run_task_tag_suggestion_graph(
     current_tags: list[str],
     available_tags: list[str],
 ) -> TaskTagSuggestionResponse:
-    state = await get_task_tag_suggestion_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="task_tag_suggestion_graph",
+        graph=get_task_tag_suggestion_graph(),
+        source="task_tag_suggestion",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

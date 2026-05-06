@@ -6,6 +6,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import VisionAltTextState
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 
 VISION_AGENT_KEY = "rag-vision"
@@ -57,7 +58,7 @@ async def _invoke_vision_alt_text(
 @lru_cache
 def get_attachment_vision_graph():
     graph = StateGraph(AttachmentVisionGraphState)
-    graph.add_node("invoke_vision_alt_text", _invoke_vision_alt_text)
+    graph.add_node("invoke_vision_alt_text", traced_node("invoke_vision_alt_text", _invoke_vision_alt_text))
     graph.add_edge(START, "invoke_vision_alt_text")
     graph.add_edge("invoke_vision_alt_text", END)
     return graph.compile()
@@ -73,7 +74,11 @@ async def run_attachment_vision_graph(
     content_type: str,
     prompt: str = VISION_ALT_TEXT_PROMPT,
 ) -> VisionAltTextState:
-    state = await get_attachment_vision_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="attachment_vision_graph",
+        graph=get_attachment_vision_graph(),
+        source="attachment_vision",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

@@ -12,6 +12,7 @@ from app.agents.subgraph_registry import (
     run_agent_subgraph,
     select_agent_subgraph,
 )
+from app.services.graph_run_tracing import run_traced_graph, traced_condition, traced_node
 
 MANAGER_AGENT_KEY = "manager"
 
@@ -246,17 +247,25 @@ def _finalize_chat_response(state: ChatGraphState) -> ChatGraphState:
 @lru_cache
 def get_chat_graph():
     graph = StateGraph(ChatGraphState)
-    graph.add_node("prepare_chat_request", _prepare_chat_request)
-    graph.add_node("orchestrate_chat_request", _orchestrate_chat_request)
-    graph.add_node("collect_related_tasks", _collect_related_tasks)
-    graph.add_node("invoke_agent_subgraph", _invoke_agent_subgraph)
-    graph.add_node("persist_chat_artifacts", _persist_chat_artifacts)
-    graph.add_node("finalize_chat_response", _finalize_chat_response)
+    graph.add_node("prepare_chat_request", traced_node("prepare_chat_request", _prepare_chat_request))
+    graph.add_node("orchestrate_chat_request", traced_node("orchestrate_chat_request", _orchestrate_chat_request))
+    graph.add_node("collect_related_tasks", traced_node("collect_related_tasks", _collect_related_tasks))
+    graph.add_node("invoke_agent_subgraph", traced_node("invoke_agent_subgraph", _invoke_agent_subgraph))
+    graph.add_node("persist_chat_artifacts", traced_node("persist_chat_artifacts", _persist_chat_artifacts))
+    graph.add_node("finalize_chat_response", traced_node("finalize_chat_response", _finalize_chat_response))
     graph.add_edge(START, "prepare_chat_request")
     graph.add_edge("prepare_chat_request", "orchestrate_chat_request")
     graph.add_conditional_edges(
         "orchestrate_chat_request",
-        _route_chat_request,
+        traced_condition(
+            "route_chat_request",
+            "orchestrate_chat_request",
+            {
+                "collect_related_tasks": "collect_related_tasks",
+                "__end__": END,
+            },
+            _route_chat_request,
+        ),
         {
             "collect_related_tasks": "collect_related_tasks",
             "__end__": END,
@@ -286,7 +295,11 @@ async def run_chat_graph(
     raw_message_content: str | None = None,
     source_message_id: str | None = None,
 ) -> ChatState:
-    state = await get_chat_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="chat_graph",
+        graph=get_chat_graph(),
+        source="chat",
+        input_state=
         {
             "db": db,
             "task_id": task_id,

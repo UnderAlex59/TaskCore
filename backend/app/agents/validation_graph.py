@@ -18,6 +18,7 @@ from app.agents.system_prompts import (
     VALIDATION_CUSTOM_RULES_SYSTEM_PROMPT,
 )
 from app.core.validation_settings import normalize_validation_node_settings
+from app.services.graph_run_tracing import run_traced_graph, traced_condition, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -556,19 +557,29 @@ def _finalize_validation_result(state: ValidationGraphState) -> ValidationGraphS
 @lru_cache
 def get_validation_graph():
     graph = StateGraph(ValidationGraphState)
-    graph.add_node("normalize_validation_input", _normalize_validation_input)
-    graph.add_node("prepare_core_rules_request", _prepare_core_rules_request)
-    graph.add_node("evaluate_core_rules", _evaluate_core_rules)
-    graph.add_node("prepare_custom_rules_request", _prepare_custom_rules_request)
-    graph.add_node("evaluate_custom_rules", _evaluate_custom_rules)
-    graph.add_node("search_project_questions", _search_project_questions)
-    graph.add_node("prepare_context_questions_request", _prepare_context_questions_request)
-    graph.add_node("inspect_context", _inspect_context)
-    graph.add_node("finalize_validation_result", _finalize_validation_result)
+    graph.add_node("normalize_validation_input", traced_node("normalize_validation_input", _normalize_validation_input))
+    graph.add_node("prepare_core_rules_request", traced_node("prepare_core_rules_request", _prepare_core_rules_request))
+    graph.add_node("evaluate_core_rules", traced_node("evaluate_core_rules", _evaluate_core_rules))
+    graph.add_node("prepare_custom_rules_request", traced_node("prepare_custom_rules_request", _prepare_custom_rules_request))
+    graph.add_node("evaluate_custom_rules", traced_node("evaluate_custom_rules", _evaluate_custom_rules))
+    graph.add_node("search_project_questions", traced_node("search_project_questions", _search_project_questions))
+    graph.add_node("prepare_context_questions_request", traced_node("prepare_context_questions_request", _prepare_context_questions_request))
+    graph.add_node("inspect_context", traced_node("inspect_context", _inspect_context))
+    graph.add_node("finalize_validation_result", traced_node("finalize_validation_result", _finalize_validation_result))
     graph.add_edge(START, "normalize_validation_input")
     graph.add_conditional_edges(
         "normalize_validation_input",
-        _route_after_normalization,
+        traced_condition(
+            "route_after_normalization",
+            "normalize_validation_input",
+            {
+                "prepare_core_rules_request": "prepare_core_rules_request",
+                "prepare_custom_rules_request": "prepare_custom_rules_request",
+                "search_project_questions": "search_project_questions",
+                "finalize_validation_result": "finalize_validation_result",
+            },
+            _route_after_normalization,
+        ),
         {
             "prepare_core_rules_request": "prepare_core_rules_request",
             "prepare_custom_rules_request": "prepare_custom_rules_request",
@@ -579,7 +590,16 @@ def get_validation_graph():
     graph.add_edge("prepare_core_rules_request", "evaluate_core_rules")
     graph.add_conditional_edges(
         "evaluate_core_rules",
-        _route_after_core_rules,
+        traced_condition(
+            "route_after_core_rules",
+            "evaluate_core_rules",
+            {
+                "prepare_custom_rules_request": "prepare_custom_rules_request",
+                "search_project_questions": "search_project_questions",
+                "finalize_validation_result": "finalize_validation_result",
+            },
+            _route_after_core_rules,
+        ),
         {
             "prepare_custom_rules_request": "prepare_custom_rules_request",
             "search_project_questions": "search_project_questions",
@@ -589,7 +609,15 @@ def get_validation_graph():
     graph.add_edge("prepare_custom_rules_request", "evaluate_custom_rules")
     graph.add_conditional_edges(
         "evaluate_custom_rules",
-        _route_after_custom_rules,
+        traced_condition(
+            "route_after_custom_rules",
+            "evaluate_custom_rules",
+            {
+                "search_project_questions": "search_project_questions",
+                "finalize_validation_result": "finalize_validation_result",
+            },
+            _route_after_custom_rules,
+        ),
         {
             "search_project_questions": "search_project_questions",
             "finalize_validation_result": "finalize_validation_result",
@@ -616,7 +644,11 @@ async def run_validation_graph(
     attachment_names: list[str],
     validation_node_settings: dict[str, bool] | None = None,
 ) -> ValidationState:
-    state = await get_validation_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="validation_graph",
+        graph=get_validation_graph(),
+        source="task_validation",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

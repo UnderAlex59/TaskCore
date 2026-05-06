@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "/tmp/uploads"
     LANGGRAPH_IMAGES_DIR: str = str(PROJECT_ROOT / "langgraph_graphs")
+    GRAPH_RUN_MONITORING_ENABLED: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -5,6 +5,7 @@ from functools import lru_cache
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ChatState
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 
 MANAGER_AGENT_KEY = "manager"
 MANAGER_AGENT_NAME = "ManagerAgent"
@@ -79,7 +80,7 @@ def _build_manager_response(state: ManagerGraphState) -> ManagerGraphState:
 @lru_cache
 def get_manager_agent_graph():
     graph = StateGraph(ManagerGraphState)
-    graph.add_node("build_manager_response", _build_manager_response)
+    graph.add_node("build_manager_response", traced_node("build_manager_response", _build_manager_response))
     graph.add_edge(START, "build_manager_response")
     graph.add_edge("build_manager_response", END)
     return graph.compile()
@@ -90,7 +91,11 @@ async def run_manager_agent_graph(
     requested_agent: str | None,
     routing_mode: str,
 ) -> ChatState:
-    state = await get_manager_agent_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="manager_agent_graph",
+        graph=get_manager_agent_graph(),
+        source="chat_subgraph",
+        input_state=
         {
             "requested_agent": requested_agent,
             "routing_mode": routing_mode,

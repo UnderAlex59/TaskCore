@@ -11,6 +11,7 @@ export type ProviderKind =
 export type MonitoringRange = "24h" | "7d" | "30d" | "90d";
 export type PromptLogMode = "disabled" | "metadata_only" | "full";
 export type LLMRequestStatus = "success" | "error";
+export type GraphRunStatus = "running" | "success" | "error";
 export type VisionSystemPromptMode = "system_role" | "inline_user";
 export type VisionMessageOrder = "text_first" | "image_first";
 export type VisionDetail = "default" | "auto" | "low" | "high";
@@ -193,6 +194,7 @@ export interface MonitoringLLMRead {
 
 export interface LLMRuntimeSettingsRead {
   prompt_log_mode: PromptLogMode;
+  graph_monitoring_enabled: boolean;
 }
 
 export interface LLMRequestLogPageRead {
@@ -208,6 +210,8 @@ export interface LLMRequestLogPageRead {
     task_id: string | null;
     project_id: string | null;
     agent_key: string | null;
+    graph_run_id: string | null;
+    graph_node_name: string | null;
     provider_kind: string;
     model: string;
     status: LLMRequestStatus;
@@ -220,6 +224,126 @@ export interface LLMRequestLogPageRead {
     response_text: string | null;
     error_message: string | null;
   }>;
+}
+
+export interface GraphRunSummaryRead {
+  range: MonitoringRange;
+  window_start: string;
+  runs_total: number;
+  success_total: number;
+  error_total: number;
+  running_total: number;
+  error_rate: number;
+  avg_latency_ms: number | null;
+  slowest_graphs: Array<{
+    graph_key: string;
+    runs_total: number;
+    avg_latency_ms: number | null;
+    max_latency_ms: number | null;
+  }>;
+  recent_failures: Array<{
+    id: string;
+    graph_key: string;
+    task_id: string | null;
+    project_id: string | null;
+    latency_ms: number | null;
+    error_message: string | null;
+    started_at: string;
+  }>;
+}
+
+export interface GraphRunListItemRead {
+  id: string;
+  graph_key: string;
+  status: GraphRunStatus;
+  actor_name: string;
+  actor_user_id: string | null;
+  project_id: string | null;
+  task_id: string | null;
+  source: string | null;
+  started_at: string;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  events_count: number;
+  llm_requests_count: number;
+}
+
+export interface GraphRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: GraphRunListItemRead[];
+}
+
+export interface GraphRunEventRead {
+  id: string;
+  sequence: number;
+  event_type: string;
+  node_name: string | null;
+  namespace: string | null;
+  status: GraphRunStatus;
+  started_at: string;
+  finished_at: string | null;
+  latency_ms: number | null;
+  payload: Record<string, unknown> | null;
+  error_message: string | null;
+}
+
+export interface GraphRunNodeRead {
+  id: string;
+  sequence: number;
+  graph_key: string | null;
+  node_name: string;
+  namespace: string | null;
+  status: GraphRunStatus;
+  latency_ms: number | null;
+  input_preview: unknown;
+  result_preview: unknown;
+  error_message: string | null;
+  llm_request_ids: string[];
+  children: GraphRunNodeRead[];
+}
+
+export interface GraphRunTransitionRead {
+  id: string;
+  sequence: number;
+  graph_key: string | null;
+  namespace: string | null;
+  source_node: string | null;
+  condition: string | null;
+  reason: string | null;
+  condition_input_preview: unknown;
+  selected: string[];
+  target_nodes: string[];
+}
+
+export interface GraphRunGraphNodeRead {
+  mermaid_id: string;
+  node_event_id: string | null;
+  node_name: string;
+  graph_key: string;
+  executed: boolean;
+}
+
+export interface GraphRunGraphViewRead {
+  graph_key: string;
+  mermaid: string;
+  nodes: GraphRunGraphNodeRead[];
+  executed_node_ids: string[];
+  executed_edge_ids: string[];
+  selected_edge_ids: string[];
+}
+
+export interface GraphRunDetailRead
+  extends Omit<GraphRunListItemRead, "events_count" | "llm_requests_count"> {
+  input_preview: Record<string, unknown> | null;
+  final_state_preview: Record<string, unknown> | null;
+  events: GraphRunEventRead[];
+  node_tree: GraphRunNodeRead[];
+  transitions: GraphRunTransitionRead[];
+  graph_views: GraphRunGraphViewRead[];
+  llm_requests: LLMRequestLogPageRead["items"];
 }
 
 export interface AuditPageRead {
@@ -456,11 +580,18 @@ export const adminApi = {
   getLlmRuntimeSettings: async () =>
     (await apiClient.get<LLMRuntimeSettingsRead>("/admin/llm/runtime/settings"))
       .data,
-  updateLlmRuntimeSettings: async (promptLogMode: PromptLogMode) =>
+  updateLlmRuntimeSettings: async (
+    settings:
+      | PromptLogMode
+      | {
+          graph_monitoring_enabled?: boolean;
+          prompt_log_mode?: PromptLogMode;
+        },
+  ) =>
     (
       await apiClient.patch<LLMRuntimeSettingsRead>(
         "/admin/llm/runtime/settings",
-        { prompt_log_mode: promptLogMode },
+        typeof settings === "string" ? { prompt_log_mode: settings } : settings,
       )
     ).data,
   listOverrides: async () =>
@@ -537,6 +668,33 @@ export const adminApi = {
         {
           params: { range, page, status },
         },
+      )
+    ).data,
+  getGraphRunSummary: async (range: MonitoringRange) =>
+    (
+      await apiClient.get<GraphRunSummaryRead>(
+        "/admin/monitoring/graphs/summary",
+        { params: { range } },
+      )
+    ).data,
+  getGraphRuns: async (params: {
+    graph_key?: string;
+    page?: number;
+    project_id?: string;
+    range: MonitoringRange;
+    status?: GraphRunStatus;
+    task_id?: string;
+  }) =>
+    (
+      await apiClient.get<GraphRunPageRead>(
+        "/admin/monitoring/graphs/runs",
+        { params },
+      )
+    ).data,
+  getGraphRunDetail: async (runId: string) =>
+    (
+      await apiClient.get<GraphRunDetailRead>(
+        `/admin/monitoring/graphs/runs/${runId}`,
       )
     ).data,
   getAudit: async (range: MonitoringRange, page = 1) =>

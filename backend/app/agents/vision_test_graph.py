@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.attachment_vision_graph import VISION_AGENT_KEY
 from app.agents.state import VisionTestState
 from app.models.llm_provider_config import LLMProviderConfig
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 
 DEFAULT_VISION_TEST_PROMPT = (
@@ -65,7 +66,7 @@ async def _invoke_vision_test(state: VisionTestGraphState) -> VisionTestGraphSta
 @lru_cache
 def get_vision_test_graph():
     graph = StateGraph(VisionTestGraphState)
-    graph.add_node("invoke_vision_test", _invoke_vision_test)
+    graph.add_node("invoke_vision_test", traced_node("invoke_vision_test", _invoke_vision_test))
     graph.add_edge(START, "invoke_vision_test")
     graph.add_edge("invoke_vision_test", END)
     return graph.compile()
@@ -79,7 +80,11 @@ async def run_vision_test_graph(
     content_type: str,
     prompt: str = DEFAULT_VISION_TEST_PROMPT,
 ) -> VisionTestState:
-    state = await get_vision_test_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="vision_test_graph",
+        graph=get_vision_test_graph(),
+        source="admin_vision_test",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,

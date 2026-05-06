@@ -269,6 +269,7 @@ class AdminLLMService:
                 id=1,
                 default_provider_config_id=provider.id,
                 prompt_log_mode="full",
+                graph_monitoring_enabled=True,
                 updated_by=actor.id,
             )
             db.add(runtime)
@@ -292,11 +293,15 @@ class AdminLLMService:
     async def get_runtime_settings(db: AsyncSession) -> RuntimeSettingsRead:
         await LLMRuntimeService.ensure_bootstrap()
         runtime = await db.get(LLMRuntimeSettings, 1)
+        graph_monitoring_enabled = bool(
+            runtime.graph_monitoring_enabled if runtime is not None else True
+        ) and get_settings().GRAPH_RUN_MONITORING_ENABLED
         return RuntimeSettingsRead(
             prompt_log_mode=cast(
                 PromptLogMode,
                 runtime.prompt_log_mode if runtime is not None else "full",
             ),
+            graph_monitoring_enabled=graph_monitoring_enabled,
         )
 
     @staticmethod
@@ -310,13 +315,27 @@ class AdminLLMService:
         if runtime is None:
             runtime = LLMRuntimeSettings(
                 id=1,
-                prompt_log_mode=payload.prompt_log_mode,
+                prompt_log_mode=payload.prompt_log_mode or "full",
+                graph_monitoring_enabled=(
+                    payload.graph_monitoring_enabled
+                    if payload.graph_monitoring_enabled is not None
+                    else True
+                ),
                 updated_by=actor.id,
             )
             db.add(runtime)
         else:
-            runtime.prompt_log_mode = payload.prompt_log_mode
+            if payload.prompt_log_mode is not None:
+                runtime.prompt_log_mode = payload.prompt_log_mode
+            if payload.graph_monitoring_enabled is not None:
+                runtime.graph_monitoring_enabled = payload.graph_monitoring_enabled
             runtime.updated_by = actor.id
+
+        prompt_log_mode = cast(PromptLogMode, runtime.prompt_log_mode)
+        graph_monitoring_enabled = bool(runtime.graph_monitoring_enabled)
+        effective_graph_monitoring_enabled = (
+            graph_monitoring_enabled and get_settings().GRAPH_RUN_MONITORING_ENABLED
+        )
 
         AuditService.record(
             db,
@@ -324,10 +343,16 @@ class AdminLLMService:
             event_type="admin.llm_monitoring.updated",
             entity_type="llm_runtime_settings",
             entity_id="1",
-            metadata={"prompt_log_mode": payload.prompt_log_mode},
+            metadata={
+                "prompt_log_mode": prompt_log_mode,
+                "graph_monitoring_enabled": graph_monitoring_enabled,
+            },
         )
         await db.commit()
-        return RuntimeSettingsRead(prompt_log_mode=payload.prompt_log_mode)
+        return RuntimeSettingsRead(
+            prompt_log_mode=prompt_log_mode,
+            graph_monitoring_enabled=effective_graph_monitoring_enabled,
+        )
 
     @staticmethod
     async def list_agent_overrides(db: AsyncSession) -> list[AgentOverrideRead]:

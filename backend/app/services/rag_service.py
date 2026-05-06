@@ -60,7 +60,10 @@ class RagService:
                 allow_vision=allow_vision,
             )
         rag_index = await run_rag_pipeline(
+            db=db,
+            actor_user_id=actor_user_id,
             task_id=task.id,
+            project_id=task.project_id,
             title=task.title,
             content=task.content,
             tags=task.tags,

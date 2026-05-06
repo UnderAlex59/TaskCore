@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import RagIndexState
 from app.core.config import get_settings
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 
 
 class RagPipelineState(RagIndexState, total=False):
@@ -436,10 +437,10 @@ def _finalize_rag_index(state: RagPipelineState) -> RagPipelineState:
 @lru_cache
 def get_rag_pipeline_graph():
     graph = StateGraph(RagPipelineState)
-    graph.add_node("collect_task_sources", _collect_task_sources)
-    graph.add_node("collect_attachment_sources", _collect_attachment_sources)
-    graph.add_node("collect_validation_sources", _collect_validation_sources)
-    graph.add_node("finalize_rag_index", _finalize_rag_index)
+    graph.add_node("collect_task_sources", traced_node("collect_task_sources", _collect_task_sources))
+    graph.add_node("collect_attachment_sources", traced_node("collect_attachment_sources", _collect_attachment_sources))
+    graph.add_node("collect_validation_sources", traced_node("collect_validation_sources", _collect_validation_sources))
+    graph.add_node("finalize_rag_index", traced_node("finalize_rag_index", _finalize_rag_index))
     graph.add_edge(START, "collect_task_sources")
     graph.add_edge("collect_task_sources", "collect_attachment_sources")
     graph.add_edge("collect_attachment_sources", "collect_validation_sources")
@@ -450,16 +451,26 @@ def get_rag_pipeline_graph():
 
 async def run_rag_pipeline(
     *,
+    db: Any | None = None,
+    actor_user_id: str | None = None,
     task_id: str,
+    project_id: str | None = None,
     title: str,
     content: str,
     tags: list[str],
     attachments: list[dict[str, Any]],
     validation_result: dict | None,
 ) -> RagIndexState:
-    state = await get_rag_pipeline_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="rag_pipeline",
+        graph=get_rag_pipeline_graph(),
+        source="rag_index",
+        input_state=
         {
+            "db": db,
+            "actor_user_id": actor_user_id,
             "task_id": task_id,
+            "project_id": project_id,
             "title": title,
             "content": content,
             "tags": tags,

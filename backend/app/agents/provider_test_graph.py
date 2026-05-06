@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.state import ProviderTestState
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 
 
 class ProviderTestGraphState(ProviderTestState, total=False):
@@ -88,9 +89,9 @@ def _finalize_provider_test(state: ProviderTestGraphState) -> ProviderTestGraphS
 @lru_cache
 def get_provider_test_graph():
     graph = StateGraph(ProviderTestGraphState)
-    graph.add_node("load_provider", _load_provider)
-    graph.add_node("invoke_provider_test", _invoke_provider_test)
-    graph.add_node("finalize_provider_test", _finalize_provider_test)
+    graph.add_node("load_provider", traced_node("load_provider", _load_provider))
+    graph.add_node("invoke_provider_test", traced_node("invoke_provider_test", _invoke_provider_test))
+    graph.add_node("finalize_provider_test", traced_node("finalize_provider_test", _finalize_provider_test))
     graph.add_edge(START, "load_provider")
     graph.add_edge("load_provider", "invoke_provider_test")
     graph.add_edge("invoke_provider_test", "finalize_provider_test")
@@ -104,7 +105,11 @@ async def run_provider_test_graph(
     provider_id: str,
     actor_user_id: str | None,
 ) -> ProviderTestState:
-    state = await get_provider_test_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="provider_test_graph",
+        graph=get_provider_test_graph(),
+        source="admin_provider_test",
+        input_state=
         {
             "db": db,
             "provider_id": provider_id,

@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.state import ChatState
 from app.agents.system_prompts import QA_QUERY_REWRITER_SYSTEM_PROMPT
 from app.core.config import get_settings
+from app.services.graph_run_tracing import run_traced_graph, traced_node
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -509,12 +510,12 @@ def _finalize_retrieval(state: RagRetrievalState) -> RagRetrievalState:
 @lru_cache
 def get_rag_retrieval_graph():
     graph = StateGraph(RagRetrievalState)
-    graph.add_node("prepare_rewrite_prompt", _prepare_rewrite_prompt)
-    graph.add_node("invoke_query_rewriter", _invoke_query_rewriter)
-    graph.add_node("normalize_query_variants", _normalize_query_variants)
-    graph.add_node("retrieve_candidates", _retrieve_candidates)
-    graph.add_node("rerank_candidates", _rerank_candidates)
-    graph.add_node("finalize_retrieval", _finalize_retrieval)
+    graph.add_node("prepare_rewrite_prompt", traced_node("prepare_rewrite_prompt", _prepare_rewrite_prompt))
+    graph.add_node("invoke_query_rewriter", traced_node("invoke_query_rewriter", _invoke_query_rewriter))
+    graph.add_node("normalize_query_variants", traced_node("normalize_query_variants", _normalize_query_variants))
+    graph.add_node("retrieve_candidates", traced_node("retrieve_candidates", _retrieve_candidates))
+    graph.add_node("rerank_candidates", traced_node("rerank_candidates", _rerank_candidates))
+    graph.add_node("finalize_retrieval", traced_node("finalize_retrieval", _finalize_retrieval))
     graph.add_edge(START, "prepare_rewrite_prompt")
     graph.add_edge("prepare_rewrite_prompt", "invoke_query_rewriter")
     graph.add_edge("invoke_query_rewriter", "normalize_query_variants")
@@ -538,7 +539,11 @@ async def run_rag_retrieval_graph(
     question: str,
     retrieval_limit: int,
 ) -> RagRetrievalState:
-    state = await get_rag_retrieval_graph().ainvoke(
+    state = await run_traced_graph(
+        graph_key="rag_retrieval_graph",
+        graph=get_rag_retrieval_graph(),
+        source="qa_rag_retrieval",
+        input_state=
         {
             "db": db,
             "actor_user_id": actor_user_id,
