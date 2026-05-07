@@ -184,7 +184,10 @@ async def test_resolve_provider_requires_admin_configured_default(
     with pytest.raises(RuntimeError) as exc_info:
         await LLMRuntimeService.resolve_provider(FakeDB(), agent_key=None)  # type: ignore[arg-type]
 
-    assert "LLM" in str(exc_info.value)
+    assert str(exc_info.value) == (
+        "Не настроен LLM-провайдер. Добавьте профиль и выберите профиль "
+        "по умолчанию в админ-панели."
+    )
 
 
 @pytest.mark.asyncio

@@ -78,7 +78,9 @@ class LLMRuntimeService:
         if base_url:
             return base_url.rstrip("/")
         if normalized == "openai_compatible":
-            raise ValueError("Р”Р»СЏ РїСЂРѕРІР°Р№РґРµСЂР° openai_compatible РЅРµРѕР±С…РѕРґРёРјРѕ СѓРєР°Р·Р°С‚СЊ base_url")
+            raise ValueError(
+                "Для провайдера openai_compatible необходимо указать base_url"
+            )
         return DEFAULT_BASE_URLS.get(normalized, DEFAULT_BASE_URLS["openai"])
 
     @staticmethod
@@ -226,7 +228,8 @@ class LLMRuntimeService:
 
         if selected is None:
             raise RuntimeError(
-                "РќРµ РЅР°СЃС‚СЂРѕРµРЅ LLM-РїСЂРѕРІР°Р№РґРµСЂ. Р”РѕР±Р°РІСЊС‚Рµ РїСЂРѕС„РёР»СЊ Рё РІС‹Р±РµСЂРёС‚Рµ РїСЂРѕС„РёР»СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РІ Р°РґРјРёРЅ-РїР°РЅРµР»Рё."
+                "Не настроен LLM-провайдер. Добавьте профиль и выберите профиль "
+                "по умолчанию в админ-панели."
             )
 
         profile = await cls._build_profile(selected)
@@ -242,7 +245,7 @@ class LLMRuntimeService:
             secret = cls.decrypt_secret(config.encrypted_secret)
             if provider_kind == "gigachat":
                 if not secret:
-                    raise ValueError("Р”Р»СЏ GigaChat РЅРµ РЅР°СЃС‚СЂРѕРµРЅ РєР»СЋС‡ Р°РІС‚РѕСЂРёР·Р°С†РёРё")
+                    raise ValueError("Для GigaChat не настроен ключ авторизации")
                 ssl_verify = cls._get_gigachat_ssl_verify()
                 api_key = await cls._get_gigachat_access_token(
                     config.id,

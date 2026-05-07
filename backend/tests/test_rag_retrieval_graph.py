@@ -83,6 +83,8 @@ async def test_rag_retrieval_graph_uses_llm_query_variants_and_hybrid_rerank(
     )
 
     assert result["query_rewriter_ok"] is True
+    assert result["query_rewriter_provider_kind"] == "openai"
+    assert result["query_rewriter_model"] == "gpt-4o-mini"
     assert result["retrieval_queries"] == ["Какой SLA?", "SLA вход email", "пароль SLA"]
     assert result["retrieval_keywords"] == ["SLA", "email"]
     assert result["rag_chunk_ids"] == ["strong", "weak"]
@@ -125,5 +127,7 @@ async def test_rag_retrieval_graph_falls_back_to_original_question_on_bad_rewrit
     )
 
     assert result["query_rewriter_ok"] is False
+    assert result["query_rewriter_provider_kind"] == "openai"
+    assert result["query_rewriter_model"] == "gpt-4o-mini"
     assert result["retrieval_queries"] == ["Что во вложении?"]
     assert seen_queries == ["Что во вложении?"]

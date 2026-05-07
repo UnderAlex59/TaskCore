@@ -1,8 +1,8 @@
 import {
-  useDeferredValue,
   useEffect,
   useEffectEvent,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -18,6 +18,7 @@ import { usersApi, type UserSummary } from "@/api/usersApi";
 import TaskCard from "@/features/tasks/TaskCard";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
+import { useDebounce } from "@/shared/hooks/useDebounce";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { getRoleLabel, getTaskStatusLabel } from "@/shared/lib/locale";
 import { useAuthStore } from "@/store/authStore";
@@ -45,12 +46,14 @@ export default function TaskList() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const latestLoadId = useRef(0);
 
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [tasks, setTasks] = useState<TaskRead[]>([]);
   const [members, setMembers] = useState<ProjectMemberRead[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [savingMember, setSavingMember] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -67,17 +70,27 @@ export default function TaskList() {
   const [taskPendingDeletion, setTaskPendingDeletion] =
     useState<TaskRead | null>(null);
 
-  const deferredSearch = useDeferredValue(search);
+  const debouncedSearch = useDebounce(search.trim(), 400);
 
   async function loadData() {
     if (!projectId) {
+      latestLoadId.current += 1;
       setError("Не найден идентификатор проекта.");
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
+    const loadId = latestLoadId.current + 1;
+    latestLoadId.current = loadId;
+    const isInitialLoad = project?.id !== projectId;
+
     try {
-      setLoading(true);
+      if (isInitialLoad) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
       setError(null);
       const shouldLoadUsers = ["ADMIN", "ANALYST", "MANAGER"].includes(
         user?.role ?? "",
@@ -86,23 +99,32 @@ export default function TaskList() {
         await Promise.all([
           projectsApi.get(projectId),
           tasksApi.list(projectId, {
-            search: deferredSearch || undefined,
+            search: debouncedSearch || undefined,
             status: statusFilter || undefined,
             size: 100,
           }),
           projectsApi.listMembers(projectId),
           shouldLoadUsers ? usersApi.list() : Promise.resolve([]),
         ]);
+      if (latestLoadId.current !== loadId) {
+        return;
+      }
       setProject(loadedProject);
       setTasks(loadedTasks);
       setMembers(loadedMembers);
       setUsers(loadedUsers);
     } catch (caught) {
+      if (latestLoadId.current !== loadId) {
+        return;
+      }
       setError(
         getApiErrorMessage(caught, "Не удалось загрузить задачи проекта."),
       );
     } finally {
-      setLoading(false);
+      if (latestLoadId.current === loadId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -110,7 +132,7 @@ export default function TaskList() {
 
   useEffect(() => {
     void onLoadData();
-  }, [projectId, deferredSearch, statusFilter, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, debouncedSearch, statusFilter, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentMembership = members.find(
     (member) => member.user_id === user?.id,
@@ -235,7 +257,7 @@ export default function TaskList() {
   }
 
   return (
-    <section className="space-y-6">
+    <section aria-busy={refreshing} className="space-y-6">
       <header className="page-panel px-5 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 max-w-3xl">
