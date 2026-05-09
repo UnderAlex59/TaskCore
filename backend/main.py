@@ -16,10 +16,12 @@ from app.core.database import is_database_ready
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
+from app.routers.notifications import router as notifications_router
 from app.routers.projects import router as projects_router
 from app.routers.proposals import router as proposals_router
-from app.routers.tasks import router as tasks_router
 from app.routers.task_tags import router as task_tags_router
+from app.routers.tasks import router as tasks_router
+from app.routers.telegram import router as telegram_router
 from app.routers.users import router as users_router
 from app.routers.validation import router as validation_router
 from app.services.qdrant_service import QdrantService
@@ -35,7 +37,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         export_agent_graph_images(Path(settings.LANGGRAPH_IMAGES_DIR))
     except Exception:
-        logger.exception("Failed to export LangGraph PNG files into %s", settings.LANGGRAPH_IMAGES_DIR)
+        logger.exception(
+            "Failed to export LangGraph PNG files into %s",
+            settings.LANGGRAPH_IMAGES_DIR,
+        )
     yield
 
 
@@ -60,10 +65,16 @@ def create_app() -> FastAPI:
     app.include_router(task_tags_router)
     app.include_router(validation_router)
     app.include_router(chat_router)
+    app.include_router(notifications_router)
+    app.include_router(telegram_router)
     app.include_router(proposals_router)
     uploads_app = StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False)
     app.mount("/uploads", uploads_app, name="uploads")
-    app.mount("/api/uploads", StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False), name="api-uploads")
+    app.mount(
+        "/api/uploads",
+        StaticFiles(directory=settings.UPLOAD_DIR, check_dir=False),
+        name="api-uploads",
+    )
     app.mount(
         "/api/langgraph-images",
         StaticFiles(directory=settings.LANGGRAPH_IMAGES_DIR, check_dir=False, html=True),

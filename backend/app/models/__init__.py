@@ -10,6 +10,13 @@ from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_request_log import LLMRequestLog
 from app.models.llm_runtime_settings import LLMRuntimeSettings
 from app.models.message import Message
+from app.models.notification import (
+    ChatReadState,
+    Notification,
+    NotificationDelivery,
+    TelegramConnection,
+    TelegramLinkToken,
+)
 from app.models.project import Project, ProjectMember
 from app.models.project_task_tag import ProjectTaskTag
 from app.models.refresh_token import RefreshToken
@@ -31,6 +38,9 @@ __all__ = [
     "LLMRequestLog",
     "LLMRuntimeSettings",
     "Message",
+    "ChatReadState",
+    "Notification",
+    "NotificationDelivery",
     "Project",
     "ProjectMember",
     "ProjectTaskTag",
@@ -38,6 +48,8 @@ __all__ = [
     "Task",
     "TaskAttachment",
     "TaskTag",
+    "TelegramConnection",
+    "TelegramLinkToken",
     "User",
     "ValidationQuestion",
 ]

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "/tmp/uploads"
     LANGGRAPH_IMAGES_DIR: str = str(PROJECT_ROOT / "langgraph_graphs")
     GRAPH_RUN_MONITORING_ENABLED: bool = True
+    TELEGRAM_BOT_TOKEN: str | None = None
+    TELEGRAM_WEBHOOK_SECRET: str | None = None
+    TELEGRAM_BOT_USERNAME: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -73,6 +76,9 @@ class Settings(BaseSettings):
         "EMBEDDING_MODEL",
         "OLLAMA_EMBEDDING_MODEL",
         "LLM_SETTINGS_ENCRYPTION_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_WEBHOOK_SECRET",
+        "TELEGRAM_BOT_USERNAME",
         mode="before",
     )
     @classmethod
@@ -90,6 +96,7 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
 
 @lru_cache
 def get_settings() -> Settings:

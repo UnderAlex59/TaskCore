@@ -61,6 +61,7 @@ export default function TaskList() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("");
+  const [myTasksOnly, setMyTasksOnly] = useState(true);
   const [memberUserId, setMemberUserId] = useState("");
   const [memberRole, setMemberRole] = useState<UserRole>("DEVELOPER");
   const [memberPendingRemoval, setMemberPendingRemoval] =
@@ -99,6 +100,7 @@ export default function TaskList() {
         await Promise.all([
           projectsApi.get(projectId),
           tasksApi.list(projectId, {
+            participant_id: myTasksOnly ? user?.id : undefined,
             search: debouncedSearch || undefined,
             status: statusFilter || undefined,
             size: 100,
@@ -132,7 +134,7 @@ export default function TaskList() {
 
   useEffect(() => {
     void onLoadData();
-  }, [projectId, debouncedSearch, statusFilter, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, debouncedSearch, myTasksOnly, statusFilter, user?.id, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentMembership = members.find(
     (member) => member.user_id === user?.id,
@@ -159,7 +161,9 @@ export default function TaskList() {
     }),
     [tasks],
   );
-  const hasActiveFilters = search.trim().length > 0 || statusFilter !== "";
+  const hasSearchOrStatusFilter =
+    search.trim().length > 0 || statusFilter !== "";
+  const hasActiveFilters = hasSearchOrStatusFilter || myTasksOnly;
 
   async function handleAddMember(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -291,7 +295,7 @@ export default function TaskList() {
               </button>
             ) : null}
 
-            <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_220px_160px]">
               <label className="block">
                 <span className="sr-only">Поиск задач</span>
                 <input
@@ -321,6 +325,16 @@ export default function TaskList() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex min-h-[46px] items-center gap-3 rounded-[10px] border border-[rgba(9,30,66,0.14)] bg-white px-4 py-3 text-sm font-semibold text-[#172b4d]">
+                <input
+                  checked={myTasksOnly}
+                  className="h-4 w-4 rounded border-[rgba(9,30,66,0.24)] text-[#0c66e4] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"
+                  name="task-my-filter"
+                  onChange={(event) => setMyTasksOnly(event.target.checked)}
+                  type="checkbox"
+                />
+                Мои задачи
               </label>
             </div>
           </div>
@@ -372,7 +386,9 @@ export default function TaskList() {
               </p>
               <p className="mt-2 text-sm leading-7 text-[#626f86]">
                 {hasActiveFilters
-                  ? "Измените поисковый запрос или статус, чтобы расширить выдачу."
+                  ? myTasksOnly && !hasSearchOrStatusFilter
+                    ? "Отключите фильтр «Мои задачи», чтобы увидеть остальные задачи проекта."
+                    : "Измените поисковый запрос, статус или фильтр «Мои задачи», чтобы расширить выдачу."
                   : "Создайте первую постановку, чтобы команда могла пройти проверку и взять задачу в работу."}
               </p>
             </div>

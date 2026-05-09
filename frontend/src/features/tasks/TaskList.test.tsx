@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -117,6 +117,13 @@ describe("TaskList", () => {
 
     expect(await screen.findByText("Синхронизация статусов")).toBeInTheDocument();
     expect(tasksApiMock.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("checkbox", { name: "Мои задачи" })).toBeChecked();
+    expect(tasksApiMock.list).toHaveBeenLastCalledWith("project-1", {
+      participant_id: "user-1",
+      search: undefined,
+      status: undefined,
+      size: 100,
+    });
 
     vi.useFakeTimers();
     fireEvent.change(screen.getByRole("searchbox", { name: "Поиск задач" }), {
@@ -140,7 +147,29 @@ describe("TaskList", () => {
 
     expect(tasksApiMock.list).toHaveBeenCalledTimes(2);
     expect(tasksApiMock.list).toHaveBeenLastCalledWith("project-1", {
+      participant_id: "user-1",
       search: "статус",
+      status: undefined,
+      size: 100,
+    });
+  });
+
+  it("can disable the default my tasks filter", async () => {
+    renderTaskList();
+
+    const myTasksFilter = await screen.findByRole("checkbox", {
+      name: "Мои задачи",
+    });
+
+    await act(async () => {
+      fireEvent.click(myTasksFilter);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(tasksApiMock.list).toHaveBeenCalledTimes(2));
+    expect(tasksApiMock.list).toHaveBeenLastCalledWith("project-1", {
+      participant_id: undefined,
+      search: undefined,
       status: undefined,
       size: 100,
     });

@@ -12,6 +12,7 @@ import {
   type ChatRealtimeEvent,
   type MessageRead,
 } from "@/api/chatApi";
+import { notificationsApi } from "@/api/notificationsApi";
 import { projectsApi, type ProjectMemberRead } from "@/api/projectsApi";
 import { proposalsApi, type ProposalRead } from "@/api/proposalsApi";
 import { taskTagsApi, type TaskTagOption } from "@/api/taskTagsApi";
@@ -133,6 +134,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [taskTags, setTaskTags] = useState<TaskTagOption[]>([]);
   const [members, setMembers] = useState<ProjectMemberRead[]>([]);
   const [messages, setMessages] = useState<MessageRead[]>([]);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [proposals, setProposals] = useState<ProposalRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +148,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [agentPendingMessageId, setAgentPendingMessageId] = useState<
     string | null
   >(null);
+  const [requestedAnalystMessageIds, setRequestedAnalystMessageIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [taskPendingDeletion, setTaskPendingDeletion] = useState(false);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(
     null,
@@ -235,8 +240,11 @@ export default function TaskWorkspacePage({ mode }: Props) {
 
       if (canUserAccessChat(loadedTask, user?.id, user?.role)) {
         setMessages(await chatApi.list(taskId, { limit: 100 }));
+        const unread = await notificationsApi.getTaskUnread(taskId);
+        setChatUnreadCount(unread.unread_count);
       } else {
         setMessages([]);
+        setChatUnreadCount(0);
       }
     } catch (caught) {
       setError(getApiErrorMessage(caught, "Не удалось загрузить задачу."));
@@ -261,8 +269,11 @@ export default function TaskWorkspacePage({ mode }: Props) {
 
     if (canUserAccessChat(loadedTask, user?.id, user?.role)) {
       setMessages(await chatApi.list(taskId, { limit: 100 }));
+      const unread = await notificationsApi.getTaskUnread(taskId);
+      setChatUnreadCount(unread.unread_count);
     } else {
       setMessages([]);
+      setChatUnreadCount(0);
     }
   }
 
@@ -498,6 +509,26 @@ export default function TaskWorkspacePage({ mode }: Props) {
     }
   }
 
+  async function handleRequestAnalyst(message: MessageRead) {
+    if (!taskId) {
+      return;
+    }
+
+    try {
+      setRequestedAnalystMessageIds((current) =>
+        new Set(current).add(message.id),
+      );
+      await notificationsApi.requestAnalyst(taskId, message.id);
+    } catch (caught) {
+      setRequestedAnalystMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
+      setError(getApiErrorMessage(caught, "Не удалось уведомить аналитика."));
+    }
+  }
+
   async function handleProposalReview(
     proposalId: string,
     status: "accepted" | "rejected",
@@ -549,6 +580,14 @@ export default function TaskWorkspacePage({ mode }: Props) {
     ) {
       await refreshTaskSnapshot();
     }
+
+    if (activeTab === "chat") {
+      const unread = await notificationsApi.markTaskChatRead(taskId);
+      setChatUnreadCount(unread.unread_count);
+    } else {
+      const unread = await notificationsApi.getTaskUnread(taskId);
+      setChatUnreadCount(unread.unread_count);
+    }
   });
 
   useEffect(() => {
@@ -598,6 +637,20 @@ export default function TaskWorkspacePage({ mode }: Props) {
       socket?.close();
     };
   }, [accessToken, canConnectToChat, onRealtimeMessages, taskId]);
+
+  const markCurrentChatRead = useEffectEvent(async () => {
+    if (!taskId || !canConnectToChat) {
+      return;
+    }
+    const unread = await notificationsApi.markTaskChatRead(taskId);
+    setChatUnreadCount(unread.unread_count);
+  });
+
+  useEffect(() => {
+    if (activeTab === "chat") {
+      void markCurrentChatRead();
+    }
+  }, [activeTab, markCurrentChatRead, taskId]);
 
   if (loading) {
     return <LoadingSpinner label="Загрузка задачи" />;
@@ -749,7 +802,9 @@ export default function TaskWorkspacePage({ mode }: Props) {
       disabled={!canAccessChat}
       inputPlaceholder="Напишите вопрос по задаче, решение или команду для агента..."
       messages={messages}
+      onRequestAnalyst={handleRequestAnalyst}
       onSend={handleSendMessage}
+      requestedAnalystMessageIds={requestedAnalystMessageIds}
       sending={sendingMessage}
       title="Чат задачи"
     />
@@ -776,9 +831,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
       >
         <div
           className={
-            activeTab === "chat"
-              ? "flex flex-col gap-2"
-              : "flex flex-col gap-5"
+            activeTab === "chat" ? "flex flex-col gap-2" : "flex flex-col gap-5"
           }
         >
           <div
@@ -879,7 +932,12 @@ export default function TaskWorkspacePage({ mode }: Props) {
                 onClick={() => setActiveTab(tab.key)}
                 type="button"
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                {tab.key === "chat" && chatUnreadCount > 0 ? (
+                  <span className="ml-2 rounded-full bg-[#0c66e4] px-2 py-0.5 text-xs font-semibold text-white">
+                    {chatUnreadCount > 99 ? "99+" : chatUnreadCount}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>

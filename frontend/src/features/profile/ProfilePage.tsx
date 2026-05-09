@@ -1,5 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import {
+  notificationsApi,
+  type NotificationSettingsRead,
+} from "@/api/notificationsApi";
 import { usersApi } from "@/api/usersApi";
 import { Avatar } from "@/shared/components/Avatar";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
@@ -15,8 +19,28 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [removingAvatar, setRemovingAvatar] = useState(false);
+  const [notificationSettings, setNotificationSettings] =
+    useState<NotificationSettingsRead | null>(null);
+  const [telegramDeepLink, setTelegramDeepLink] = useState<string | null>(null);
+  const [telegramTokenExpiresAt, setTelegramTokenExpiresAt] = useState<
+    string | null
+  >(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void notificationsApi.getSettings().then((settings) => {
+      if (active) {
+        setNotificationSettings(settings);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!user) {
     return null;
@@ -80,6 +104,73 @@ export default function ProfilePage() {
       setError(getApiErrorMessage(caught, "Не удалось удалить аватар."));
     } finally {
       setRemovingAvatar(false);
+    }
+  }
+
+  async function handleCreateTelegramToken() {
+    try {
+      setTelegramBusy(true);
+      setError(null);
+      setSuccess(null);
+      const token = await notificationsApi.createTelegramLinkToken();
+      setTelegramDeepLink(token.deep_link);
+      setTelegramTokenExpiresAt(token.expires_at);
+      if (token.deep_link) {
+        setSuccess("Ссылка для привязки Telegram создана.");
+      } else {
+        setError(
+          "TELEGRAM_BOT_USERNAME не настроен на backend. Обратитесь к администратору.",
+        );
+      }
+    } catch (caught) {
+      setError(
+        getApiErrorMessage(caught, "Не удалось создать ссылку для Telegram."),
+      );
+    } finally {
+      setTelegramBusy(false);
+    }
+  }
+
+  async function handleToggleTelegramSetting(
+    key: "telegram_important_enabled" | "telegram_normal_enabled",
+    enabled: boolean,
+  ) {
+    try {
+      setTelegramBusy(true);
+      setError(null);
+      const payload =
+        key === "telegram_important_enabled"
+          ? { telegram_important_enabled: enabled }
+          : { telegram_normal_enabled: enabled };
+      const settings = await notificationsApi.updateSettings({
+        ...payload,
+      });
+      setNotificationSettings(settings);
+    } catch (caught) {
+      setError(
+        getApiErrorMessage(
+          caught,
+          "Не удалось обновить настройки уведомлений.",
+        ),
+      );
+    } finally {
+      setTelegramBusy(false);
+    }
+  }
+
+  async function handleUnlinkTelegram() {
+    try {
+      setTelegramBusy(true);
+      setError(null);
+      await notificationsApi.unlinkTelegram();
+      setTelegramDeepLink(null);
+      setTelegramTokenExpiresAt(null);
+      setNotificationSettings(await notificationsApi.getSettings());
+      setSuccess("Telegram отключен.");
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось отключить Telegram."));
+    } finally {
+      setTelegramBusy(false);
     }
   }
 
@@ -199,6 +290,114 @@ export default function ProfilePage() {
             {saving ? "Сохраняем..." : "Сохранить профиль"}
           </button>
         </form>
+
+        <section className="space-y-5 rounded-[18px] border border-[rgba(9,30,66,0.12)] bg-white p-6 xl:col-start-2">
+          <div>
+            <p className="section-eyebrow">Telegram</p>
+            <h3 className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              Уведомления в Telegram
+            </h3>
+            <p className="mt-2 text-sm leading-7 text-[#44546f]">
+              В Telegram отправляются системные уведомления по задачам, чату и
+              запросам участия аналитика.
+            </p>
+          </div>
+
+          <div className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3 text-sm leading-7 text-[#44546f]">
+            {notificationSettings?.telegram_linked ? (
+              <p>
+                Telegram подключен
+                {notificationSettings.telegram_username
+                  ? `: @${notificationSettings.telegram_username}`
+                  : "."}
+              </p>
+            ) : (
+              <p>Telegram пока не подключен.</p>
+            )}
+          </div>
+
+          <label className="flex items-start gap-3 text-sm leading-6 text-[#44546f]">
+            <input
+              checked={
+                notificationSettings?.telegram_important_enabled ?? true
+              }
+              className="mt-1 h-4 w-4"
+              disabled={telegramBusy}
+              onChange={(event) =>
+                void handleToggleTelegramSetting(
+                  "telegram_important_enabled",
+                  event.target.checked,
+                )
+              }
+              type="checkbox"
+            />
+            <span>Отправлять важные уведомления в Telegram</span>
+          </label>
+
+          <label className="flex items-start gap-3 text-sm leading-6 text-[#44546f]">
+            <input
+              checked={notificationSettings?.telegram_normal_enabled ?? true}
+              className="mt-1 h-4 w-4"
+              disabled={telegramBusy}
+              onChange={(event) =>
+                void handleToggleTelegramSetting(
+                  "telegram_normal_enabled",
+                  event.target.checked,
+                )
+              }
+              type="checkbox"
+            />
+            <span>Отправлять обычные уведомления в Telegram</span>
+          </label>
+
+          {telegramDeepLink ? (
+            <div className="rounded-[14px] border border-[rgba(12,102,228,0.16)] bg-[#e9f2ff] px-4 py-3">
+              <p className="text-sm font-semibold text-[#172b4d]">
+                Ссылка привязки
+              </p>
+              <a
+                className="text-anywhere mt-2 block font-mono text-sm font-semibold text-[#0c66e4] underline"
+                href={telegramDeepLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {telegramDeepLink}
+              </a>
+              <p className="mt-2 text-sm leading-6 text-[#44546f]">
+                Откройте ссылку и запустите бота. Ссылка действует до{" "}
+                {telegramTokenExpiresAt
+                  ? new Date(telegramTokenExpiresAt).toLocaleTimeString(
+                      "ru-RU",
+                      {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                    )
+                  : "истечения срока"}
+                .
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              className="ui-button-primary"
+              disabled={telegramBusy}
+              onClick={() => void handleCreateTelegramToken()}
+              type="button"
+            >
+              {telegramBusy ? "Готовим..." : "Получить ссылку"}
+            </button>
+            <button
+              className="ui-button-secondary"
+              disabled={telegramBusy || !notificationSettings?.telegram_linked}
+              onClick={() => void handleUnlinkTelegram()}
+              type="button"
+            >
+              Отключить Telegram
+            </button>
+          </div>
+        </section>
       </div>
     </section>
   );

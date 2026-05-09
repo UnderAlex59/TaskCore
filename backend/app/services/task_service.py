@@ -224,6 +224,11 @@ class TaskService:
                 )
             ],
         )
+        from app.services.notification_service import NotificationService
+
+        task = await db.get(Task, task_id)
+        if task is not None:
+            await NotificationService.notify_chat_unread_for_message(task, message, db)
 
     @staticmethod
     def _can_configure_review(task: Task, current_user: User) -> bool:
@@ -297,6 +302,7 @@ class TaskService:
         analyst_id: str | None = None,
         developer_id: str | None = None,
         tester_id: str | None = None,
+        participant_id: str | None = None,
         search: str | None = None,
         page: int = 1,
         size: int = 20,
@@ -314,6 +320,15 @@ class TaskService:
             stmt = stmt.where(Task.developer_id == developer_id)
         if tester_id:
             stmt = stmt.where(Task.tester_id == tester_id)
+        if participant_id:
+            stmt = stmt.where(
+                or_(
+                    Task.analyst_id == participant_id,
+                    Task.reviewer_analyst_id == participant_id,
+                    Task.developer_id == participant_id,
+                    Task.tester_id == participant_id,
+                )
+            )
         if search:
             pattern = f"%{search.strip()}%"
             stmt = stmt.where(or_(Task.title.ilike(pattern), Task.content.ilike(pattern)))
@@ -611,6 +626,17 @@ class TaskService:
         task.updated_at = current_timestamp
         attachments = await TaskService._get_attachments(task.id, db)
         approval_message: Message | None = None
+        assigned_user_ids: set[str] = set()
+        from app.services.notification_service import NotificationService, TaskNotificationSnapshot
+
+        should_index_task_context = False
+        if reviewer_assignment_changed and task.reviewer_analyst_id is not None:
+            assigned_user_ids.add(task.reviewer_analyst_id)
+        if team_assignment_changed:
+            if task.developer_id is not None:
+                assigned_user_ids.add(task.developer_id)
+            if task.tester_id is not None:
+                assigned_user_ids.add(task.tester_id)
 
         if waiting_for_second_review:
             reviewer_name = await TaskService._get_user_name(task.reviewer_analyst_id, db)
@@ -688,6 +714,20 @@ class TaskService:
                     "reviewer_confirmed": reviewer_confirmed or task.reviewer_approved_at is not None,
                 },
             )
+            should_index_task_context = True
+
+        notification_task = TaskNotificationSnapshot(
+            id=task.id,
+            project_id=task.project_id,
+            title=task.title,
+            status=task.status,
+            analyst_id=task.analyst_id,
+            reviewer_analyst_id=task.reviewer_analyst_id,
+            developer_id=task.developer_id,
+            tester_id=task.tester_id,
+            updated_at=current_timestamp,
+        )
+        if should_index_task_context:
             await RagService.index_task_context(
                 db,
                 task,
@@ -696,6 +736,17 @@ class TaskService:
                 validation_result=task.validation_result,
             )
 
+        await NotificationService.notify_task_assigned(
+            notification_task,
+            db,
+            assigned_user_ids=assigned_user_ids,
+        )
+        if notification_task.status == TaskStatus.READY_FOR_DEV:
+            await NotificationService.notify_task_status_changed(
+                notification_task,
+                db,
+                actor_user_id=current_user.id,
+            )
         await db.commit()
         await db.refresh(task)
         if approval_message is not None:
@@ -742,6 +793,9 @@ class TaskService:
             task_id=task.id,
         )
         attachments = await TaskService._get_attachments(task.id, db)
+        from app.services.notification_service import NotificationService
+
+        await NotificationService.notify_task_status_changed(task, db, actor_user_id=current_user.id)
         await db.commit()
         await db.refresh(task)
         await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
@@ -787,6 +841,9 @@ class TaskService:
             task_id=task.id,
         )
         attachments = await TaskService._get_attachments(task.id, db)
+        from app.services.notification_service import NotificationService
+
+        await NotificationService.notify_task_status_changed(task, db, actor_user_id=current_user.id)
         await db.commit()
         await db.refresh(task)
         await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
@@ -832,6 +889,9 @@ class TaskService:
             task_id=task.id,
         )
         attachments = await TaskService._get_attachments(task.id, db)
+        from app.services.notification_service import NotificationService
+
+        await NotificationService.notify_task_status_changed(task, db, actor_user_id=current_user.id)
         await db.commit()
         await db.refresh(task)
         await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)
@@ -877,6 +937,9 @@ class TaskService:
             task_id=task.id,
         )
         attachments = await TaskService._get_attachments(task.id, db)
+        from app.services.notification_service import NotificationService
+
+        await NotificationService.notify_task_status_changed(task, db, actor_user_id=current_user.id)
         await db.commit()
         await db.refresh(task)
         await TaskService._broadcast_latest_agent_message(task.id, "ManagerAgent", db)

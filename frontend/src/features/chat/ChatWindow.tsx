@@ -15,7 +15,9 @@ interface Props {
   eyebrow?: string;
   inputPlaceholder?: string;
   messages: MessageRead[];
+  onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
   onSend?: (value: string) => Promise<void>;
+  requestedAnalystMessageIds?: Set<string>;
   sending?: boolean;
   title?: string;
 }
@@ -31,11 +33,14 @@ export default function ChatWindow({
   eyebrow = "Обсуждение задачи",
   inputPlaceholder,
   messages,
+  onRequestAnalyst,
   onSend,
+  requestedAnalystMessageIds,
   sending = false,
   title = "Обсуждение",
 }: Props) {
-  const showHeader = Boolean(actions || eyebrow || title || description) && !compactInput;
+  const showHeader =
+    Boolean(actions || eyebrow || title || description) && !compactInput;
 
   return (
     <section
@@ -68,6 +73,8 @@ export default function ChatWindow({
           agentPendingMessage={agentPendingMessage}
           currentUserId={currentUserId}
           messages={messages}
+          onRequestAnalyst={onRequestAnalyst}
+          requestedAnalystMessageIds={requestedAnalystMessageIds}
         />
       </div>
 

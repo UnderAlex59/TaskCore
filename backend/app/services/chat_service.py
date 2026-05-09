@@ -118,7 +118,11 @@ class ChatService:
             task_id=task.id,
             metadata={"message_type": message_type.value},
         )
+        from app.services.notification_service import NotificationService
+
+        await NotificationService.notify_mentions_for_message(task, user_message, current_user, db)
         await db.commit()
+        await NotificationService.notify_chat_unread_for_message(task, user_message, db)
 
         return (
             [
@@ -182,6 +186,19 @@ class ChatService:
                 source_ref=source_ref,
             )
             db.add(agent_message)
+            await db.flush()
+            from app.services.notification_service import NotificationService
+
+            source_ref_for_notifications = dict(agent_message.source_ref or {})
+            if (
+                agent_message.agent_name == "QAAgent"
+                and (
+                    source_ref_for_notifications.get("answer_confidence") == "low"
+                    or source_ref_for_notifications.get("validation_backlog_question")
+                    or source_ref_for_notifications.get("validation_backlog_saved") is True
+                )
+            ):
+                await NotificationService.notify_qa_needs_analyst(task, agent_message, db)
             await db.commit()
             await db.refresh(agent_message)
             await chat_connection_manager.broadcast_messages(
@@ -194,3 +211,4 @@ class ChatService:
                     )
                 ],
             )
+            await NotificationService.notify_chat_unread_for_message(task, agent_message, db)

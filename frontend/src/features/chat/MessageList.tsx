@@ -7,6 +7,8 @@ interface Props {
   agentPendingMessage?: MessageRead | null;
   currentUserId?: string;
   messages: MessageRead[];
+  onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
+  requestedAnalystMessageIds?: Set<string>;
 }
 
 function getPendingQuestion(messages: MessageRead[]) {
@@ -80,6 +82,8 @@ export default function MessageList({
   agentPendingMessage = null,
   currentUserId,
   messages,
+  onRequestAnalyst,
+  requestedAnalystMessageIds,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const lastMessageId = messages.at(-1)?.id;
@@ -136,6 +140,8 @@ export default function MessageList({
           currentUserId={currentUserId}
           key={message.id}
           message={message}
+          onRequestAnalyst={onRequestAnalyst}
+          requestAnalystDisabled={requestedAnalystMessageIds?.has(message.id)}
         />
       ))}
       {pendingMessage ? (

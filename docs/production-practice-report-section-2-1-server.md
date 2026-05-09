@@ -71,6 +71,60 @@ flowchart TB
     MS --> PG
 ```
 
+улучшенная схема
+```mermaid
+---
+config:
+  layout: elk
+---
+flowchart TB
+    classDef frontend fill:#eef2ff,stroke:#818cf8
+    classDef api fill:#f0fdfa,stroke:#2dd4bf
+    classDef service fill:#f5f3ff,stroke:#a78bfa
+    classDef data fill:#f0fdf4,stroke:#4ade80
+
+    FE["Frontend SPA<br/>React / Vite"]:::frontend
+    API["FastAPI<br/>REST API и WebSocket"]:::api
+    FE --> API
+
+    subgraph API_LAYER["Уровень API"]
+        direction TB
+        R["Routers<br/>auth, users, projects, tasks, chat, proposals, admin"]:::api
+        D["Dependencies & Security<br/>JWT, роли, доступ"]:::api
+        SC["Pydantic Schemas<br/>валидация входа/ответа"]:::api
+    end
+
+    subgraph SERVICE_LAYER["Сервисный слой"]
+        direction TB
+        AS["AuthService<br/>сессии и токены"]:::service
+        PS["ProjectService<br/>проекты, участники, правила"]:::service
+        TS["TaskService<br/>workflow, вложения"]:::service
+        CS["ChatService / ProposalService<br/>сообщения и изменения"]:::service
+        RS["QdrantService / RagService<br/>RAG-память"]:::service
+        LS["LLMRuntimeService<br/>провайдеры, prompts, logs"]:::service
+        MS["Audit / MonitoringService<br/>аудит и наблюдаемость"]:::service
+    end
+
+    subgraph DATA_AI_LAYER["Данные и AI-контур"]
+        direction TB
+        PG[("PostgreSQL<br/>транзакционные данные")]:::data
+        QD[("Qdrant<br/>task_knowledge, project_questions, proposals")]:::data
+        LG["LangGraph<br/>графы и subgraphs"]:::data
+        LLM["LLM провайдеры<br/>через LLMRuntimeService"]:::data
+        FS["Файловое хранилище<br/>uploads"]:::data
+    end
+
+    %% Потоки данных
+    API --> R --> D --> SC
+    SC --> AS & PS & TS & CS & RS & LS & MS
+    AS & PS & CS & MS --> PG
+    TS --> PG & FS & LG
+    CS --> LG
+    RS --> PG & QD
+    LG --> RS & LS
+    LS --> LLM
+```
+
 Рисунок 2.1 - слоистая структура серверной части магистерской системы.
 
 На уровне запуска приложения backend выполняет несколько системных действий. При старте создается каталог для вложений, проверяются и создаются Qdrant-коллекции, а также экспортируются изображения LangGraph-схем в каталог `LANGGRAPH_IMAGES_DIR`. Эти операции имеют прикладное значение: вложения являются частью требования, Qdrant-коллекции необходимы для RAG-памяти, а экспорт схем позволяет визуально контролировать структуру agentic-сценариев.
@@ -169,6 +223,46 @@ flowchart LR
     PG --> RESP["HTTP response\nPydantic schema"]
     RESP --> FE
     WS --> FE
+```
+
+улучшенная диаграмма
+```mermaid
+%%{init: {"layout": "elk"}}%%
+flowchart TD
+    FE["Frontend\nпользовательское действие"] --> RT["FastAPI router\nприем запроса"]
+    RT --> DEP{"Dependencies\nJWT, роль, проектный доступ"}
+
+    DEP -->|доступ запрещен| ERR["HTTP error\n403 / 401"]
+    DEP -->|доступ разрешен| SVC["Service layer\nприкладная операция"]
+
+    SVC --> PG[("PostgreSQL\nсостояние и история")]
+    SVC --> FS["Uploads\nфайлы вложений"]
+    SVC --> AUD["AuditService\nжурнал действий"]
+
+    SVC -->|если нужен RAG| RAG["RagService / QdrantService\nпоиск и индексация"]
+    RAG --> QD[("Qdrant\ntask_knowledge\nproject_questions\ntask_proposals")]
+
+    SVC -->|если нужен AI-сценарий| LG["LangGraph graph/subgraph\nвалидация, чат, теги"]
+    LG --> RAG
+    LG --> LLMR["LLMRuntimeService\nвыбор провайдера и логирование"]
+    LLMR --> PROVIDER["LLM-провайдер\nOpenAI, Ollama, OpenRouter,\nGigaChat, compatible API"]
+
+    LG --> RESULT["Прикладной результат\nvalidation_result, message,\nproposal, tags"]
+    RESULT --> PG
+    RESULT --> WS["WebSocket update\nдля чата и UI"]
+
+    PG --> RESP["HTTP response\nPydantic schema"]
+    RESP --> FE
+    WS --> FE
+
+    classDef indigo stroke:#818cf8,fill:#eef2ff
+    classDef teal stroke:#2dd4bf,fill:#f0fdfa
+    classDef cyan stroke:#22d3ee,fill:#ecfeff
+    classDef violet stroke:#a78bfa,fill:#f5f3ff
+    class FE,WS,RESP indigo
+    class RT,DEP,SVC teal
+    class PG,FS,AUD,QD cyan
+    class LG,RAG,LLMR,PROVIDER,RESULT violet
 ```
 
 Рисунок 2.2 - обобщенный поток обработки серверного запроса.

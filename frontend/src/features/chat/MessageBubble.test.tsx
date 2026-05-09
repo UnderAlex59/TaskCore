@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import MessageBubble from "@/features/chat/MessageBubble";
 
@@ -57,5 +57,55 @@ describe("MessageBubble", () => {
     expect(
       screen.getByText("Отвечает на вопросы по требованиям."),
     ).toBeInTheDocument();
+  });
+
+  it("shows analyst request action for confident QA answers", () => {
+    const onRequestAnalyst = vi.fn();
+
+    render(
+      <MessageBubble
+        currentUserId="user-1"
+        message={{
+          ...baseMessage,
+          agent_name: "QAAgent",
+          author_id: null,
+          author_name: null,
+          message_type: "agent_answer",
+          source_ref: {
+            agent_key: "qa",
+            answer_confidence: "high",
+          },
+        }}
+        onRequestAnalyst={onRequestAnalyst}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Позвать аналитика" }));
+
+    expect(onRequestAnalyst).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides analyst request action for low confidence QA answers", () => {
+    render(
+      <MessageBubble
+        currentUserId="user-1"
+        message={{
+          ...baseMessage,
+          agent_name: "QAAgent",
+          author_id: null,
+          author_name: null,
+          message_type: "agent_answer",
+          source_ref: {
+            agent_key: "qa",
+            answer_confidence: "low",
+          },
+        }}
+        onRequestAnalyst={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Позвать аналитика" }),
+    ).not.toBeInTheDocument();
   });
 });

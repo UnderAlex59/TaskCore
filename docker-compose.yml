@@ -139,6 +139,27 @@ services:
       retries: 5
       start_period: 15s
 
+  telegram-webhook:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    entrypoint: ["/bin/sh", "-lc"]
+    command: |
+      if [ -z "$${TELEGRAM_BOT_TOKEN:-}" ] || \
+        [ -z "$${TELEGRAM_WEBHOOK_SECRET:-}" ] || \
+        [ -z "$${TELEGRAM_WEBHOOK_URL:-}" ]; then
+        echo "Skipping Telegram webhook registration: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET or TELEGRAM_WEBHOOK_URL is not configured."
+        exit 0
+      fi
+
+      python -m app.scripts.telegram_webhook --no-fail setup \
+        --url "$${TELEGRAM_WEBHOOK_URL}"
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend

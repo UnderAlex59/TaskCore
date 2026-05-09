@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.models.task import Task, TaskStatus
 from app.models.user import User, UserRole
@@ -108,6 +109,39 @@ async def test_commit_task_changes_returns_serialized_task_when_indexing_succeed
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_filters_by_any_participant_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_user = make_user()
+    db = AsyncMock()
+    execute_result = Mock()
+    execute_result.scalars.return_value.all.return_value = []
+    db.execute.return_value = execute_result
+
+    monkeypatch.setattr(ProjectService, "ensure_project_access", AsyncMock())
+
+    await TaskService.list_tasks(
+        "project-1",
+        current_user,
+        db,
+        participant_id="user-2",
+    )
+
+    captured_stmt = db.execute.await_args.args[0]
+    compiled_sql = str(
+        captured_stmt.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "tasks.analyst_id =" in compiled_sql
+    assert "tasks.reviewer_analyst_id =" in compiled_sql
+    assert "tasks.developer_id =" in compiled_sql
+    assert "tasks.tester_id =" in compiled_sql
+
+
+@pytest.mark.asyncio
 async def test_approve_task_keeps_status_awaiting_approval_until_second_reviewer_confirms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -150,6 +184,81 @@ async def test_approve_task_keeps_status_awaiting_approval_until_second_reviewer
     assert task.tester_id == "tester-1"
     assert task.reviewer_analyst_id == "reviewer-1"
     assert task.reviewer_approved_at is None
+    db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once_with(task)
+
+
+@pytest.mark.asyncio
+async def test_approve_task_notifies_from_snapshot_after_rag_indexing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.notification_service import NotificationService, TaskNotificationSnapshot
+
+    task = make_task()
+    task.status = TaskStatus.AWAITING_APPROVAL
+    task.developer_id = None
+    task.tester_id = None
+    current_user = make_user()
+    db = AsyncMock()
+    db.add = Mock()
+    db.execute = AsyncMock(
+        return_value=Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=None))))
+    )
+    serialized_task = object()
+    notified: list[TaskNotificationSnapshot] = []
+
+    monkeypatch.setattr(TaskService, "get_task_with_access", AsyncMock(return_value=task))
+    monkeypatch.setattr(TaskService, "_get_project_member_or_422", AsyncMock())
+    monkeypatch.setattr(TaskService, "_get_attachments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(TaskService, "_get_user_name", AsyncMock(return_value="Team Member"))
+    monkeypatch.setattr(TaskService, "_broadcast_latest_agent_message", AsyncMock())
+    monkeypatch.setattr(TaskService, "_serialize_task", Mock(return_value=serialized_task))
+    monkeypatch.setattr(AuditService, "record", Mock())
+
+    async def fake_index_task_context(*args, **kwargs) -> list[str]:
+        task.title = "expired task title should not be used for notifications"
+        task.updated_at = None
+        return ["chunk-1"]
+
+    async def fake_notify_task_assigned(
+        notification_task: TaskNotificationSnapshot,
+        db_arg,
+        *,
+        assigned_user_ids: set[str],
+    ) -> None:
+        notified.append(notification_task)
+        assert assigned_user_ids == {"developer-1", "tester-1"}
+
+    async def fake_notify_task_status_changed(
+        notification_task: TaskNotificationSnapshot,
+        db_arg,
+        *,
+        actor_user_id: str | None = None,
+    ) -> None:
+        notified.append(notification_task)
+        assert actor_user_id == current_user.id
+
+    monkeypatch.setattr(RagService, "index_task_context", fake_index_task_context)
+    monkeypatch.setattr(NotificationService, "notify_task_assigned", fake_notify_task_assigned)
+    monkeypatch.setattr(
+        NotificationService,
+        "notify_task_status_changed",
+        fake_notify_task_status_changed,
+    )
+
+    result = await TaskService.approve_task(
+        "task-1",
+        TaskApprove(developer_id="developer-1", tester_id="tester-1"),
+        current_user,
+        db,
+    )
+
+    assert result is serialized_task
+    assert len(notified) == 2
+    assert notified[0] is notified[1]
+    assert notified[0].title == "Shared delivery notes"
+    assert notified[0].status == TaskStatus.READY_FOR_DEV
+    assert notified[0].updated_at is not None
     db.commit.assert_awaited_once()
     db.refresh.assert_awaited_once_with(task)
 

@@ -5,13 +5,20 @@ import { formatDateTime, getAgentKeyLabel } from "@/shared/lib/locale";
 interface Props {
   currentUserId?: string;
   message: MessageRead;
+  onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
+  requestAnalystDisabled?: boolean;
 }
 
 function formatTimestamp(value: string) {
   return formatDateTime(value);
 }
 
-export default function MessageBubble({ currentUserId, message }: Props) {
+export default function MessageBubble({
+  currentUserId,
+  message,
+  onRequestAnalyst,
+  requestAnalystDisabled = false,
+}: Props) {
   const isHumanMessage = message.author_id !== null;
   const isAgentMessage = !isHumanMessage;
   const isOwnMessage =
@@ -27,6 +34,12 @@ export default function MessageBubble({ currentUserId, message }: Props) {
       ? message.source_ref.agent_description
       : null;
   const agentLabel = getAgentKeyLabel(agentKey);
+  const canRequestAnalyst =
+    isAgentMessage &&
+    (agentKey === "qa" || message.agent_name === "QAAgent") &&
+    message.message_type === "agent_answer" &&
+    message.source_ref?.answer_confidence !== "low" &&
+    Boolean(onRequestAnalyst);
   const authorLabel = isHumanMessage
     ? (message.author_name ?? "Пользователь")
     : agentLabel;
@@ -91,6 +104,20 @@ export default function MessageBubble({ currentUserId, message }: Props) {
           <p className="text-anywhere mt-3 border-t border-[rgba(12,102,228,0.12)] pt-2 text-xs leading-5 text-[#626f86]">
             {agentDescription}
           </p>
+        ) : null}
+        {canRequestAnalyst ? (
+          <div className="mt-3 border-t border-[rgba(12,102,228,0.12)] pt-3">
+            <button
+              className="ui-button-secondary px-3 py-1.5 text-xs"
+              disabled={requestAnalystDisabled}
+              onClick={() => void onRequestAnalyst?.(message)}
+              type="button"
+            >
+              {requestAnalystDisabled
+                ? "Аналитик уведомлен"
+                : "Позвать аналитика"}
+            </button>
+          </div>
         ) : null}
       </div>
 

@@ -92,6 +92,7 @@ export interface TaskListParams {
   analyst_id?: string;
   developer_id?: string;
   page?: number;
+  participant_id?: string;
   search?: string;
   size?: number;
   status?: TaskStatus;
