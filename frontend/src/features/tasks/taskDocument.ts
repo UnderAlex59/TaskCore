@@ -134,10 +134,23 @@ export function parseTaskDocument(content: string): TaskDocumentSections {
 }
 
 export function serializeTaskDocument(sections: TaskDocumentSections) {
-  return TASK_DOCUMENT_SECTIONS.map((section) => {
-    const value = normalizeSectionText(sections[section.key]);
-    return `## ${section.title}\n${value}`;
-  })
+  const normalizedDescription = normalizeSectionText(sections.description);
+  const nonEmptySections = TASK_DOCUMENT_SECTIONS.filter((section) =>
+    Boolean(normalizeSectionText(sections[section.key])),
+  );
+
+  if (
+    nonEmptySections.length === 1 &&
+    nonEmptySections[0]?.key === "description"
+  ) {
+    return normalizedDescription;
+  }
+
+  return nonEmptySections
+    .map((section) => {
+      const value = normalizeSectionText(sections[section.key]);
+      return `## ${section.title}\n${value}`;
+    })
     .join("\n\n")
     .trim();
 }
@@ -154,9 +167,12 @@ export function serializeTaskBodyForEditor(sections: TaskDocumentSections) {
     return normalizedDescription;
   }
 
-  return TASK_DOCUMENT_SECTIONS.filter(
-    (section) => section.key !== "changeHistory",
-  )
+  return TASK_DOCUMENT_SECTIONS.filter((section) => {
+    if (section.key === "changeHistory") {
+      return false;
+    }
+    return Boolean(normalizeSectionText(sections[section.key]));
+  })
     .map((section) => {
       const value = normalizeSectionText(sections[section.key]);
       return `## ${section.title}\n${value}`;

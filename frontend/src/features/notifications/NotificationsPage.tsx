@@ -218,12 +218,8 @@ export default function NotificationsPage() {
           <div className="min-w-0">
             <p className="section-eyebrow">Уведомления</p>
             <h2 className="mt-3 text-3xl font-semibold text-[#172b4d]">
-              Реестр уведомлений
+              Уведомления
             </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[#44546f]">
-              Полная история системных уведомлений по задачам, чату и
-              назначенным действиям.
-            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="metric-tile">

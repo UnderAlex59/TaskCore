@@ -265,12 +265,12 @@ export default function TaskForm({
                   </div>
                   <div className="rounded-[14px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5e6c84]">
-                      Семантический индекс
+                      Индексирована
                     </p>
                     <p className="mt-2 text-sm font-medium text-[#172b4d]">
                       {task.indexed_at
                         ? formatDateTime(task.indexed_at)
-                        : "Еще не построен"}
+                        : "Еще не расчитан"}
                     </p>
                   </div>
                 </div>
@@ -520,7 +520,7 @@ export default function TaskForm({
               onClick={() => void onCommit?.()}
               type="button"
             >
-              {committing ? "Публикуем commit..." : "Commit изменений"}
+              {committing ? "Индексация..." : "Индексировать"}
             </button>
           ) : null}
           <button

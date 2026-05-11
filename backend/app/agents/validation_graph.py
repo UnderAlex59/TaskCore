@@ -29,6 +29,14 @@ VALIDATION_AGENT_DESCRIPTION = (
 )
 VALIDATION_AGENT_ALIASES: tuple[str, ...] = ()
 _ALLOWED_SEVERITIES = {"low", "medium", "high"}
+_TASK_SECTION_HEADING_PATTERN = re.compile(
+    (
+        r"^##\s+"
+        r"(Описание|Бизнес-правила|Acceptance criteria|Материалы|История изменений)"
+        r"\s*$"
+    ),
+    re.MULTILINE,
+)
 
 
 class ValidationGraphState(ValidationState, total=False):
@@ -81,7 +89,7 @@ def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
 
 def _normalize_validation_input(state: ValidationGraphState) -> ValidationGraphState:
     normalized_title = str(state.get("title", "")).strip()
-    normalized_content = str(state.get("content", "")).strip()
+    normalized_content = _strip_empty_task_sections(str(state.get("content", "")))
     return {
         "normalized_title": normalized_title,
         "normalized_content": normalized_content,
@@ -90,6 +98,29 @@ def _normalize_validation_input(state: ValidationGraphState) -> ValidationGraphS
             state.get("validation_node_settings")
         ),
     }
+
+
+def _strip_empty_task_sections(content: str) -> str:
+    normalized_content = content.strip()
+    matches = list(_TASK_SECTION_HEADING_PATTERN.finditer(normalized_content))
+    if not matches:
+        return normalized_content
+
+    parts: list[str] = []
+    prefix = normalized_content[: matches[0].start()].strip()
+    if prefix:
+        parts.append(prefix)
+
+    for index, current_match in enumerate(matches):
+        next_match = matches[index + 1] if index + 1 < len(matches) else None
+        section_end = next_match.start() if next_match else len(normalized_content)
+        section_body = normalized_content[
+            current_match.end() : section_end
+        ].strip()
+        if section_body:
+            parts.append(f"## {current_match.group(1)}\n{section_body}")
+
+    return "\n\n".join(parts).strip()
 
 
 def _contains_acceptance_language(text: str) -> bool:

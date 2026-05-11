@@ -177,14 +177,10 @@ export default function ProfilePage() {
   return (
     <section className="space-y-6">
       <header className="rounded-[20px] border border-[rgba(9,30,66,0.12)] bg-white px-6 py-6 sm:px-8">
-        <p className="section-eyebrow">Profile</p>
+        <p className="section-eyebrow">Профиль</p>
         <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
           Настройки пользователя
         </h2>
-        <p className="mt-4 max-w-2xl text-sm leading-7 text-[#44546f]">
-          Обновите отображаемое имя, пароль и аватар, который используется в
-          интерфейсе и обсуждениях задач.
-        </p>
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -270,11 +266,6 @@ export default function ProfilePage() {
             </label>
           </div>
 
-          <p className="text-xs leading-6 text-[#626f86]">
-            Если меняете пароль, укажите текущий. Новый пароль должен
-            соответствовать правилам безопасности системы.
-          </p>
-
           {error ? (
             <p className="rounded-[12px] border border-[rgba(174,46,36,0.18)] bg-[#fdecec] px-4 py-3 text-sm text-[#ae2e24]">
               {error}
@@ -297,10 +288,6 @@ export default function ProfilePage() {
             <h3 className="mt-2 text-2xl font-semibold text-[#172b4d]">
               Уведомления в Telegram
             </h3>
-            <p className="mt-2 text-sm leading-7 text-[#44546f]">
-              В Telegram отправляются системные уведомления по задачам, чату и
-              запросам участия аналитика.
-            </p>
           </div>
 
           <div className="rounded-[14px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] px-4 py-3 text-sm leading-7 text-[#44546f]">

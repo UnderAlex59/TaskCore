@@ -21,10 +21,6 @@ export default function AdminLayout() {
         <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
           Администрирование платформы
         </h2>
-        <p className="mt-4 max-w-3xl text-sm leading-7 text-[#44546f]">
-          Мониторинг, диагностика индексов, модельные профили и служебные
-          справочники платформы в одном рабочем пространстве.
-        </p>
         <nav aria-label="Администрирование" className="mt-6 flex flex-wrap gap-2">
           {adminNavItems.map((item) => (
             <NavLink

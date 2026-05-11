@@ -338,7 +338,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
       setTask(await tasksApi.commitChanges(projectId, taskId));
     } catch (caught) {
       setError(
-        getApiErrorMessage(caught, "Не удалось выполнить commit изменений."),
+        getApiErrorMessage(caught, "Не удалось выполнить индексацию изменений."),
       );
     } finally {
       setCommittingTask(false);
@@ -694,7 +694,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
     task.requires_revalidation &&
     postApprovalStatuses.has(task.status) &&
     task.embeddings_stale
-      ? "Сначала выполните commit изменений, чтобы пересчитать эмбеддинги. " +
+      ? "Сначала выполните индексацию изменений. " +
         "После этого задачу можно отправить на повторную проверку."
       : undefined;
   const canEditTask = hasApprovalRole && editableStatuses.has(task.status);
@@ -1095,7 +1095,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
                       onClick={() => void handleApprove()}
                       type="button"
                     >
-                      {approving ? "Сохраняем маршрут..." : approvalButtonLabel}
+                      {approving ? "Сохраняем команду..." : approvalButtonLabel}
                     </button>
                     {secondReviewPending && reviewer ? (
                       <p className="text-sm leading-6 text-[#7f4c00]">

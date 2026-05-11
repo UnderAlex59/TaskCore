@@ -280,10 +280,6 @@ export default function CustomRulesEditor() {
         <h2 className="mt-3 text-3xl font-extrabold text-ink sm:text-4xl">
           {project?.name ?? "Правила проекта"}
         </h2>
-        <p className="mt-4 text-sm leading-7 text-ink/70">
-          Правила применяются во время проверки, если совпадают теги или если у
-          правила нет фильтра по тегам.
-        </p>
         {error ? (
           <p
             aria-live="polite"
@@ -300,12 +296,8 @@ export default function CustomRulesEditor() {
             Справочник тегов проекта
           </p>
           <h3 className="mt-2 text-xl font-bold text-ink">
-            Набор тегов для задач и LLM
+            Набор тегов для задач
           </h3>
-          <p className="mt-3 text-sm leading-7 text-ink/70">
-            Только эти теги доступны в задачах проекта, в правилах проверки и в
-            LLM-подборе тегов для аналитика.
-          </p>
         </div>
 
         <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleCreateTag}>
@@ -340,9 +332,6 @@ export default function CustomRulesEditor() {
               >
                 <div>
                   <p className="font-semibold text-ink">{tag.name}</p>
-                  <p className="mt-1 text-sm text-slate/70">
-                    Доступен для задач, правил и LLM-рекомендаций в этом проекте.
-                  </p>
                 </div>
                 <button
                   className="ui-button-secondary"
@@ -362,15 +351,11 @@ export default function CustomRulesEditor() {
         <section className="glass-panel space-y-5 rounded-[28px] border border-black/10 p-6 shadow-panel">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-ember">
-              Узлы LangGraph
+              Узлы графа валидации
             </p>
             <h3 className="mt-2 text-xl font-bold text-ink">
               Конфигурация проверки задач
             </h3>
-            <p className="mt-3 text-sm leading-7 text-ink/70">
-              Администратор может отключать отдельные узлы графа валидации для
-              этого проекта. Отключённые узлы не участвуют в запуске проверки.
-            </p>
           </div>
 
           <div className="space-y-3">

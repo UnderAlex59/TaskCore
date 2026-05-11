@@ -269,10 +269,6 @@ export default function TaskList() {
             <h2 className="text-anywhere mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
               {project?.name ?? "Задачи проекта"}
             </h2>
-            <p className="mt-4 text-sm leading-7 text-[#44546f]">
-              Здесь создаются постановки, назначается команда проекта и
-              отслеживается текущий статус задач.
-            </p>
           </div>
 
           <div className="w-full max-w-xl space-y-3">

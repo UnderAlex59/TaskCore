@@ -162,6 +162,66 @@ async def test_validation_graph_normalizes_object_questions(
 
 
 @pytest.mark.asyncio
+async def test_validation_graph_strips_empty_task_sections_from_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_prompt = ""
+
+    async def fake_invoke_chat(
+        *args, **kwargs
+    ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        nonlocal captured_prompt
+        captured_prompt = str(kwargs["user_prompt"])
+        return LLMInvocationResult(
+            ok=True,
+            text='{"issues":[],"questions":[]}',
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=50,
+            prompt_tokens=20,
+            completion_tokens=20,
+            total_tokens=40,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    await run_validation_graph(
+        db=object(),
+        actor_user_id="user-1",
+        task_id="task-1",
+        project_id="project-1",
+        title="Workflow approval",
+        content=(
+            "## Описание\n"
+            "Approved workflow body.\n\n"
+            "## Бизнес-правила\n\n\n"
+            "## Acceptance criteria\n\n\n"
+            "## Материалы\n"
+            "Contract draft is attached."
+        ),
+        tags=["workflow"],
+        custom_rules=[],
+        related_tasks=[],
+        attachment_names=[],
+        validation_node_settings={
+            "core_rules": True,
+            "custom_rules": False,
+            "context_questions": False,
+        },
+    )
+
+    assert "Approved workflow body." in captured_prompt
+    assert "Contract draft is attached." in captured_prompt
+    assert "## Бизнес-правила" not in captured_prompt
+    assert "## Acceptance criteria" not in captured_prompt
+
+
+@pytest.mark.asyncio
 async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

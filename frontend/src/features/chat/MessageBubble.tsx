@@ -100,11 +100,6 @@ export default function MessageBubble({
         >
           {message.content}
         </p>
-        {isAgentMessage && agentDescription ? (
-          <p className="text-anywhere mt-3 border-t border-[rgba(12,102,228,0.12)] pt-2 text-xs leading-5 text-[#626f86]">
-            {agentDescription}
-          </p>
-        ) : null}
         {canRequestAnalyst ? (
           <div className="mt-3 border-t border-[rgba(12,102,228,0.12)] pt-3">
             <button
