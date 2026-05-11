@@ -19,6 +19,7 @@ import VisionTestPage from "@/features/admin/VisionTestPage";
 import ProfilePage from "@/features/profile/ProfilePage";
 import UserList from "@/features/admin/UserList";
 import LandingPage from "@/features/landing/LandingPage";
+import NotificationsPage from "@/features/notifications/NotificationsPage";
 import ProjectList from "@/features/projects/ProjectList";
 import TaskChatPage from "@/features/tasks/TaskChatPage";
 import TaskCreatePage from "@/features/tasks/TaskCreatePage";
@@ -40,6 +41,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/projects" element={<ProjectList />} />
               <Route path="/projects/:projectId/tasks" element={<TaskList />} />
               <Route

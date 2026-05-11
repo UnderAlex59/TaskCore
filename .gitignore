@@ -5,6 +5,8 @@ Thumbs.db
 .vscode/
 test_task/
 docs/
+work_report/
+
 
 # Python
 __pycache__/

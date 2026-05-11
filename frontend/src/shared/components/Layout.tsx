@@ -9,12 +9,18 @@ import {
 } from "@/api/notificationsApi";
 import { Avatar } from "@/shared/components/Avatar";
 import { formatDateTime, getRoleLabel } from "@/shared/lib/locale";
+import { NOTIFICATIONS_CHANGED_EVENT } from "@/shared/lib/notificationEvents";
 import { getUserDisplayName } from "@/shared/lib/userProfile";
 import { useAuthStore } from "@/store/authStore";
 
 const navItems = [
   { href: "/projects", label: "Проекты", description: "Задачи, роли, правила" },
   { href: "/profile", label: "Профиль", description: "Учетная запись" },
+  {
+    href: "/notifications",
+    label: "Уведомления",
+    description: "Личные события",
+  },
   {
     href: "/admin/monitoring",
     label: "Администрирование",
@@ -31,6 +37,7 @@ function mergeNotifications(
     merged.set(item.id, item);
   }
   return [...merged.values()]
+    .filter((item) => !item.read_at)
     .sort(
       (left, right) =>
         new Date(right.created_at).getTime() -
@@ -39,105 +46,25 @@ function mergeNotifications(
     .slice(0, 20);
 }
 
-function NotificationCenter() {
-  const accessToken = useAuthStore((state) => state.accessToken);
-  const [items, setItems] = useState<NotificationRead[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+interface NotificationCenterProps {
+  items: NotificationRead[];
+  onMarkAllRead: () => Promise<void>;
+  onMarkRead: (notification: NotificationRead) => Promise<void>;
+  unreadCount: number;
+}
+
+function NotificationCenter({
+  items,
+  onMarkAllRead,
+  onMarkRead,
+  unreadCount,
+}: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!accessToken) {
-      setItems([]);
-      setUnreadCount(0);
-      return;
-    }
-
-    let active = true;
-    void notificationsApi.list({ limit: 10 }).then((payload) => {
-      if (!active) {
-        return;
-      }
-      setItems(payload.items);
-      setUnreadCount(payload.unread_count);
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [accessToken]);
-
-  useEffect(() => {
-    if (!accessToken) {
-      return;
-    }
-
-    let reconnectTimer: number | null = null;
-    let socket: WebSocket | null = null;
-    let closed = false;
-
-    const connect = () => {
-      if (closed) {
-        return;
-      }
-      socket = notificationsApi.connect(accessToken);
-      socket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as NotificationRealtimeEvent;
-          if (
-            payload.type === "notifications.created" &&
-            Array.isArray(payload.notifications)
-          ) {
-            setItems((current) =>
-              mergeNotifications(current, payload.notifications ?? []),
-            );
-            setUnreadCount(
-              (count) => count + (payload.notifications?.length ?? 0),
-            );
-          }
-        } catch {
-          // Realtime payload can be ignored without breaking the session.
-        }
-      };
-      socket.onclose = () => {
-        if (!closed) {
-          reconnectTimer = window.setTimeout(connect, 1500);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      closed = true;
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-      }
-      socket?.close();
-    };
-  }, [accessToken]);
 
   const unreadLabel = useMemo(
     () => (unreadCount > 99 ? "99+" : String(unreadCount)),
     [unreadCount],
   );
-
-  async function handleMarkRead(notification: NotificationRead) {
-    if (notification.read_at) {
-      return;
-    }
-    const updated = await notificationsApi.markRead(notification.id);
-    setItems((current) =>
-      current.map((item) => (item.id === updated.id ? updated : item)),
-    );
-    setUnreadCount((count) => Math.max(0, count - 1));
-  }
-
-  async function handleMarkAllRead() {
-    await notificationsApi.markAllRead();
-    const now = new Date().toISOString();
-    setItems((current) => current.map((item) => ({ ...item, read_at: now })));
-    setUnreadCount(0);
-  }
 
   return (
     <div className="relative">
@@ -146,7 +73,7 @@ function NotificationCenter() {
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <span>Уведомления</span>
+        <span>Непрочитанные</span>
         {unreadCount > 0 ? (
           <span className="ml-3 rounded-full bg-[#0c66e4] px-2 py-0.5 text-xs font-semibold text-white">
             {unreadLabel}
@@ -167,7 +94,7 @@ function NotificationCenter() {
             <button
               className="text-xs font-semibold text-[#0c66e4] disabled:text-[#7a869a]"
               disabled={unreadCount === 0}
-              onClick={() => void handleMarkAllRead()}
+              onClick={() => void onMarkAllRead()}
               type="button"
             >
               Прочитано
@@ -193,7 +120,7 @@ function NotificationCenter() {
                     key={item.id}
                     onClick={() => {
                       setOpen(false);
-                      void handleMarkRead(item);
+                      void onMarkRead(item);
                     }}
                     to={href}
                   >
@@ -228,9 +155,130 @@ function NotificationCenter() {
 
 export function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState<NotificationRead[]>(
+    [],
+  );
+  const [unreadCount, setUnreadCount] = useState(0);
   const navigate = useNavigate();
+  const accessToken = useAuthStore((state) => state.accessToken);
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setNotificationItems([]);
+      setUnreadCount(0);
+      return;
+    }
+
+    let active = true;
+    void notificationsApi
+      .list({ limit: 10, unread_only: true })
+      .then((payload) => {
+        if (!active) {
+          return;
+        }
+        setNotificationItems(payload.items);
+        setUnreadCount(payload.unread_count);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    const handleNotificationsChanged = () => {
+      void notificationsApi
+        .list({ limit: 10, unread_only: true })
+        .then((payload) => {
+          setNotificationItems(payload.items);
+          setUnreadCount(payload.unread_count);
+        });
+    };
+    window.addEventListener(
+      NOTIFICATIONS_CHANGED_EVENT,
+      handleNotificationsChanged,
+    );
+    return () => {
+      window.removeEventListener(
+        NOTIFICATIONS_CHANGED_EVENT,
+        handleNotificationsChanged,
+      );
+    };
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    let reconnectTimer: number | null = null;
+    let socket: WebSocket | null = null;
+    let closed = false;
+
+    const connect = () => {
+      if (closed) {
+        return;
+      }
+      socket = notificationsApi.connect(accessToken);
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as NotificationRealtimeEvent;
+          if (
+            payload.type === "notifications.created" &&
+            Array.isArray(payload.notifications)
+          ) {
+            const unreadNotifications = payload.notifications.filter(
+              (item) => !item.read_at,
+            );
+            setNotificationItems((current) =>
+              mergeNotifications(current, unreadNotifications),
+            );
+            setUnreadCount((count) => count + unreadNotifications.length);
+          }
+        } catch {
+          // Realtime payload can be ignored without breaking the session.
+        }
+      };
+      socket.onclose = () => {
+        if (!closed) {
+          reconnectTimer = window.setTimeout(connect, 1500);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
+    };
+  }, [accessToken]);
+
+  async function handleMarkNotificationRead(notification: NotificationRead) {
+    if (notification.read_at) {
+      return;
+    }
+    await notificationsApi.markRead(notification.id);
+    setNotificationItems((current) =>
+      current.filter((item) => item.id !== notification.id),
+    );
+    setUnreadCount((count) => Math.max(0, count - 1));
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    await notificationsApi.markAllRead();
+    setNotificationItems([]);
+    setUnreadCount(0);
+  }
 
   async function handleLogout() {
     try {
@@ -299,7 +347,14 @@ export function Layout() {
             onClick={closeDrawer}
             to={item.href}
           >
-            <span className="block truncate font-semibold">{item.label}</span>
+            <span className="flex min-w-0 items-center justify-between gap-2 font-semibold">
+              <span className="truncate">{item.label}</span>
+              {item.href === "/notifications" && unreadCount > 0 ? (
+                <span className="shrink-0 rounded-full bg-[#0c66e4] px-2 py-0.5 text-xs font-semibold text-white">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              ) : null}
+            </span>
             <span className="mt-1 block truncate text-xs text-[#626f86] group-hover:text-[#44546f]">
               {item.description}
             </span>
@@ -307,7 +362,12 @@ export function Layout() {
         ))}
       </nav>
 
-      <NotificationCenter />
+      <NotificationCenter
+        items={notificationItems}
+        onMarkAllRead={handleMarkAllNotificationsRead}
+        onMarkRead={handleMarkNotificationRead}
+        unreadCount={unreadCount}
+      />
 
       <div className="min-w-0 space-y-3 rounded-[16px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] p-4">
         <div className="flex items-center gap-3">

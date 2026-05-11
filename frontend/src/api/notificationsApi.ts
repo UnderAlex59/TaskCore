@@ -20,6 +20,18 @@ export interface NotificationPageRead {
   unread_count: number;
 }
 
+export type NotificationReadState = "all" | "unread" | "read";
+export type NotificationPriorityFilter = "normal" | "important";
+
+export interface NotificationListParams {
+  limit?: number;
+  priority?: NotificationPriorityFilter;
+  read_state?: NotificationReadState;
+  search?: string;
+  type?: string;
+  unread_only?: boolean;
+}
+
 export interface ChatUnreadRead {
   task_id: string;
   unread_count: number;
@@ -73,7 +85,7 @@ function buildNotificationsRealtimeUrl(token: string) {
 }
 
 export const notificationsApi = {
-  list: async (params?: { limit?: number; unread_only?: boolean }) =>
+  list: async (params?: NotificationListParams) =>
     (await apiClient.get<NotificationPageRead>("/notifications", { params }))
       .data,
   markRead: async (notificationId: string) =>

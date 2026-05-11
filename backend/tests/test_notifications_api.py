@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -94,6 +96,107 @@ async def test_notification_list_and_mark_read(client: AsyncClient) -> None:
     refreshed_response = await client.get("/notifications", headers=headers)
     assert refreshed_response.status_code == 200
     assert refreshed_response.json()["unread_count"] == 0
+
+
+async def test_notification_list_filters_current_user_items(client: AsyncClient) -> None:
+    await register_user(client, email="filter-owner@example.com", full_name="Filter Owner")
+    await register_user(client, email="filter-other@example.com", full_name="Filter Other")
+    token = await login_user(client, email="filter-owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    owner = await get_user_by_email("filter-owner@example.com")
+    other = await get_user_by_email("filter-other@example.com")
+
+    async with AsyncSessionLocal() as db:
+        await NotificationService.create_notification(
+            db,
+            user_id=owner.id,
+            type_=NotificationType.TASK_ASSIGNED,
+            priority=NotificationPriority.IMPORTANT,
+            title="Срочно проверить задачу",
+            body="Проверьте новую задачу.",
+        )
+        read_notification = await NotificationService.create_notification(
+            db,
+            user_id=owner.id,
+            type_=NotificationType.TASK_STATUS_CHANGED,
+            priority=NotificationPriority.NORMAL,
+            title="Статус изменился",
+            body="Задача перешла в новый статус.",
+        )
+        await NotificationService.create_notification(
+            db,
+            user_id=owner.id,
+            type_=NotificationType.CHAT_MENTION,
+            priority=NotificationPriority.NORMAL,
+            title="Вас упомянули в чате",
+            body="Посмотрите обсуждение.",
+        )
+        await NotificationService.create_notification(
+            db,
+            user_id=other.id,
+            type_=NotificationType.TASK_ASSIGNED,
+            priority=NotificationPriority.IMPORTANT,
+            title="Срочно проверить задачу",
+            body="Чужое уведомление не должно попасть в выдачу.",
+        )
+        assert read_notification is not None
+        read_notification.read_at = datetime.now(UTC)
+        await db.commit()
+
+    all_response = await client.get("/notifications", headers=headers)
+    assert all_response.status_code == 200
+    all_payload = all_response.json()
+    assert all_payload["unread_count"] == 2
+    assert len(all_payload["items"]) == 3
+
+    unread_response = await client.get(
+        "/notifications",
+        headers=headers,
+        params={"unread_only": True},
+    )
+    assert unread_response.status_code == 200
+    assert len(unread_response.json()["items"]) == 2
+    assert all(item["read_at"] is None for item in unread_response.json()["items"])
+
+    read_response = await client.get(
+        "/notifications",
+        headers=headers,
+        params={"read_state": "read"},
+    )
+    assert read_response.status_code == 200
+    assert [item["title"] for item in read_response.json()["items"]] == [
+        "Статус изменился"
+    ]
+
+    important_response = await client.get(
+        "/notifications",
+        headers=headers,
+        params={"priority": "important"},
+    )
+    assert important_response.status_code == 200
+    assert [item["title"] for item in important_response.json()["items"]] == [
+        "Срочно проверить задачу"
+    ]
+
+    mention_response = await client.get(
+        "/notifications",
+        headers=headers,
+        params={"type": "chat_mention"},
+    )
+    assert mention_response.status_code == 200
+    assert [item["type"] for item in mention_response.json()["items"]] == [
+        "chat_mention"
+    ]
+
+    search_response = await client.get(
+        "/notifications",
+        headers=headers,
+        params={"search": "проверить"},
+    )
+    assert search_response.status_code == 200
+    assert [item["title"] for item in search_response.json()["items"]] == [
+        "Срочно проверить задачу"
+    ]
 
 
 async def test_telegram_link_token_can_be_consumed_once(

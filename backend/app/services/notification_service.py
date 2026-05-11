@@ -76,6 +76,10 @@ class NotificationService:
         db: AsyncSession,
         *,
         unread_only: bool = False,
+        read_state: str = "all",
+        priority: str | None = None,
+        type_: str | None = None,
+        search: str | None = None,
         limit: int = 20,
     ) -> NotificationPageRead:
         stmt: Select[tuple[Notification]] = (
@@ -84,8 +88,24 @@ class NotificationService:
             .order_by(Notification.created_at.desc())
             .limit(limit)
         )
-        if unread_only:
+        effective_read_state = "unread" if unread_only else read_state
+        if effective_read_state == "unread":
             stmt = stmt.where(Notification.read_at.is_(None))
+        elif effective_read_state == "read":
+            stmt = stmt.where(Notification.read_at.is_not(None))
+        if priority:
+            stmt = stmt.where(Notification.priority == NotificationPriority(priority))
+        if type_:
+            stmt = stmt.where(Notification.type == NotificationType(type_))
+        normalized_search = search.strip() if search else ""
+        if normalized_search:
+            pattern = f"%{normalized_search}%"
+            stmt = stmt.where(
+                or_(
+                    Notification.title.ilike(pattern),
+                    Notification.body.ilike(pattern),
+                )
+            )
 
         items = list((await db.execute(stmt)).scalars().all())
         unread_count = int(

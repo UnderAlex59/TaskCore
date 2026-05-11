@@ -114,6 +114,14 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   validation_question: "вопрос валидации",
 };
 
+const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
+  analyst_requested: "Запрос аналитика",
+  chat_mention: "Упоминание в чате",
+  qa_needs_analyst: "QA требует аналитика",
+  task_assigned: "Назначение на задачу",
+  task_status_changed: "Изменение статуса задачи",
+};
+
 const RANGE_LABELS: Record<MonitoringRange, string> = {
   "24h": "24 ч",
   "7d": "7 дн",
@@ -276,6 +284,14 @@ export function getEntityTypeLabel(entityType: string | null | undefined) {
   }
 
   return ENTITY_TYPE_LABELS[entityType] ?? normalizeFallbackLabel(entityType);
+}
+
+export function getNotificationTypeLabel(type: string | null | undefined) {
+  if (!type) {
+    return "Тип не указан";
+  }
+
+  return NOTIFICATION_TYPE_LABELS[type] ?? normalizeFallbackLabel(type);
 }
 
 export function getAgentKeyLabel(agentKey: string | null | undefined) {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import (
     APIRouter,
     Query,
@@ -59,12 +61,27 @@ async def list_notifications(
     current_user: CurrentUser,
     db: DBSession,
     unread_only: bool = Query(default=False),
+    read_state: Literal["all", "unread", "read"] = Query(default="all"),
+    priority: Literal["normal", "important"] | None = Query(default=None),
+    type: Literal[
+        "qa_needs_analyst",
+        "analyst_requested",
+        "task_assigned",
+        "task_status_changed",
+        "chat_mention",
+    ]
+    | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> NotificationPageRead:
     return await NotificationService.list_notifications(
         current_user,
         db,
         unread_only=unread_only,
+        read_state=read_state,
+        priority=priority,
+        type_=type,
+        search=search,
         limit=limit,
     )
 
