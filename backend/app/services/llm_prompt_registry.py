@@ -8,6 +8,7 @@ from app.agents.system_prompts import (
     CHAT_ROUTING_SYSTEM_PROMPT,
     QA_ANSWER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
+    RAG_EVAL_JUDGE_SYSTEM_PROMPT,
     VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
     VALIDATION_CONTEXT_QUESTIONS_SYSTEM_PROMPT,
     VALIDATION_CORE_PROMPT_KEY,
@@ -52,6 +53,17 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
             ),
             default_system_prompt=QA_VERIFIER_SYSTEM_PROMPT,
             priority=30,
+        ),
+        LLMPromptDefinition(
+            prompt_key="rag-eval-judge",
+            agent_key="rag-eval-judge",
+            name="RAGEvalJudgeAgent",
+            description=(
+                "Оценивает groundedness и correctness ответов RAG-агента "
+                "на фиксированном eval-наборе."
+            ),
+            default_system_prompt=RAG_EVAL_JUDGE_SYSTEM_PROMPT,
+            priority=40,
         ),
         LLMPromptDefinition(
             prompt_key="change-tracker",

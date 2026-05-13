@@ -12,6 +12,8 @@ from app.core.validation_settings import normalize_validation_node_settings
 from app.models.audit_event import AuditEvent
 from app.models.custom_rule import CustomRule
 from app.models.llm_request_log import LLMRequestLog
+from app.models.message import Message
+from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
 from app.models.task import Task
 from app.models.user import User, UserRole
@@ -194,7 +196,13 @@ class ProjectService:
         task_ids = list(
             (await db.execute(select(Task.id).where(Task.project_id == project.id))).scalars().all()
         )
+        message_ids = []
         if task_ids:
+            message_ids = list(
+                (
+                    await db.execute(select(Message.id).where(Message.task_id.in_(task_ids)))
+                ).scalars().all()
+            )
             await db.execute(
                 update(AuditEvent)
                 .where(AuditEvent.task_id.in_(task_ids))
@@ -205,6 +213,17 @@ class ProjectService:
                 .where(LLMRequestLog.task_id.in_(task_ids))
                 .values(task_id=None)
             )
+            await db.execute(
+                update(Notification)
+                .where(Notification.task_id.in_(task_ids))
+                .values(task_id=None)
+            )
+        if message_ids:
+            await db.execute(
+                update(Notification)
+                .where(Notification.message_id.in_(message_ids))
+                .values(message_id=None)
+            )
         await db.execute(
             update(AuditEvent)
             .where(AuditEvent.project_id == project.id)
@@ -213,6 +232,11 @@ class ProjectService:
         await db.execute(
             update(LLMRequestLog)
             .where(LLMRequestLog.project_id == project.id)
+            .values(project_id=None)
+        )
+        await db.execute(
+            update(Notification)
+            .where(Notification.project_id == project.id)
             .values(project_id=None)
         )
         AuditService.record(

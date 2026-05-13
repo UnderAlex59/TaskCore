@@ -75,6 +75,11 @@ class QAAgentGraphState(ChatState, total=False):
     needs_verification: bool
     retrieval_query: str
     retrieval_limit: int
+    use_query_rewriter: bool
+    use_hybrid_rerank: bool
+    include_cross_task: bool
+    include_current_task_content: bool
+    min_score_override: float | None
     focus_points: list[str]
     canonical_question_hint: str | None
     rag_snippets: list[str]
@@ -242,6 +247,11 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
             task_tags=[],
             question=query_text,
             retrieval_limit=retrieval_limit,
+            use_query_rewriter=bool(state.get("use_query_rewriter", True)),
+            use_hybrid_rerank=bool(state.get("use_hybrid_rerank", True)),
+            include_cross_task=bool(state.get("include_cross_task", True)),
+            include_current_task_content=bool(state.get("include_current_task_content", False)),
+            min_score_override=state.get("min_score_override"),
         )
         if needs_rag and query_text
         else {
@@ -591,9 +601,13 @@ def get_qa_agent_graph():
     graph.add_node("prepare_qa_request", traced_node("prepare_qa_request", _prepare_qa_request))
     graph.add_node("collect_qa_context", traced_node("collect_qa_context", _collect_qa_context))
     graph.add_node("invoke_qa_answer", traced_node("invoke_qa_answer", _invoke_qa_answer))
-    graph.add_node("prepare_qa_verification", traced_node("prepare_qa_verification", _prepare_qa_verification))
+    graph.add_node(
+        "prepare_qa_verification", traced_node("prepare_qa_verification", _prepare_qa_verification)
+    )
     graph.add_node("invoke_qa_verifier", traced_node("invoke_qa_verifier", _invoke_qa_verifier))
-    graph.add_node("finalize_qa_response", traced_node("finalize_qa_response", _finalize_qa_response))
+    graph.add_node(
+        "finalize_qa_response", traced_node("finalize_qa_response", _finalize_qa_response)
+    )
     graph.add_edge(START, "prepare_qa_request")
     graph.add_edge("prepare_qa_request", "collect_qa_context")
     graph.add_edge("collect_qa_context", "invoke_qa_answer")
@@ -632,13 +646,17 @@ async def run_qa_agent_graph(
     validation_result: dict | None,
     related_tasks: list[dict[str, object]],
     routing_mode: str,
+    use_query_rewriter: bool = True,
+    use_hybrid_rerank: bool = True,
+    include_cross_task: bool = True,
+    include_current_task_content: bool = False,
+    min_score_override: float | None = None,
 ) -> ChatState:
     state = await run_traced_graph(
         graph_key="qa_agent_graph",
         graph=get_qa_agent_graph(),
         source="chat_subgraph",
-        input_state=
-        {
+        input_state={
             "db": db,
             "actor_user_id": actor_user_id,
             "task_id": task_id,
@@ -650,7 +668,12 @@ async def run_qa_agent_graph(
             "validation_result": validation_result,
             "related_tasks": related_tasks,
             "routing_mode": routing_mode,
-        }
+            "use_query_rewriter": use_query_rewriter,
+            "use_hybrid_rerank": use_hybrid_rerank,
+            "include_cross_task": include_cross_task,
+            "include_current_task_content": include_current_task_content,
+            "min_score_override": min_score_override,
+        },
     )
     return {
         "agent_name": str(state.get("agent_name", QA_AGENT_NAME)),

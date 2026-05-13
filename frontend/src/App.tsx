@@ -7,6 +7,7 @@ import LoginPage from "@/auth/pages/LoginPage";
 import AgentPromptsPage from "@/features/admin/AgentPromptsPage";
 import AdminLayout from "@/features/admin/AdminLayout";
 import QdrantAdminPage from "@/features/admin/QdrantAdminPage";
+import RagEvalPage from "@/features/admin/RagEvalPage";
 import RegisterPage from "@/auth/pages/RegisterPage";
 import CustomRulesEditor from "@/features/admin/CustomRulesEditor";
 import GraphRunsPage from "@/features/admin/GraphRunsPage";
@@ -66,6 +67,7 @@ export default function App() {
                   <Route path="monitoring" element={<MonitoringPage />} />
                   <Route path="graph-runs" element={<GraphRunsPage />} />
                   <Route path="qdrant" element={<QdrantAdminPage />} />
+                  <Route path="rag-eval" element={<RagEvalPage />} />
                   <Route path="llm-requests" element={<LLMRequestLogsPage />} />
                   <Route
                     path="validation-questions"

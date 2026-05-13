@@ -37,6 +37,12 @@ from app.agents.rag_retrieval_graph import (
     QA_QUERY_REWRITER_AGENT_KEY,
     QA_QUERY_REWRITER_AGENT_NAME,
 )
+from app.agents.rag_eval_judge_graph import (
+    RAG_EVAL_JUDGE_AGENT_ALIASES,
+    RAG_EVAL_JUDGE_AGENT_DESCRIPTION,
+    RAG_EVAL_JUDGE_AGENT_KEY,
+    RAG_EVAL_JUDGE_AGENT_NAME,
+)
 from app.agents.task_tag_suggestion_graph import (
     TASK_TAG_SUGGESTER_AGENT_ALIASES,
     TASK_TAG_SUGGESTER_AGENT_DESCRIPTION,
@@ -74,6 +80,13 @@ def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
             description=QA_QUERY_REWRITER_AGENT_DESCRIPTION,
             aliases=QA_QUERY_REWRITER_AGENT_ALIASES,
             priority=35,
+        ),
+        ChatAgentMetadata(
+            key=RAG_EVAL_JUDGE_AGENT_KEY,
+            name=RAG_EVAL_JUDGE_AGENT_NAME,
+            description=RAG_EVAL_JUDGE_AGENT_DESCRIPTION,
+            aliases=RAG_EVAL_JUDGE_AGENT_ALIASES,
+            priority=40,
         ),
         ChatAgentMetadata(
             key=CHANGE_TRACKER_AGENT_KEY,

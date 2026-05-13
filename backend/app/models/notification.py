@@ -81,17 +81,17 @@ class Notification(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
     project_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("projects.id"),
+        ForeignKey("projects.id", ondelete="SET NULL"),
         nullable=True,
     )
     task_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("tasks.id"),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
         nullable=True,
     )
     message_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("messages.id"),
+        ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
     dedupe_key: Mapped[str | None] = mapped_column(String(255), nullable=True)

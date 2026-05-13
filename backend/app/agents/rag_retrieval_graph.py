@@ -24,6 +24,7 @@ QA_QUERY_REWRITER_AGENT_DESCRIPTION = (
 QA_QUERY_REWRITER_AGENT_ALIASES: tuple[str, ...] = ()
 
 _ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
+_CURRENT_TASK_CONTENT_SOURCE_TYPES = {"task_content"}
 _CROSS_TASK_CONTEXT_SOURCE_TYPES = {
     "task_content",
     "attachment_text",
@@ -47,6 +48,11 @@ class RagRetrievalState(ChatState, total=False):
     task_tags: list[str]
     question: str
     retrieval_limit: int
+    use_query_rewriter: bool
+    use_hybrid_rerank: bool
+    include_cross_task: bool
+    include_current_task_content: bool
+    min_score_override: float | None
     rewrite_system_prompt: str
     rewrite_user_prompt: str
     rewrite_payload: dict[str, object] | None
@@ -167,6 +173,12 @@ def _resolve_rag_context_scope(*, has_attachments: bool, has_cross_task: bool) -
 
 
 def _prepare_rewrite_prompt(state: RagRetrievalState) -> RagRetrievalState:
+    if not state.get("use_query_rewriter", True):
+        return {
+            "rewrite_system_prompt": QA_QUERY_REWRITER_SYSTEM_PROMPT,
+            "rewrite_user_prompt": "",
+        }
+
     task_content = _normalize_space(state.get("task_content", ""))[:1200]
     task_tags = ", ".join(str(tag) for tag in list(state.get("task_tags", [])) if str(tag))
     question = _normalize_space(state.get("question", ""))
@@ -184,7 +196,7 @@ def _prepare_rewrite_prompt(state: RagRetrievalState) -> RagRetrievalState:
 
 async def _invoke_query_rewriter(state: RagRetrievalState) -> RagRetrievalState:
     db = state.get("db")
-    if db is None:
+    if db is None or not state.get("use_query_rewriter", True):
         return {
             "query_rewriter_ok": False,
             "query_rewriter_error_message": None,
@@ -255,6 +267,9 @@ async def _retrieve_candidates(state: RagRetrievalState) -> RagRetrievalState:
     retrieval_limit = max(1, int(state.get("retrieval_limit", 5)))
     candidate_limit = max(retrieval_limit * _DEFAULT_CANDIDATE_MULTIPLIER, 12)
     hits: list[dict[str, object]] = []
+    current_task_source_types = set(_ATTACHMENT_SOURCE_TYPES)
+    if state.get("include_current_task_content", False):
+        current_task_source_types.update(_CURRENT_TASK_CONTENT_SOURCE_TYPES)
 
     for query in queries:
         if task_id:
@@ -262,7 +277,7 @@ async def _retrieve_candidates(state: RagRetrievalState) -> RagRetrievalState:
                 task_id=task_id,
                 query_text=query,
                 limit=candidate_limit,
-                include_source_types=sorted(_ATTACHMENT_SOURCE_TYPES),
+                include_source_types=sorted(current_task_source_types),
             )
             if not attachment_hits:
                 attachment_hits = [
@@ -271,12 +286,12 @@ async def _retrieve_candidates(state: RagRetrievalState) -> RagRetrievalState:
                         task_id=task_id,
                         query_text=query,
                         limit=retrieval_limit,
-                        include_source_types=sorted(_ATTACHMENT_SOURCE_TYPES),
+                        include_source_types=sorted(current_task_source_types),
                     )
                 ]
             for hit in attachment_hits:
                 hits.append({**hit, "scope": "current_task_attachment", "matched_query": query})
-        if project_id:
+        if project_id and state.get("include_cross_task", True):
             cross_task_hits = await QdrantService.probe_project_task_knowledge_chunks(
                 project_id=project_id,
                 query_text=query,
@@ -299,6 +314,13 @@ async def _retrieve_candidates(state: RagRetrievalState) -> RagRetrievalState:
                 hits.append({**hit, "scope": "cross_task", "matched_query": query})
 
     return {"candidate_hits": hits}
+
+
+def _threshold(state: RagRetrievalState) -> float:
+    override = state.get("min_score_override")
+    if override is None:
+        return float(get_settings().RAG_CHUNK_MIN_SCORE)
+    return max(0.0, min(float(override), 1.0))
 
 
 def _score_hit(
@@ -366,7 +388,30 @@ def _score_hit(
 
 
 def _rerank_candidates(state: RagRetrievalState) -> RagRetrievalState:
-    threshold = float(get_settings().RAG_CHUNK_MIN_SCORE)
+    if not state.get("use_hybrid_rerank", True):
+        reranked = []
+        for index, hit in enumerate(list(state.get("candidate_hits", []))):
+            document = hit.get("document")
+            if not isinstance(document, Document):
+                continue
+            reranked.append(
+                {
+                    **hit,
+                    "rerank_score": round(float(hit.get("score") or 0.0), 4),
+                    "rerank_reasons": ["vector_score"],
+                    "_candidate_index": index,
+                }
+            )
+        reranked.sort(
+            key=lambda item: (
+                float(item.get("rerank_score") or 0.0),
+                -int(item.get("_candidate_index") or 0),
+            ),
+            reverse=True,
+        )
+        return {"reranked_hits": reranked}
+
+    threshold = _threshold(state)
     query_tokens = _tokens(" ".join(list(state.get("retrieval_queries", []))))
     keyword_tokens = _tokens(" ".join(list(state.get("retrieval_keywords", []))))
     task_title_tokens = _tokens(state.get("task_title", ""))
@@ -398,25 +443,32 @@ def _rerank_candidates(state: RagRetrievalState) -> RagRetrievalState:
     return {"reranked_hits": reranked}
 
 
-def _diagnostic_chunk(hit: dict[str, object], *, fallback_id: str) -> dict[str, object]:
+def _diagnostic_chunk(
+    hit: dict[str, object], *, fallback_id: str, threshold: float
+) -> dict[str, object]:
     document = hit.get("document")
     metadata = dict(getattr(document, "metadata", {}) or {})
     return {
         "chunk_id": str(metadata.get("chunk_id") or fallback_id),
+        "id": str(metadata.get("chunk_id") or fallback_id),
         "scope": str(hit.get("scope") or ""),
         "score": round(float(hit.get("score") or 0.0), 4),
+        "threshold": threshold,
         "rerank_score": round(float(hit.get("rerank_score") or 0.0), 4),
         "matched_query": str(hit.get("matched_query") or ""),
         "rerank_reasons": list(hit.get("rerank_reasons", [])),
+        "content": str(getattr(document, "page_content", "") or ""),
         "task_id": str(metadata.get("task_id") or "") or None,
         "task_title": str(metadata.get("task_title") or "") or None,
         "source_type": str(metadata.get("source_type") or "") or None,
+        "chunk_kind": str(metadata.get("chunk_kind") or "") or None,
+        "chunk_index": metadata.get("chunk_index"),
         "filename": str(metadata.get("filename") or "") or None,
     }
 
 
 def _finalize_retrieval(state: RagRetrievalState) -> RagRetrievalState:
-    threshold = float(get_settings().RAG_CHUNK_MIN_SCORE)
+    threshold = _threshold(state)
     retrieval_limit = max(1, int(state.get("retrieval_limit", 5)))
     task_id = _normalize_space(state.get("task_id"))
 
@@ -435,7 +487,14 @@ def _finalize_retrieval(state: RagRetrievalState) -> RagRetrievalState:
             continue
 
         scope = str(hit.get("scope") or "")
-        if scope == "current_task_attachment" and _is_attachment_document(document):
+        if scope == "current_task_attachment" and (
+            _is_attachment_document(document)
+            or (
+                state.get("include_current_task_content", False)
+                and str((document.metadata or {}).get("source_type") or "")
+                in _CURRENT_TASK_CONTENT_SOURCE_TYPES
+            )
+        ):
             if len(attachment_documents) < retrieval_limit:
                 attachment_documents.append(document)
             continue
@@ -498,7 +557,7 @@ def _finalize_retrieval(state: RagRetrievalState) -> RagRetrievalState:
             has_cross_task=bool(cross_task_snippets),
         ),
         "reranked_chunks": [
-            _diagnostic_chunk(hit, fallback_id=f"reranked-{index}")
+            _diagnostic_chunk(hit, fallback_id=f"reranked-{index}", threshold=threshold)
             for index, hit in enumerate(
                 list(state.get("reranked_hits", []))[:_MAX_RERANKED_DIAGNOSTICS],
                 start=1,
@@ -510,9 +569,16 @@ def _finalize_retrieval(state: RagRetrievalState) -> RagRetrievalState:
 @lru_cache
 def get_rag_retrieval_graph():
     graph = StateGraph(RagRetrievalState)
-    graph.add_node("prepare_rewrite_prompt", traced_node("prepare_rewrite_prompt", _prepare_rewrite_prompt))
-    graph.add_node("invoke_query_rewriter", traced_node("invoke_query_rewriter", _invoke_query_rewriter))
-    graph.add_node("normalize_query_variants", traced_node("normalize_query_variants", _normalize_query_variants))
+    graph.add_node(
+        "prepare_rewrite_prompt", traced_node("prepare_rewrite_prompt", _prepare_rewrite_prompt)
+    )
+    graph.add_node(
+        "invoke_query_rewriter", traced_node("invoke_query_rewriter", _invoke_query_rewriter)
+    )
+    graph.add_node(
+        "normalize_query_variants",
+        traced_node("normalize_query_variants", _normalize_query_variants),
+    )
     graph.add_node("retrieve_candidates", traced_node("retrieve_candidates", _retrieve_candidates))
     graph.add_node("rerank_candidates", traced_node("rerank_candidates", _rerank_candidates))
     graph.add_node("finalize_retrieval", traced_node("finalize_retrieval", _finalize_retrieval))
@@ -538,13 +604,17 @@ async def run_rag_retrieval_graph(
     task_tags: list[str] | None = None,
     question: str,
     retrieval_limit: int,
+    use_query_rewriter: bool = True,
+    use_hybrid_rerank: bool = True,
+    include_cross_task: bool = True,
+    include_current_task_content: bool = False,
+    min_score_override: float | None = None,
 ) -> RagRetrievalState:
     state = await run_traced_graph(
         graph_key="rag_retrieval_graph",
         graph=get_rag_retrieval_graph(),
         source="qa_rag_retrieval",
-        input_state=
-        {
+        input_state={
             "db": db,
             "actor_user_id": actor_user_id,
             "task_id": task_id,
@@ -555,7 +625,12 @@ async def run_rag_retrieval_graph(
             "task_tags": task_tags or [],
             "question": question,
             "retrieval_limit": retrieval_limit,
-        }
+            "use_query_rewriter": use_query_rewriter,
+            "use_hybrid_rerank": use_hybrid_rerank,
+            "include_cross_task": include_cross_task,
+            "include_current_task_content": include_current_task_content,
+            "min_score_override": min_score_override,
+        },
     )
     return {
         "query_rewriter_ok": bool(state.get("query_rewriter_ok", False))

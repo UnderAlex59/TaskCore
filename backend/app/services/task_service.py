@@ -15,6 +15,7 @@ from app.agents.validation_graph import run_validation_graph
 from app.models.audit_event import AuditEvent
 from app.models.llm_request_log import LLMRequestLog
 from app.models.message import Message, MessageType
+from app.models.notification import Notification
 from app.models.project import ProjectMember
 from app.models.task import Task, TaskAttachment, TaskStatus
 from app.models.user import User, UserRole
@@ -963,6 +964,9 @@ class TaskService:
         task = await TaskService.get_task_or_404(project_id, task_id, db)
         attachments = await TaskService._get_attachments(task.id, db)
         attachment_paths = [Path(attachment.storage_path) for attachment in attachments]
+        message_ids = list(
+            (await db.execute(select(Message.id).where(Message.task_id == task.id))).scalars().all()
+        )
         await db.execute(
             update(AuditEvent)
             .where(AuditEvent.task_id == task.id)
@@ -973,6 +977,17 @@ class TaskService:
             .where(LLMRequestLog.task_id == task.id)
             .values(task_id=None)
         )
+        await db.execute(
+            update(Notification)
+            .where(Notification.task_id == task.id)
+            .values(task_id=None)
+        )
+        if message_ids:
+            await db.execute(
+                update(Notification)
+                .where(Notification.message_id.in_(message_ids))
+                .values(message_id=None)
+            )
         AuditService.record(
             db,
             actor_user_id=current_user.id,

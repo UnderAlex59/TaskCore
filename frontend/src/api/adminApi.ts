@@ -532,6 +532,155 @@ export interface QdrantTaskResyncRead {
   warnings: string[];
 }
 
+export type RagEvalImportFormat = "json" | "csv";
+export type RagEvalRunStatus = "queued" | "running" | "success" | "error";
+export type RagEvalIndexingMode = "all" | "stale_only" | "none";
+
+export interface RagEvalRunConfig {
+  indexing_mode: RagEvalIndexingMode;
+  retrieval_limit: number;
+  use_query_rewriter: boolean;
+  use_hybrid_rerank: boolean;
+  include_cross_task: boolean;
+  include_current_task_content: boolean;
+  run_answer_agent: boolean;
+  run_llm_judge: boolean;
+  min_score_override: number | null;
+}
+
+export interface RagEvalImportPayload {
+  format: RagEvalImportFormat;
+  dataset_name?: string | null;
+  project_id?: string | null;
+  content?: string | null;
+  payload?: {
+    dataset_name: string;
+    project_id: string;
+    tasks: Array<{
+      external_id: string;
+      title: string;
+      content: string;
+      tags?: string[];
+      attachments?: Array<{
+        filename: string;
+        content_type?: string;
+        content: string;
+      }> | null;
+    }>;
+    cases: Array<{
+      external_id: string;
+      task_external_id: string;
+      question: string;
+      expected_answer?: string | null;
+      expected_relevant?: Array<{
+        task_external_id?: string | null;
+        source_type?: string | null;
+        chunk_index?: number | null;
+        text_contains?: string | null;
+      }>;
+    }>;
+  } | null;
+}
+
+export interface RagEvalDatasetRead {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  name: string;
+  tasks_total: number;
+  cases_total: number;
+  last_run_id: string | null;
+  last_run_status: RagEvalRunStatus | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RagEvalDatasetDetailRead extends RagEvalDatasetRead {
+  tasks: Array<{
+    id: string;
+    external_id: string;
+    task_id: string;
+    title: string;
+    updated_at: string;
+  }>;
+  cases: Array<{
+    id: string;
+    external_id: string;
+    task_external_id: string;
+    task_id: string;
+    question: string;
+    expected_answer: string | null;
+    expected_relevant: Array<Record<string, unknown>>;
+    updated_at: string;
+  }>;
+}
+
+export interface RagEvalImportResultRead {
+  dataset: RagEvalDatasetDetailRead;
+  created_tasks: number;
+  updated_tasks: number;
+  imported_cases: number;
+  warnings: string[];
+}
+
+export interface RagEvalRunCreateRead {
+  id: string;
+  dataset_id: string;
+  status: RagEvalRunStatus;
+  config: RagEvalRunConfig;
+  created_at: string;
+}
+
+export interface RagEvalRunRead {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  project_id: string;
+  status: RagEvalRunStatus;
+  config: RagEvalRunConfig;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+  index_results: Array<{
+    id: string;
+    task_id: string;
+    task_external_id: string;
+    status: string;
+    attachment_payload_ms: number | null;
+    chunking_ms: number | null;
+    embedding_and_qdrant_write_ms: number | null;
+    qdrant_cleanup_ms: number | null;
+    total_index_ms: number | null;
+    chunks_total: number;
+    error_message: string | null;
+    created_at: string;
+  }>;
+  case_results: Array<{
+    id: string;
+    case_id: string;
+    case_external_id: string;
+    question: string;
+    task_id: string;
+    task_external_id: string;
+    status: string;
+    retrieved_chunks: Array<Record<string, unknown>>;
+    matched_expected: Array<Record<string, unknown>>;
+    answer_text: string | null;
+    answer_source_ref: Record<string, unknown> | null;
+    judge_payload: Record<string, unknown> | null;
+    metrics: Record<string, unknown>;
+    latency_ms: number | null;
+    retrieval_latency_ms: number | null;
+    answer_latency_ms: number | null;
+    judge_latency_ms: number | null;
+    error_message: string | null;
+    created_at: string;
+  }>;
+}
+
 export const adminApi = {
   listProviders: async () =>
     (await apiClient.get<ProviderConfigRead[]>("/admin/llm/providers")).data,
@@ -791,5 +940,38 @@ export const adminApi = {
       await apiClient.post<QdrantTaskResyncRead>(
         `/admin/qdrant/tasks/${taskId}/resync`,
       )
+    ).data,
+  listRagEvalDatasets: async () =>
+    (await apiClient.get<RagEvalDatasetRead[]>("/admin/rag-eval/datasets"))
+      .data,
+  importRagEvalDataset: async (payload: RagEvalImportPayload) =>
+    (
+      await apiClient.post<RagEvalImportResultRead>(
+        "/admin/rag-eval/datasets/import",
+        payload,
+      )
+    ).data,
+  getRagEvalDataset: async (datasetId: string) =>
+    (
+      await apiClient.get<RagEvalDatasetDetailRead>(
+        `/admin/rag-eval/datasets/${datasetId}`,
+      )
+    ).data,
+  createRagEvalRun: async (datasetId: string, config: RagEvalRunConfig) =>
+    (
+      await apiClient.post<RagEvalRunCreateRead>(
+        `/admin/rag-eval/datasets/${datasetId}/runs`,
+        config,
+      )
+    ).data,
+  getRagEvalRun: async (runId: string) =>
+    (await apiClient.get<RagEvalRunRead>(`/admin/rag-eval/runs/${runId}`))
+      .data,
+  exportRagEvalRun: async (runId: string, format: "json" | "csv") =>
+    (
+      await apiClient.get<string>(`/admin/rag-eval/runs/${runId}/export`, {
+        params: { format },
+        responseType: "text",
+      })
     ).data,
 };

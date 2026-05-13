@@ -4,6 +4,7 @@ const adminNavItems = [
   { href: "/admin/monitoring", label: "Мониторинг" },
   { href: "/admin/graph-runs", label: "Графы" },
   { href: "/admin/qdrant", label: "Qdrant и RAG" },
+  { href: "/admin/rag-eval", label: "RAG Eval" },
   { href: "/admin/llm-requests", label: "LLM-запросы" },
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },

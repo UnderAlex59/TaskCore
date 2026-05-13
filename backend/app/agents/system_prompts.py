@@ -40,6 +40,18 @@ QA_QUERY_REWRITER_SYSTEM_PROMPT = (
     "Не добавляй текст вне JSON."
 )
 
+RAG_EVAL_JUDGE_SYSTEM_PROMPT = (
+    "Ты проверяешь качество ответа RAG-системы для исследовательского стенда. "
+    "Используй только вопрос, эталонный ответ и найденные фрагменты контекста. "
+    "Верни строго JSON с ключами groundedness, correctness, unsupported_claims, rationale. "
+    "groundedness должен быть одним из: grounded, partially_grounded, unsupported. "
+    "correctness должен быть одним из: correct, partially_correct, incorrect, not_enough_context. "
+    "groundedness оценивает, подтверждён ли ответ найденным контекстом. "
+    "correctness оценивает соответствие эталону или критериям ответа. "
+    "Если контекста или эталона недостаточно, не выдумывай подтверждение. "
+    "Не добавляй текст вне JSON."
+)
+
 CHANGE_TRACKER_SYSTEM_PROMPT = (
     "Ты нормализуешь запросы на изменение требований. "
     "Верни строгий JSON с ключами proposal_text и acknowledgement. "

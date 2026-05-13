@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.core.dependencies import DBSession, require_role
 from app.models.task import TaskStatus
@@ -47,10 +47,20 @@ from app.schemas.admin_qdrant import (
     QdrantScenarioProbeRead,
     QdrantTaskResyncRead,
 )
+from app.schemas.admin_rag_eval import (
+    RagEvalDatasetDetailRead,
+    RagEvalDatasetRead,
+    RagEvalImportPayload,
+    RagEvalImportResultRead,
+    RagEvalRunConfig,
+    RagEvalRunCreateRead,
+    RagEvalRunRead,
+)
 from app.schemas.admin_validation import ValidationQuestionPageRead
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
 from app.services.admin_qdrant_service import AdminQdrantService
+from app.services.admin_rag_eval_service import AdminRagEvalService
 from app.services.llm_prompt_service import LLMPromptService
 from app.services.monitoring_service import MonitoringService
 from app.services.task_tag_service import TaskTagService
@@ -294,6 +304,79 @@ async def qdrant_resync_task(
     db: DBSession,
 ) -> QdrantTaskResyncRead:
     return await AdminQdrantService.resync_task(task_id, current_user, db)
+
+
+@router.get("/rag-eval/datasets", response_model=list[RagEvalDatasetRead])
+async def list_rag_eval_datasets(
+    _: AdminUser,
+    db: DBSession,
+) -> list[RagEvalDatasetRead]:
+    return await AdminRagEvalService.list_datasets(db)
+
+
+@router.post("/rag-eval/datasets/import", response_model=RagEvalImportResultRead, status_code=201)
+async def import_rag_eval_dataset(
+    payload: RagEvalImportPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> RagEvalImportResultRead:
+    return await AdminRagEvalService.import_dataset(payload, current_user, db)
+
+
+@router.get("/rag-eval/datasets/{dataset_id}", response_model=RagEvalDatasetDetailRead)
+async def get_rag_eval_dataset(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> RagEvalDatasetDetailRead:
+    return await AdminRagEvalService.get_dataset(dataset_id, db)
+
+
+@router.post("/rag-eval/datasets/{dataset_id}/runs", response_model=RagEvalRunCreateRead, status_code=201)
+async def create_rag_eval_run(
+    dataset_id: str,
+    payload: RagEvalRunConfig,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser,
+    db: DBSession,
+) -> RagEvalRunCreateRead:
+    run = await AdminRagEvalService.create_run(dataset_id, payload, current_user, db)
+    background_tasks.add_task(AdminRagEvalService.process_run, run.id)
+    return run
+
+
+@router.get("/rag-eval/runs/{run_id}", response_model=RagEvalRunRead)
+async def get_rag_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> RagEvalRunRead:
+    return await AdminRagEvalService.get_run(run_id, db)
+
+
+@router.get("/rag-eval/runs/{run_id}/export")
+async def export_rag_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+    export_format: str = Query(default="json", alias="format"),
+) -> Response:
+    filename, media_type, content = await AdminRagEvalService.export_run(run_id, export_format, db)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/rag-eval/datasets/{dataset_id}", status_code=204)
+async def delete_rag_eval_dataset(
+    dataset_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminRagEvalService.delete_dataset(dataset_id, current_user, db)
+    return Response(status_code=204)
 
 
 @router.get("/monitoring/llm/requests", response_model=LLMRequestLogPageRead)

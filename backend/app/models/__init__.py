@@ -19,6 +19,14 @@ from app.models.notification import (
 )
 from app.models.project import Project, ProjectMember
 from app.models.project_task_tag import ProjectTaskTag
+from app.models.rag_eval import (
+    RagEvalCase,
+    RagEvalCaseResult,
+    RagEvalDataset,
+    RagEvalDatasetTask,
+    RagEvalIndexResult,
+    RagEvalRun,
+)
 from app.models.refresh_token import RefreshToken
 from app.models.task import Task, TaskAttachment
 from app.models.task_tag import TaskTag
@@ -44,6 +52,12 @@ __all__ = [
     "Project",
     "ProjectMember",
     "ProjectTaskTag",
+    "RagEvalCase",
+    "RagEvalCaseResult",
+    "RagEvalDataset",
+    "RagEvalDatasetTask",
+    "RagEvalIndexResult",
+    "RagEvalRun",
     "RefreshToken",
     "Task",
     "TaskAttachment",

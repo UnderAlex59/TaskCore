@@ -8,7 +8,9 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
+from app.models.message import Message, MessageType
 from app.models.notification import (
+    Notification,
     NotificationDelivery,
     NotificationDeliveryChannel,
     NotificationDeliveryStatus,
@@ -197,6 +199,127 @@ async def test_notification_list_filters_current_user_items(client: AsyncClient)
     assert [item["title"] for item in search_response.json()["items"]] == [
         "Срочно проверить задачу"
     ]
+
+
+async def test_delete_task_keeps_notification_history(client: AsyncClient) -> None:
+    await register_user(client, email="delete-task-notify@example.com", full_name="Delete Task")
+    token = await login_user(client, email="delete-task-notify@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    user = await get_user_by_email("delete-task-notify@example.com")
+
+    project_response = await client.post(
+        "/projects",
+        headers=headers,
+        json={"name": "Notification cleanup", "description": "Task delete"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    task_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Удаляемая задача", "content": "Проверка удаления уведомлений."},
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        message = Message(
+            task_id=task_id,
+            author_id=user.id,
+            message_type=MessageType.GENERAL,
+            content="Сообщение для уведомления.",
+        )
+        db.add(message)
+        await db.flush()
+        notification = await NotificationService.create_notification(
+            db,
+            user_id=user.id,
+            type_=NotificationType.CHAT_MENTION,
+            priority=NotificationPriority.NORMAL,
+            title="Вас упомянули в чате",
+            body="Проверьте обсуждение.",
+            project_id=project_id,
+            task_id=task_id,
+            message_id=message.id,
+        )
+        assert notification is not None
+        notification_id = notification.id
+        await db.commit()
+
+    delete_response = await client.delete(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=headers,
+    )
+    assert delete_response.status_code == 204
+
+    async with AsyncSessionLocal() as db:
+        notification = await db.get(Notification, notification_id)
+        assert notification is not None
+        assert notification.project_id == project_id
+        assert notification.task_id is None
+        assert notification.message_id is None
+
+
+async def test_delete_project_keeps_notification_history(client: AsyncClient) -> None:
+    await register_user(
+        client,
+        email="delete-project-notify@example.com",
+        full_name="Delete Project",
+    )
+    token = await login_user(client, email="delete-project-notify@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    user = await get_user_by_email("delete-project-notify@example.com")
+
+    project_response = await client.post(
+        "/projects",
+        headers=headers,
+        json={"name": "Удаляемый проект", "description": "Проверка уведомлений."},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    task_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Задача проекта", "content": "Будет удалена вместе с проектом."},
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        message = Message(
+            task_id=task_id,
+            author_id=user.id,
+            message_type=MessageType.GENERAL,
+            content="Сообщение проекта.",
+        )
+        db.add(message)
+        await db.flush()
+        notification = await NotificationService.create_notification(
+            db,
+            user_id=user.id,
+            type_=NotificationType.TASK_STATUS_CHANGED,
+            priority=NotificationPriority.NORMAL,
+            title="Статус задачи изменился",
+            body="Проект удаляется без падения.",
+            project_id=project_id,
+            task_id=task_id,
+            message_id=message.id,
+        )
+        assert notification is not None
+        notification_id = notification.id
+        await db.commit()
+
+    delete_response = await client.delete(f"/projects/{project_id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    async with AsyncSessionLocal() as db:
+        notification = await db.get(Notification, notification_id)
+        assert notification is not None
+        assert notification.project_id is None
+        assert notification.task_id is None
+        assert notification.message_id is None
 
 
 async def test_telegram_link_token_can_be_consumed_once(
