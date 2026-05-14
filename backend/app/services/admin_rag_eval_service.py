@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -46,7 +46,10 @@ from app.schemas.admin_rag_eval import (
     RagEvalIndexResultRead,
     RagEvalRunConfig,
     RagEvalRunCreateRead,
+    RagEvalRunListItemRead,
+    RagEvalRunPageRead,
     RagEvalRunRead,
+    RagEvalRunStatus,
     RagEvalStructuredImport,
     RagEvalTaskImport,
 )
@@ -1011,6 +1014,62 @@ class AdminRagEvalService:
         }
 
     @staticmethod
+    async def list_runs(
+        dataset_id: str,
+        db: AsyncSession,
+        *,
+        run_status: RagEvalRunStatus | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> RagEvalRunPageRead:
+        dataset = await db.get(RagEvalDataset, dataset_id)
+        if dataset is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="RAG eval-набор не найден."
+            )
+
+        conditions = [RagEvalRun.dataset_id == dataset.id]
+        if run_status is not None:
+            conditions.append(RagEvalRun.status == run_status)
+
+        total = await db.scalar(select(func.count()).select_from(RagEvalRun).where(*conditions))
+        runs = list(
+            (
+                await db.execute(
+                    select(RagEvalRun)
+                    .where(*conditions)
+                    .order_by(RagEvalRun.created_at.desc())
+                    .offset(max(page - 1, 0) * page_size)
+                    .limit(page_size)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return RagEvalRunPageRead(
+            page=page,
+            page_size=page_size,
+            total=int(total or 0),
+            items=[
+                RagEvalRunListItemRead(
+                    id=run.id,
+                    dataset_id=run.dataset_id,
+                    dataset_name=dataset.name,
+                    project_id=run.project_id,
+                    status=cast(RagEvalRunStatus, run.status),
+                    config=RagEvalRunConfig.model_validate(run.config),
+                    summary_metrics=run.summary_metrics,
+                    started_at=run.started_at,
+                    finished_at=run.finished_at,
+                    latency_ms=run.latency_ms,
+                    error_message=run.error_message,
+                    created_at=run.created_at,
+                )
+                for run in runs
+            ],
+        )
+
+    @staticmethod
     async def get_run(run_id: str, db: AsyncSession) -> RagEvalRunRead:
         run = await db.get(RagEvalRun, run_id)
         if run is None:
@@ -1148,6 +1207,31 @@ class AdminRagEvalService:
                 }
             )
         return f"rag-eval-{run.id}.csv", "text/csv; charset=utf-8", output.getvalue()
+
+    @staticmethod
+    async def delete_run(run_id: str, actor: User, db: AsyncSession) -> None:
+        run = await db.get(RagEvalRun, run_id)
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="RAG eval-запуск не найден."
+            )
+        if run.status in {"queued", "running"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Нельзя удалить RAG eval-запуск, который ещё выполняется.",
+            )
+
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="admin.rag_eval_run_deleted",
+            entity_type="rag_eval_run",
+            entity_id=run.id,
+            project_id=run.project_id,
+            metadata={"dataset_id": run.dataset_id, "status": run.status},
+        )
+        await db.delete(run)
+        await db.commit()
 
     @staticmethod
     async def delete_dataset(dataset_id: str, actor: User, db: AsyncSession) -> None:

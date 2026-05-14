@@ -5,7 +5,10 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 
+from app.core.database import AsyncSessionLocal
+from app.models.rag_eval import RagEvalCaseResult, RagEvalIndexResult
 from app.services.admin_rag_eval_service import AdminRagEvalService
 
 
@@ -276,3 +279,136 @@ async def test_admin_can_run_rag_eval_with_stubbed_agents(
     )
     assert export_response.status_code == 200
     assert "case_external_id" in export_response.text
+
+    history_response = await client.get(
+        f"/admin/rag-eval/datasets/{dataset_id}/runs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["items"][0]["id"] == run_id
+    assert history_payload["items"][0]["summary_metrics"]["recall_at_5"] == 1
+
+    json_export_response = await client.get(
+        f"/admin/rag-eval/runs/{run_id}/export?format=json",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert json_export_response.status_code == 200
+    assert "русской кодировкой" in json_export_response.text
+
+    delete_response = await client.delete(
+        f"/admin/rag-eval/runs/{run_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert delete_response.status_code == 204
+
+    deleted_detail_response = await client.get(
+        f"/admin/rag-eval/runs/{run_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert deleted_detail_response.status_code == 404
+
+    async with AsyncSessionLocal() as db:
+        case_results_total = await db.scalar(
+            select(func.count())
+            .select_from(RagEvalCaseResult)
+            .where(RagEvalCaseResult.run_id == run_id)
+        )
+        index_results_total = await db.scalar(
+            select(func.count())
+            .select_from(RagEvalIndexResult)
+            .where(RagEvalIndexResult.run_id == run_id)
+        )
+    assert case_results_total == 0
+    assert index_results_total == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_admin_can_list_rag_eval_runs_with_status_pagination_and_protect_active_delete(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = await register_and_login(
+        client,
+        email="rag-eval-history@example.com",
+        full_name="RAG Eval History Admin",
+    )
+    project_id = await create_project(client, token, name="RAG Eval History")
+    import_response = await client.post(
+        "/admin/rag-eval/datasets/import",
+        headers={"Authorization": f"Bearer {token}"},
+        json=import_payload(project_id),
+    )
+    assert import_response.status_code == 201
+    dataset_id = import_response.json()["dataset"]["id"]
+
+    async def noop_process_run(run_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.routers.admin.AdminRagEvalService.process_run",
+        noop_process_run,
+    )
+
+    first_response = await client.post(
+        f"/admin/rag-eval/datasets/{dataset_id}/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "indexing_mode": "none",
+            "retrieval_limit": 3,
+            "use_query_rewriter": False,
+            "use_hybrid_rerank": False,
+            "include_cross_task": False,
+            "include_current_task_content": False,
+            "run_answer_agent": False,
+            "run_llm_judge": False,
+            "min_score_override": None,
+        },
+    )
+    assert first_response.status_code == 201
+    first_run_id = first_response.json()["id"]
+    await asyncio.sleep(0.01)
+
+    second_response = await client.post(
+        f"/admin/rag-eval/datasets/{dataset_id}/runs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "indexing_mode": "none",
+            "retrieval_limit": 5,
+            "use_query_rewriter": True,
+            "use_hybrid_rerank": True,
+            "include_cross_task": True,
+            "include_current_task_content": False,
+            "run_answer_agent": False,
+            "run_llm_judge": False,
+            "min_score_override": None,
+        },
+    )
+    assert second_response.status_code == 201
+    second_run_id = second_response.json()["id"]
+
+    history_response = await client.get(
+        f"/admin/rag-eval/datasets/{dataset_id}/runs?status=queued&page=1&size=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 2
+    assert history_payload["page"] == 1
+    assert history_payload["page_size"] == 1
+    assert history_payload["items"][0]["id"] == second_run_id
+
+    second_page_response = await client.get(
+        f"/admin/rag-eval/datasets/{dataset_id}/runs?status=queued&page=2&size=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second_page_response.status_code == 200
+    assert second_page_response.json()["items"][0]["id"] == first_run_id
+
+    delete_response = await client.delete(
+        f"/admin/rag-eval/runs/{first_run_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert delete_response.status_code == 409

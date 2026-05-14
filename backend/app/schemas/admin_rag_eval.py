@@ -200,6 +200,28 @@ class RagEvalRunCreateRead(BaseModel):
     created_at: datetime
 
 
+class RagEvalRunListItemRead(BaseModel):
+    id: str
+    dataset_id: str
+    dataset_name: str | None = None
+    project_id: str
+    status: RagEvalRunStatus
+    config: RagEvalRunConfig
+    summary_metrics: dict[str, Any] | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    latency_ms: int | None
+    error_message: str | None
+    created_at: datetime
+
+
+class RagEvalRunPageRead(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    items: list[RagEvalRunListItemRead]
+
+
 class RagEvalJudgeResult(BaseModel):
     groundedness: RagEvalGroundedness
     correctness: RagEvalCorrectness

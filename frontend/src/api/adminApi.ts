@@ -335,8 +335,10 @@ export interface GraphRunGraphViewRead {
   selected_edge_ids: string[];
 }
 
-export interface GraphRunDetailRead
-  extends Omit<GraphRunListItemRead, "events_count" | "llm_requests_count"> {
+export interface GraphRunDetailRead extends Omit<
+  GraphRunListItemRead,
+  "events_count" | "llm_requests_count"
+> {
   input_preview: Record<string, unknown> | null;
   final_state_preview: Record<string, unknown> | null;
   events: GraphRunEventRead[];
@@ -631,6 +633,28 @@ export interface RagEvalRunCreateRead {
   created_at: string;
 }
 
+export interface RagEvalRunListItemRead {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  project_id: string;
+  status: RagEvalRunStatus;
+  config: RagEvalRunConfig;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface RagEvalRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: RagEvalRunListItemRead[];
+}
+
 export interface RagEvalRunRead {
   id: string;
   dataset_id: string;
@@ -835,10 +859,9 @@ export const adminApi = {
     task_id?: string;
   }) =>
     (
-      await apiClient.get<GraphRunPageRead>(
-        "/admin/monitoring/graphs/runs",
-        { params },
-      )
+      await apiClient.get<GraphRunPageRead>("/admin/monitoring/graphs/runs", {
+        params,
+      })
     ).data,
   getGraphRunDetail: async (runId: string) =>
     (
@@ -964,9 +987,25 @@ export const adminApi = {
         config,
       )
     ).data,
+  listRagEvalRuns: async (
+    datasetId: string,
+    params: {
+      page?: number;
+      size?: number;
+      status?: RagEvalRunStatus;
+    } = {},
+  ) =>
+    (
+      await apiClient.get<RagEvalRunPageRead>(
+        `/admin/rag-eval/datasets/${datasetId}/runs`,
+        { params },
+      )
+    ).data,
   getRagEvalRun: async (runId: string) =>
-    (await apiClient.get<RagEvalRunRead>(`/admin/rag-eval/runs/${runId}`))
-      .data,
+    (await apiClient.get<RagEvalRunRead>(`/admin/rag-eval/runs/${runId}`)).data,
+  deleteRagEvalRun: async (runId: string) => {
+    await apiClient.delete(`/admin/rag-eval/runs/${runId}`);
+  },
   exportRagEvalRun: async (runId: string, format: "json" | "csv") =>
     (
       await apiClient.get<string>(`/admin/rag-eval/runs/${runId}/export`, {

@@ -54,7 +54,9 @@ from app.schemas.admin_rag_eval import (
     RagEvalImportResultRead,
     RagEvalRunConfig,
     RagEvalRunCreateRead,
+    RagEvalRunPageRead,
     RagEvalRunRead,
+    RagEvalRunStatus,
 )
 from app.schemas.admin_validation import ValidationQuestionPageRead
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
@@ -332,6 +334,24 @@ async def get_rag_eval_dataset(
     return await AdminRagEvalService.get_dataset(dataset_id, db)
 
 
+@router.get("/rag-eval/datasets/{dataset_id}/runs", response_model=RagEvalRunPageRead)
+async def list_rag_eval_runs(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+    run_status: RagEvalRunStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=50),
+) -> RagEvalRunPageRead:
+    return await AdminRagEvalService.list_runs(
+        dataset_id,
+        db,
+        run_status=run_status,
+        page=page,
+        page_size=size,
+    )
+
+
 @router.post("/rag-eval/datasets/{dataset_id}/runs", response_model=RagEvalRunCreateRead, status_code=201)
 async def create_rag_eval_run(
     dataset_id: str,
@@ -352,6 +372,16 @@ async def get_rag_eval_run(
     db: DBSession,
 ) -> RagEvalRunRead:
     return await AdminRagEvalService.get_run(run_id, db)
+
+
+@router.delete("/rag-eval/runs/{run_id}", status_code=204)
+async def delete_rag_eval_run(
+    run_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminRagEvalService.delete_run(run_id, current_user, db)
+    return Response(status_code=204)
 
 
 @router.get("/rag-eval/runs/{run_id}/export")
