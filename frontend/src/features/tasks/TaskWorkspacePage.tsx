@@ -93,11 +93,16 @@ function shouldShowAgentPending(message: MessageRead) {
     return false;
   }
 
-  return (
-    message.message_type === "question" ||
-    message.message_type === "change_proposal" ||
-    message.content.trim().startsWith("/")
-  );
+  const routing =
+    message.source_ref?.routing != null &&
+    typeof message.source_ref.routing === "object"
+      ? (message.source_ref.routing as Record<string, unknown>)
+      : null;
+  if (routing?.status === "pending" && routing.ai_response_required !== false) {
+    return true;
+  }
+
+  return /^[@/][a-z0-9][a-z0-9_-]*\s+/i.test(message.content.trim());
 }
 
 function InspectorCard({

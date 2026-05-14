@@ -1282,6 +1282,7 @@ async def test_background_question_skips_ai_response() -> None:
     assert state["ai_response_required"] is False
     assert "agent_name" not in state
     assert "response" not in state
+    assert state["source_ref"]["routing"]["status"] == "error"
 
 
 @pytest.mark.asyncio
@@ -1290,7 +1291,10 @@ async def test_llm_routing_can_skip_non_task_question(monkeypatch: pytest.Monkey
         assert kwargs["agent_key"] == "chat-routing"
         return LLMInvocationResult(
             ok=True,
-            text='{"task_related": false, "reason": "smalltalk"}',
+            text=(
+                '{"ai_response_required": false, "target_agent_key": null,'
+                '"message_type": "general", "reason": "smalltalk"}'
+            ),
             provider_config_id="provider-1",
             provider_kind="openai",
             model="gpt-4o-mini",
@@ -1306,8 +1310,12 @@ async def test_llm_routing_can_skip_non_task_question(monkeypatch: pytest.Monkey
         fake_invoke_chat,
     )
 
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return None
+
     state = await run_chat_graph(
-        db=object(),
+        db=FakeDB(),
         task_id="task-1",
         project_id="project-1",
         actor_user_id="user-1",
@@ -1323,6 +1331,7 @@ async def test_llm_routing_can_skip_non_task_question(monkeypatch: pytest.Monkey
 
     assert state["ai_response_required"] is False
     assert "agent_name" not in state
+    assert state["source_ref"]["routing"]["status"] == "skipped"
 
 
 @pytest.mark.asyncio
@@ -1331,7 +1340,10 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
         if kwargs["agent_key"] == "chat-routing":
             return LLMInvocationResult(
                 ok=True,
-                text='{"task_related": true, "reason": "requirements question"}',
+                text=(
+                    '{"ai_response_required": true, "target_agent_key": "qa",'
+                    '"message_type": "question", "reason": "requirements question"}'
+                ),
                 provider_config_id="provider-1",
                 provider_kind="openai",
                 model="gpt-4o-mini",
@@ -1425,6 +1437,81 @@ async def test_llm_routing_can_send_task_question_to_qa(monkeypatch: pytest.Monk
     assert state["ai_response_required"] is True
     assert state["agent_name"] == "QAAgent"
     assert state["source_ref"]["answer_confidence"] == "low"
+    assert state["source_ref"]["routing"]["target_agent_key"] == "qa"
+
+
+@pytest.mark.asyncio
+async def test_llm_routing_sends_plain_task_statement_to_qa(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm_calls: list[str] = []
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        llm_calls.append(str(kwargs["agent_key"]))
+        if kwargs["agent_key"] == "chat-routing":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"ai_response_required": true, "target_agent_key": "qa",'
+                    '"message_type": "question", "reason": "statement asks for task clarification"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=10,
+                completion_tokens=8,
+                total_tokens=18,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Терминальные статусы не перечислены в задаче.",'
+                    '"confidence":"low",'
+                    '"canonical_question":"Какие статусы считаются терминальными?"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=40,
+                prompt_tokens=12,
+                completion_tokens=18,
+                total_tokens=30,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return None
+
+    state = await run_chat_graph(
+        db=FakeDB(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="Status sync",
+        task_status="ready_for_dev",
+        task_content="Backend and frontend should keep statuses in sync.",
+        message_type="general",
+        message_content="Не понимаю, какие статусы считаются терминальными",
+        validation_result={"verdict": "approved", "questions": []},
+        related_tasks=[],
+        requested_agent=None,
+        raw_message_content="Не понимаю, какие статусы считаются терминальными",
+    )
+
+    assert state["ai_response_required"] is True
+    assert state["agent_name"] == "QAAgent"
+    assert state["source_ref"]["answer_confidence"] == "low"
+    assert llm_calls == ["chat-routing", "qa-query-rewriter", "qa-answer"]
 
 
 @pytest.mark.asyncio
@@ -1435,7 +1522,10 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
         if kwargs["agent_key"] == "chat-routing":
             return LLMInvocationResult(
                 ok=True,
-                text='{"task_related": true, "reason": "requirements question"}',
+                text=(
+                    '{"ai_response_required": true, "target_agent_key": "qa",'
+                    '"message_type": "question", "reason": "requirements question"}'
+                ),
                 provider_config_id="provider-1",
                 provider_kind="openai",
                 model="gpt-4o-mini",
@@ -1546,6 +1636,22 @@ async def test_chat_graph_persists_low_confidence_question_via_langgraph(
 @pytest.mark.asyncio
 async def test_chat_graph_creates_proposal_via_langgraph(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "chat-routing":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"ai_response_required": true, "target_agent_key": "change-tracker",'
+                    '"message_type": "change_proposal", "reason": "change request"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
         return LLMInvocationResult(
             ok=True,
             text=(
@@ -1593,17 +1699,109 @@ async def test_chat_graph_creates_proposal_via_langgraph(monkeypatch: pytest.Mon
         task_title="API sync",
         task_status="draft",
         task_content="Backend and frontend should use one schema.",
-        message_type="change_proposal",
-        message_content="Update the API contract",
+        message_type="general",
+        message_content="В контракте API нужен один формат ответа для фронтенда",
         validation_result=None,
         related_tasks=[{"task_id": "task-2", "title": "Schema sync"}],
         requested_agent=None,
-        raw_message_content="Update the API contract",
+        raw_message_content="В контракте API нужен один формат ответа для фронтенда",
     )
 
     assert state["message_type"] == "agent_proposal"
     assert state["source_ref"]["proposal_id"] == "proposal-1"
+    assert state["source_ref"]["routing"]["target_agent_key"] == "change-tracker"
     assert "chat.proposal_requested" in audit_events
+
+
+@pytest.mark.asyncio
+async def test_malformed_llm_routing_skips_without_agent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm_calls: list[str] = []
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        llm_calls.append(str(kwargs["agent_key"]))
+        return LLMInvocationResult(
+            ok=True,
+            text="not json",
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=20,
+            prompt_tokens=8,
+            completion_tokens=8,
+            total_tokens=16,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return None
+
+    state = await run_chat_graph(
+        db=FakeDB(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="API sync",
+        task_status="draft",
+        task_content="Backend and frontend should use one schema.",
+        message_type="general",
+        message_content="Нужно уточнить контракт ответа",
+        validation_result=None,
+        related_tasks=[],
+        requested_agent=None,
+        raw_message_content="Нужно уточнить контракт ответа",
+    )
+
+    assert state["ai_response_required"] is False
+    assert "agent_name" not in state
+    assert state["source_ref"]["routing"]["status"] == "error"
+    assert state["source_ref"]["routing"]["parse_error"] == "malformed_json"
+    assert llm_calls == ["chat-routing"]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_llm_routing_skips_without_agent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm_calls: list[str] = []
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        llm_calls.append(str(kwargs["agent_key"]))
+        raise RuntimeError("router unavailable")
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    state = await run_chat_graph(
+        db=object(),
+        task_id="task-1",
+        project_id="project-1",
+        actor_user_id="user-1",
+        task_title="API sync",
+        task_status="draft",
+        task_content="Backend and frontend should use one schema.",
+        message_type="general",
+        message_content="Нужно уточнить контракт ответа",
+        validation_result=None,
+        related_tasks=[],
+        requested_agent=None,
+        raw_message_content="Нужно уточнить контракт ответа",
+    )
+
+    assert state["ai_response_required"] is False
+    assert "agent_name" not in state
+    assert state["source_ref"]["routing"]["status"] == "error"
+    assert state["source_ref"]["routing"]["runtime_error"] == "router unavailable"
+    assert llm_calls == ["chat-routing"]
 
 
 @pytest.mark.asyncio
@@ -1656,10 +1854,7 @@ async def test_external_subgraph_is_used_for_forced_routing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_external_subgraph_is_used_for_auto_routing() -> None:
-    async def can_handle(context: ChatAgentContext) -> bool:
-        return "#risk" in context.message_content.lower()
-
+async def test_external_subgraph_is_used_for_auto_routing(monkeypatch: pytest.MonkeyPatch) -> None:
     async def run_external(context: ChatAgentContext, routing_mode: str) -> ChatState:
         return {
             "agent_name": "RiskAgent",
@@ -1677,13 +1872,39 @@ async def test_external_subgraph_is_used_for_auto_routing() -> None:
                 aliases=("risk-review",),
                 priority=40,
             ),
-            can_handle=can_handle,
             runner=run_external,
         )
     )
 
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        assert kwargs["agent_key"] == "chat-routing"
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"ai_response_required": true, "target_agent_key": "risk",'
+                '"message_type": "general", "reason": "risk review requested"}'
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=20,
+            prompt_tokens=8,
+            completion_tokens=8,
+            total_tokens=16,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return None
+
     state = await run_chat_graph(
-        db=None,
+        db=FakeDB(),
         task_id="task-1",
         project_id="project-1",
         actor_user_id="user-1",

@@ -11,13 +11,21 @@ interface Props {
   requestedAnalystMessageIds?: Set<string>;
 }
 
-function getPendingQuestion(messages: MessageRead[]) {
+function getPendingRoutingMessage(messages: MessageRead[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.author_id === null) {
       return null;
     }
-    if (message.message_type === "question") {
+    const routing =
+      message.source_ref?.routing != null &&
+      typeof message.source_ref.routing === "object"
+        ? (message.source_ref.routing as Record<string, unknown>)
+        : null;
+    if (
+      routing?.status === "pending" &&
+      routing.ai_response_required !== false
+    ) {
       return message;
     }
   }
@@ -87,7 +95,7 @@ export default function MessageList({
 }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const lastMessageId = messages.at(-1)?.id;
-  const pendingMessage = agentPendingMessage ?? getPendingQuestion(messages);
+  const pendingMessage = agentPendingMessage ?? getPendingRoutingMessage(messages);
 
   useEffect(() => {
     if (!bottomRef.current) {

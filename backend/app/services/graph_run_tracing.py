@@ -407,13 +407,14 @@ async def run_traced_graph(
     graph: Any,
     input_state: dict[str, Any],
     source: str | None = None,
+    force_trace: bool = False,
 ) -> Any:
     existing_trace = _current_trace()
     has_db = isinstance(input_state.get("db"), AsyncSession)
     monitoring_enabled = (
         True if existing_trace is not None else await _is_graph_monitoring_enabled(input_state)
     )
-    if existing_trace is None and (not has_db or not monitoring_enabled):
+    if existing_trace is None and not force_trace and (not has_db or not monitoring_enabled):
         final_state: Any = None
         async for part in _stream_graph(graph, input_state):
             mode, _, payload = _normalize_stream_part(part)

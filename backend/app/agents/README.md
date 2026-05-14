@@ -10,7 +10,7 @@ backend/app/agents/
 |-- attachment_vision_graph.py    # Vision-описание вложений
 |-- change_tracker_agent_graph.py # обработка предложений изменений
 |-- chat_graph.py                 # общий граф маршрутизации сообщений
-|-- chat_routing.py               # forced routing и эвристики типа сообщения
+|-- chat_routing.py               # LLM-маршрутизация сообщений чата
 |-- graph_export.py               # экспорт PNG/HTML схем графов
 |-- manager_agent_graph.py        # fallback/manager subgraph
 |-- provider_test_graph.py        # проверка LLM-провайдера
@@ -28,13 +28,17 @@ backend/app/agents/
 
 1. Пользователь отправляет сообщение в задаче.
 2. `ChatService` сохраняет сообщение.
-3. Тип сообщения предварительно определяется как `general`, `question` или `change_proposal`.
+3. Сообщение пользователя сохраняется как `general`; явный agent prefix сохраняется как pending routing metadata.
 4. `chat_graph` собирает `ChatAgentContext`.
 5. Если сообщение начинается с agent prefix, включается forced routing.
-6. Если forced routing нет, `subgraph_registry` вызывает `can_handle(context)` у зарегистрированных subgraphs.
+6. Если forced routing нет, `chat-routing` LLM выбирает `target_agent_key`, `message_type` или отсутствие ответа.
 7. Выбранный subgraph возвращает `ChatState`: ответ, `agent_name`, `message_type`, `source_ref`, иногда `proposal_text`.
 8. `chat_graph` сохраняет связанные артефакты: agent message, change proposal или validation backlog question.
 9. `ChatRealtimeService` публикует обновления через WebSocket.
+
+`source_ref.routing` фиксирует режим, статус, выбранного агента, тип сообщения,
+причину решения, provider/model и ошибки парсинга или runtime, если routing не
+смог вернуть корректное решение.
 
 ## Forced routing
 
@@ -172,10 +176,6 @@ from app.agents.state import ChatState
 from app.agents.subgraph_registry import AgentSubgraphSpec, register_agent_subgraph
 
 
-async def can_handle(context: ChatAgentContext) -> bool:
-    return "#risk" in context.message_content.lower()
-
-
 async def run_risk_agent(context: ChatAgentContext, routing_mode: str) -> ChatState:
     return {
         "agent_name": "RiskAgent",
@@ -194,11 +194,15 @@ register_agent_subgraph(
             aliases=("risk-review",),
             priority=40,
         ),
-        can_handle=can_handle,
         runner=run_risk_agent,
     )
 )
 ```
+
+Для auto-routing внешний агент должен иметь понятные `key`, `name` и
+`description`: LLM-роутер выбирает его по этим метаданным. `can_handle` можно
+оставлять для прямого использования registry, но основной chat graph больше не
+использует эвристическое auto-routing.
 
 ## Экспорт схем
 

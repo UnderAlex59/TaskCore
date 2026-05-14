@@ -12,6 +12,7 @@ from typing import Any
 
 from app.agents.attachment_vision_graph import get_attachment_vision_graph
 from app.agents.chat_graph import get_chat_graph
+from app.agents.chat_routing_eval_graph import get_chat_routing_eval_graph
 from app.agents.provider_test_graph import get_provider_test_graph
 from app.agents.rag_pipeline import get_rag_pipeline_graph
 from app.agents.rag_retrieval_graph import get_rag_retrieval_graph
@@ -32,6 +33,7 @@ class GraphExportSpec:
 def _static_graph_export_specs() -> tuple[GraphExportSpec, ...]:
     return (
         GraphExportSpec(name="chat_graph", factory=get_chat_graph),
+        GraphExportSpec(name="chat_routing_eval_graph", factory=get_chat_routing_eval_graph),
         GraphExportSpec(name="validation_graph", factory=get_validation_graph),
         GraphExportSpec(name="rag_pipeline", factory=get_rag_pipeline_graph),
         GraphExportSpec(name="rag_retrieval_graph", factory=get_rag_retrieval_graph),

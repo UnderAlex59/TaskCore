@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 const adminNavItems = [
   { href: "/admin/monitoring", label: "Мониторинг" },
   { href: "/admin/graph-runs", label: "Графы" },
+  { href: "/admin/orchestrator-eval", label: "Оркестратор" },
   { href: "/admin/qdrant", label: "Qdrant и RAG" },
   { href: "/admin/rag-eval", label: "RAG Eval" },
   { href: "/admin/llm-requests", label: "LLM-запросы" },

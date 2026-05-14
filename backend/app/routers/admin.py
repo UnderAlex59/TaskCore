@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 
 from app.core.dependencies import DBSession, require_role
 from app.models.task import TaskStatus
@@ -37,6 +47,19 @@ from app.schemas.admin_monitoring import (
     MonitoringRange,
     MonitoringSummaryRead,
 )
+from app.schemas.admin_orchestrator_eval import (
+    OrchestratorEvalDatasetDetailRead,
+    OrchestratorEvalDatasetRead,
+    OrchestratorEvalImportPayload,
+    OrchestratorEvalImportResultRead,
+    OrchestratorEvalPlaygroundResultRead,
+    OrchestratorEvalPlaygroundRunPayload,
+    OrchestratorEvalRunConfig,
+    OrchestratorEvalRunCreateRead,
+    OrchestratorEvalRunPageRead,
+    OrchestratorEvalRunRead,
+    OrchestratorEvalRunStatus,
+)
 from app.schemas.admin_qdrant import (
     QdrantDuplicateProposalProbePayload,
     QdrantOverviewRead,
@@ -61,6 +84,7 @@ from app.schemas.admin_rag_eval import (
 from app.schemas.admin_validation import ValidationQuestionPageRead
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
+from app.services.admin_orchestrator_eval_service import AdminOrchestratorEvalService
 from app.services.admin_qdrant_service import AdminQdrantService
 from app.services.admin_rag_eval_service import AdminRagEvalService
 from app.services.llm_prompt_service import LLMPromptService
@@ -352,7 +376,11 @@ async def list_rag_eval_runs(
     )
 
 
-@router.post("/rag-eval/datasets/{dataset_id}/runs", response_model=RagEvalRunCreateRead, status_code=201)
+@router.post(
+    "/rag-eval/datasets/{dataset_id}/runs",
+    response_model=RagEvalRunCreateRead,
+    status_code=201,
+)
 async def create_rag_eval_run(
     dataset_id: str,
     payload: RagEvalRunConfig,
@@ -407,6 +435,137 @@ async def delete_rag_eval_dataset(
 ) -> Response:
     await AdminRagEvalService.delete_dataset(dataset_id, current_user, db)
     return Response(status_code=204)
+
+
+@router.post(
+    "/orchestrator-eval/playground/run",
+    response_model=OrchestratorEvalPlaygroundResultRead,
+)
+async def run_orchestrator_eval_playground(
+    payload: OrchestratorEvalPlaygroundRunPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> OrchestratorEvalPlaygroundResultRead:
+    return await AdminOrchestratorEvalService.run_playground(payload, current_user, db)
+
+
+@router.get(
+    "/orchestrator-eval/datasets",
+    response_model=list[OrchestratorEvalDatasetRead],
+)
+async def list_orchestrator_eval_datasets(
+    _: AdminUser,
+    db: DBSession,
+) -> list[OrchestratorEvalDatasetRead]:
+    return await AdminOrchestratorEvalService.list_datasets(db)
+
+
+@router.post(
+    "/orchestrator-eval/datasets/import",
+    response_model=OrchestratorEvalImportResultRead,
+    status_code=201,
+)
+async def import_orchestrator_eval_dataset(
+    payload: OrchestratorEvalImportPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> OrchestratorEvalImportResultRead:
+    return await AdminOrchestratorEvalService.import_dataset(payload, current_user, db)
+
+
+@router.get(
+    "/orchestrator-eval/datasets/{dataset_id}",
+    response_model=OrchestratorEvalDatasetDetailRead,
+)
+async def get_orchestrator_eval_dataset(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> OrchestratorEvalDatasetDetailRead:
+    return await AdminOrchestratorEvalService.get_dataset(dataset_id, db)
+
+
+@router.get(
+    "/orchestrator-eval/datasets/{dataset_id}/runs",
+    response_model=OrchestratorEvalRunPageRead,
+)
+async def list_orchestrator_eval_runs(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+    run_status: OrchestratorEvalRunStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> OrchestratorEvalRunPageRead:
+    return await AdminOrchestratorEvalService.list_runs(
+        dataset_id,
+        db,
+        run_status=run_status,
+        page=page,
+        page_size=size,
+    )
+
+
+@router.post(
+    "/orchestrator-eval/datasets/{dataset_id}/runs",
+    response_model=OrchestratorEvalRunCreateRead,
+    status_code=201,
+)
+async def create_orchestrator_eval_run(
+    dataset_id: str,
+    payload: OrchestratorEvalRunConfig,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser,
+    db: DBSession,
+) -> OrchestratorEvalRunCreateRead:
+    run = await AdminOrchestratorEvalService.create_run(
+        dataset_id,
+        payload,
+        current_user,
+        db,
+    )
+    background_tasks.add_task(AdminOrchestratorEvalService.process_run, run.id)
+    return run
+
+
+@router.get(
+    "/orchestrator-eval/runs/{run_id}",
+    response_model=OrchestratorEvalRunRead,
+)
+async def get_orchestrator_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> OrchestratorEvalRunRead:
+    return await AdminOrchestratorEvalService.get_run(run_id, db)
+
+
+@router.delete("/orchestrator-eval/runs/{run_id}", status_code=204)
+async def delete_orchestrator_eval_run(
+    run_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> None:
+    await AdminOrchestratorEvalService.delete_run(run_id, current_user, db)
+
+
+@router.get("/orchestrator-eval/runs/{run_id}/export")
+async def export_orchestrator_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
+) -> Response:
+    filename, media_type, content = await AdminOrchestratorEvalService.export_run(
+        run_id,
+        export_format,
+        db,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/monitoring/llm/requests", response_model=LLMRequestLogPageRead)

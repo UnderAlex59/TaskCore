@@ -435,6 +435,22 @@ async def test_low_confidence_task_question_is_saved_for_validation_backlog(
         *args,
         **kwargs,
     ) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "chat-routing":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"ai_response_required": true, "target_agent_key": "qa",'
+                    '"message_type": "question", "reason": "requirements question"}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
         if kwargs["agent_key"] == "qa-planner":
             return LLMInvocationResult(
                 ok=True,

@@ -17,6 +17,12 @@ from app.models.notification import (
     TelegramConnection,
     TelegramLinkToken,
 )
+from app.models.orchestrator_eval import (
+    OrchestratorEvalCase,
+    OrchestratorEvalCaseResult,
+    OrchestratorEvalDataset,
+    OrchestratorEvalRun,
+)
 from app.models.project import Project, ProjectMember
 from app.models.project_task_tag import ProjectTaskTag
 from app.models.rag_eval import (
@@ -49,6 +55,10 @@ __all__ = [
     "ChatReadState",
     "Notification",
     "NotificationDelivery",
+    "OrchestratorEvalCase",
+    "OrchestratorEvalCaseResult",
+    "OrchestratorEvalDataset",
+    "OrchestratorEvalRun",
     "Project",
     "ProjectMember",
     "ProjectTaskTag",

@@ -82,8 +82,8 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
             agent_key="chat-routing",
             name="ChatRoutingAgent",
             description=(
-                "Определяет, относится ли сообщение пользователя к предметному "
-                "контексту текущей задачи."
+                "Решает, нужен ли автоматический ответ в чате задачи, "
+                "и выбирает подходящий LangGraph subgraph."
             ),
             default_system_prompt=CHAT_ROUTING_SYSTEM_PROMPT,
             priority=60,

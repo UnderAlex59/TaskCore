@@ -6,11 +6,12 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.chat_agents.base import ChatAgentContext
+from app.agents.chat_routing import analyze_chat_routing
 from app.agents.state import ChatState
 from app.agents.subgraph_registry import (
     find_agent_subgraph,
+    list_agent_subgraphs,
     run_agent_subgraph,
-    select_agent_subgraph,
 )
 from app.services.graph_run_tracing import run_traced_graph, traced_condition, traced_node
 
@@ -32,6 +33,7 @@ class ChatGraphState(ChatState, total=False):
     related_tasks: list[dict[str, object]]
     requested_agent: str | None
     raw_message_content: str | None
+    routing: dict[str, object]
     routing_reason: str
     target_agent_key: str | None
     routing_mode: str
@@ -62,38 +64,97 @@ def _prepare_chat_request(state: ChatGraphState) -> ChatGraphState:
     }
 
 
+def _build_available_routing_agents() -> list[dict[str, object]]:
+    return [
+        {
+            "key": spec.metadata.key,
+            "name": spec.metadata.name,
+            "description": spec.metadata.description,
+            "aliases": list(spec.metadata.aliases),
+        }
+        for spec in list_agent_subgraphs()
+        if spec.auto_routable
+    ]
+
+
+def _forced_routing_ref(
+    *,
+    target_agent_key: str,
+    message_type: str,
+    reason: str,
+    requested_agent: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "mode": "forced",
+        "status": "routed",
+        "ai_response_required": True,
+        "target_agent_key": target_agent_key,
+        "message_type": message_type,
+        "reason": reason,
+        "provider_kind": None,
+        "model": None,
+    }
+    if requested_agent is not None:
+        payload["requested_agent"] = requested_agent
+    return payload
+
+
 async def _orchestrate_chat_request(state: ChatGraphState) -> ChatGraphState:
     requested_agent = state.get("requested_agent")
     if requested_agent is not None:
         target_spec = find_agent_subgraph(str(requested_agent))
         if target_spec is not None:
+            routing = _forced_routing_ref(
+                target_agent_key=target_spec.metadata.key,
+                message_type=str(state.get("message_type", "general")),
+                reason="forced_agent",
+                requested_agent=str(requested_agent),
+            )
             return {
                 "ai_response_required": True,
                 "target_agent_key": target_spec.metadata.key,
                 "routing_mode": "forced",
                 "routing_reason": "forced_agent",
+                "routing": routing,
+                "source_ref": {"routing": routing},
             }
+        routing = _forced_routing_ref(
+            target_agent_key=MANAGER_AGENT_KEY,
+            message_type="general",
+            reason="unknown_forced_agent",
+            requested_agent=str(requested_agent),
+        )
         return {
             "ai_response_required": True,
             "target_agent_key": MANAGER_AGENT_KEY,
             "routing_mode": "forced",
             "routing_reason": "unknown_forced_agent",
+            "message_type": "general",
+            "routing": routing,
+            "source_ref": {"routing": routing},
         }
 
-    target_spec = await select_agent_subgraph(_build_chat_agent_context(state))
-    if target_spec is None:
-        return {
-            "ai_response_required": False,
-            "target_agent_key": None,
-            "routing_mode": "auto",
-            "routing_reason": "background_message",
-        }
+    outcome = await analyze_chat_routing(
+        db=state.get("db"),
+        actor_user_id=state.get("actor_user_id"),
+        task_id=state.get("task_id"),
+        project_id=state.get("project_id"),
+        task_title=str(state.get("task_title", "")),
+        task_status=str(state.get("task_status", "")),
+        task_content=str(state.get("task_content", "")),
+        message_content=str(state.get("message_content", "")),
+        available_agents=_build_available_routing_agents(),
+    )
+    routing = outcome.source_ref(mode="auto")
 
     return {
-        "ai_response_required": True,
-        "target_agent_key": target_spec.metadata.key,
+        "ai_response_required": outcome.ai_response_required,
+        "target_agent_key": outcome.target_agent_key,
+        "message_type": outcome.message_type,
         "routing_mode": "auto",
-        "routing_reason": f"auto_agent:{target_spec.metadata.key}",
+        "routing_reason": outcome.reason,
+        "routing": routing,
+        "source_ref": {"routing": routing},
     }
 
 
@@ -148,7 +209,10 @@ async def _invoke_agent_subgraph(state: ChatGraphState) -> ChatGraphState:
         "agent_name": str(result.get("agent_name", "")),
         "message_type": str(result.get("message_type", "")),
         "response": str(result.get("response", "")),
-        "source_ref": dict(result.get("source_ref", {})),
+        "source_ref": {
+            **dict(result.get("source_ref", {})),
+            "routing": dict(state.get("routing", {})),
+        },
     }
     proposal_text = result.get("proposal_text")
     if proposal_text is not None:
@@ -169,7 +233,10 @@ async def _persist_chat_artifacts(state: ChatGraphState) -> ChatGraphState:
     message_type = str(state.get("message_type", ""))
 
     duplicate_proposal = bool(source_ref.get("duplicate_proposal"))
-    if (state.get("proposal_text") is not None or message_type == "agent_proposal") and not duplicate_proposal:
+    should_create_proposal = (
+        state.get("proposal_text") is not None or message_type == "agent_proposal"
+    )
+    if should_create_proposal and not duplicate_proposal:
         from app.services.audit_service import AuditService
         from app.services.proposal_service import ProposalService
 
@@ -237,6 +304,7 @@ def _finalize_chat_response(state: ChatGraphState) -> ChatGraphState:
         "message_type": str(state.get("message_type", "")),
         "response": str(state.get("response", "")),
         "source_ref": dict(state.get("source_ref", {})),
+        "routing": dict(state.get("routing", {})),
     }
     proposal_text = state.get("proposal_text")
     if proposal_text is not None:
@@ -247,12 +315,30 @@ def _finalize_chat_response(state: ChatGraphState) -> ChatGraphState:
 @lru_cache
 def get_chat_graph():
     graph = StateGraph(ChatGraphState)
-    graph.add_node("prepare_chat_request", traced_node("prepare_chat_request", _prepare_chat_request))
-    graph.add_node("orchestrate_chat_request", traced_node("orchestrate_chat_request", _orchestrate_chat_request))
-    graph.add_node("collect_related_tasks", traced_node("collect_related_tasks", _collect_related_tasks))
-    graph.add_node("invoke_agent_subgraph", traced_node("invoke_agent_subgraph", _invoke_agent_subgraph))
-    graph.add_node("persist_chat_artifacts", traced_node("persist_chat_artifacts", _persist_chat_artifacts))
-    graph.add_node("finalize_chat_response", traced_node("finalize_chat_response", _finalize_chat_response))
+    graph.add_node(
+        "prepare_chat_request",
+        traced_node("prepare_chat_request", _prepare_chat_request),
+    )
+    graph.add_node(
+        "orchestrate_chat_request",
+        traced_node("orchestrate_chat_request", _orchestrate_chat_request),
+    )
+    graph.add_node(
+        "collect_related_tasks",
+        traced_node("collect_related_tasks", _collect_related_tasks),
+    )
+    graph.add_node(
+        "invoke_agent_subgraph",
+        traced_node("invoke_agent_subgraph", _invoke_agent_subgraph),
+    )
+    graph.add_node(
+        "persist_chat_artifacts",
+        traced_node("persist_chat_artifacts", _persist_chat_artifacts),
+    )
+    graph.add_node(
+        "finalize_chat_response",
+        traced_node("finalize_chat_response", _finalize_chat_response),
+    )
     graph.add_edge(START, "prepare_chat_request")
     graph.add_edge("prepare_chat_request", "orchestrate_chat_request")
     graph.add_conditional_edges(
@@ -320,6 +406,7 @@ async def run_chat_graph(
 
     result: ChatState = {
         "ai_response_required": bool(state.get("ai_response_required")),
+        "source_ref": dict(state.get("source_ref", {})),
     }
     if not result["ai_response_required"]:
         return result

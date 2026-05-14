@@ -53,7 +53,7 @@ describe("MessageList", () => {
     });
   });
 
-  it("shows a waiting indicator after a recognized task question", () => {
+  it("does not show a waiting indicator from the old question message type", () => {
     render(
       <MessageList
         messages={[
@@ -61,6 +61,28 @@ describe("MessageList", () => {
             ...baseMessage,
             content: "Какие статусы считаются терминальными?",
             message_type: "question",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText("Агент отвечает")).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting indicator when routing metadata is pending", () => {
+    render(
+      <MessageList
+        messages={[
+          {
+            ...baseMessage,
+            content: "Какие статусы считаются терминальными?",
+            message_type: "general",
+            source_ref: {
+              routing: {
+                ai_response_required: true,
+                status: "pending",
+              },
+            },
           },
         ]}
       />,

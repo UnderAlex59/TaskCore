@@ -13,6 +13,7 @@ import CustomRulesEditor from "@/features/admin/CustomRulesEditor";
 import GraphRunsPage from "@/features/admin/GraphRunsPage";
 import LLMRequestLogsPage from "@/features/admin/LLMRequestLogsPage";
 import MonitoringPage from "@/features/admin/MonitoringPage";
+import OrchestratorEvalPage from "@/features/admin/OrchestratorEvalPage";
 import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 import TaskTagsPage from "@/features/admin/TaskTagsPage";
 import ValidationQuestionsPage from "@/features/admin/ValidationQuestionsPage";
@@ -66,6 +67,10 @@ export default function App() {
                   />
                   <Route path="monitoring" element={<MonitoringPage />} />
                   <Route path="graph-runs" element={<GraphRunsPage />} />
+                  <Route
+                    path="orchestrator-eval"
+                    element={<OrchestratorEvalPage />}
+                  />
                   <Route path="qdrant" element={<QdrantAdminPage />} />
                   <Route path="rag-eval" element={<RagEvalPage />} />
                   <Route path="llm-requests" element={<LLMRequestLogsPage />} />

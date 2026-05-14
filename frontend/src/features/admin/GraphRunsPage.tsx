@@ -46,6 +46,7 @@ const GRAPH_LABELS: Record<string, string> = {
   attachment_vision_graph: "Vision вложений",
   change_tracker_agent_graph: "Change tracker",
   chat_graph: "Чат",
+  chat_routing_eval_graph: "Orchestrator Eval",
   manager_agent_graph: "Manager",
   provider_test_graph: "Проверка провайдера",
   qa_agent_graph: "QA",

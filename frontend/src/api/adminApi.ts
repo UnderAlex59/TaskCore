@@ -705,6 +705,143 @@ export interface RagEvalRunRead {
   }>;
 }
 
+export type OrchestratorEvalImportFormat = "json" | "csv";
+export type OrchestratorEvalRunStatus = "queued" | "running" | "success" | "error";
+export type OrchestratorEvalCaseStatus = "passed" | "failed" | "error";
+export type OrchestratorRoutingMode = "auto" | "forced";
+export type OrchestratorMessageType = "general" | "question" | "change_proposal";
+
+export interface OrchestratorEvalExpectedRoute {
+  ai_response_required?: boolean | null;
+  target_agent_key?: string | null;
+  message_type?: OrchestratorMessageType | null;
+  routing_mode?: OrchestratorRoutingMode | null;
+  reason_contains?: string | null;
+}
+
+export interface OrchestratorEvalInput {
+  project_id: string;
+  task_id?: string | null;
+  task_title: string;
+  task_status: string;
+  task_content: string;
+  validation_result?: Record<string, unknown> | null;
+  message_content: string;
+  requested_agent?: string | null;
+}
+
+export interface OrchestratorEvalRunConfig {
+  compare_reason: boolean;
+}
+
+export interface OrchestratorEvalPlaygroundRunPayload {
+  input: OrchestratorEvalInput;
+  expected_route?: OrchestratorEvalExpectedRoute | null;
+  config: OrchestratorEvalRunConfig;
+}
+
+export interface OrchestratorEvalImportPayload {
+  format: OrchestratorEvalImportFormat;
+  dataset_name?: string | null;
+  project_id?: string | null;
+  content?: string | null;
+  payload?: {
+    dataset_name: string;
+    project_id: string;
+    cases: Array<{
+      external_id: string;
+      input: OrchestratorEvalInput;
+      expected_route?: OrchestratorEvalExpectedRoute;
+    }>;
+  } | null;
+}
+
+export interface OrchestratorEvalDatasetRead {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  name: string;
+  cases_total: number;
+  last_run_id: string | null;
+  last_run_status: OrchestratorEvalRunStatus | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrchestratorEvalCaseRead {
+  id: string;
+  external_id: string;
+  input: OrchestratorEvalInput;
+  expected_route: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface OrchestratorEvalDatasetDetailRead extends OrchestratorEvalDatasetRead {
+  cases: OrchestratorEvalCaseRead[];
+}
+
+export interface OrchestratorEvalImportResultRead {
+  dataset: OrchestratorEvalDatasetDetailRead;
+  imported_cases: number;
+  warnings: string[];
+}
+
+export interface OrchestratorEvalPlaygroundResultRead {
+  status: OrchestratorEvalCaseStatus;
+  input: OrchestratorEvalInput;
+  expected_route: Record<string, unknown>;
+  actual_route: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  graph_run_id: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+}
+
+export interface OrchestratorEvalCaseResultRead extends OrchestratorEvalPlaygroundResultRead {
+  id: string;
+  case_id: string;
+  case_external_id: string;
+  created_at: string;
+}
+
+export interface OrchestratorEvalRunCreateRead {
+  id: string;
+  dataset_id: string;
+  status: OrchestratorEvalRunStatus;
+  config: OrchestratorEvalRunConfig;
+  created_at: string;
+}
+
+export interface OrchestratorEvalRunListItemRead {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  project_id: string;
+  status: OrchestratorEvalRunStatus;
+  config: OrchestratorEvalRunConfig;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface OrchestratorEvalRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: OrchestratorEvalRunListItemRead[];
+}
+
+export interface OrchestratorEvalRunRead extends Omit<
+  OrchestratorEvalRunListItemRead,
+  "summary_metrics"
+> {
+  summary_metrics: Record<string, unknown> | null;
+  case_results: OrchestratorEvalCaseResultRead[];
+}
+
 export const adminApi = {
   listProviders: async () =>
     (await apiClient.get<ProviderConfigRead[]>("/admin/llm/providers")).data,
@@ -1012,5 +1149,78 @@ export const adminApi = {
         params: { format },
         responseType: "text",
       })
+    ).data,
+  runOrchestratorEvalPlayground: async (
+    payload: OrchestratorEvalPlaygroundRunPayload,
+  ) =>
+    (
+      await apiClient.post<OrchestratorEvalPlaygroundResultRead>(
+        "/admin/orchestrator-eval/playground/run",
+        payload,
+      )
+    ).data,
+  listOrchestratorEvalDatasets: async () =>
+    (
+      await apiClient.get<OrchestratorEvalDatasetRead[]>(
+        "/admin/orchestrator-eval/datasets",
+      )
+    ).data,
+  importOrchestratorEvalDataset: async (
+    payload: OrchestratorEvalImportPayload,
+  ) =>
+    (
+      await apiClient.post<OrchestratorEvalImportResultRead>(
+        "/admin/orchestrator-eval/datasets/import",
+        payload,
+      )
+    ).data,
+  getOrchestratorEvalDataset: async (datasetId: string) =>
+    (
+      await apiClient.get<OrchestratorEvalDatasetDetailRead>(
+        `/admin/orchestrator-eval/datasets/${datasetId}`,
+      )
+    ).data,
+  createOrchestratorEvalRun: async (
+    datasetId: string,
+    config: OrchestratorEvalRunConfig,
+  ) =>
+    (
+      await apiClient.post<OrchestratorEvalRunCreateRead>(
+        `/admin/orchestrator-eval/datasets/${datasetId}/runs`,
+        config,
+      )
+    ).data,
+  listOrchestratorEvalRuns: async (
+    datasetId: string,
+    params: {
+      page?: number;
+      size?: number;
+      status?: OrchestratorEvalRunStatus;
+    } = {},
+  ) =>
+    (
+      await apiClient.get<OrchestratorEvalRunPageRead>(
+        `/admin/orchestrator-eval/datasets/${datasetId}/runs`,
+        { params },
+      )
+    ).data,
+  getOrchestratorEvalRun: async (runId: string) =>
+    (
+      await apiClient.get<OrchestratorEvalRunRead>(
+        `/admin/orchestrator-eval/runs/${runId}`,
+      )
+    ).data,
+  deleteOrchestratorEvalRun: async (runId: string) => {
+    await apiClient.delete(`/admin/orchestrator-eval/runs/${runId}`);
+  },
+  exportOrchestratorEvalRun: async (runId: string, format: "json" | "csv") =>
+    (
+      await apiClient.get<string>(
+        `/admin/orchestrator-eval/runs/${runId}/export`,
+        {
+          params: { format },
+          responseType: "text",
+        },
+      )
     ).data,
 };

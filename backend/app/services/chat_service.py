@@ -22,7 +22,6 @@ from app.services.task_service import TaskService
 @dataclass(slots=True)
 class PendingChatResponse:
     actor_user_id: str
-    message_type: MessageType
     raw_message_content: str
     requested_agent: str | None
     routed_content: str
@@ -36,23 +35,20 @@ class PendingChatResponse:
 
 class ChatService:
     @staticmethod
-    def _detect_message_type(content: str) -> MessageType:
-        lowered = content.lower()
-        proposal_markers = (
-            "предлага",
-            "измен",
-            "change",
-            "нужно поменять",
-            "следует заменить",
-        )
-        if any(marker in lowered for marker in proposal_markers):
-            return MessageType.CHANGE_PROPOSAL
-        if content.strip().endswith("?") or any(
-            marker in lowered
-            for marker in ("как", "почему", "зачем", "что если", "when", "why", "how")
-        ):
-            return MessageType.QUESTION
-        return MessageType.GENERAL
+    def _initial_source_ref(requested_agent: str | None) -> dict | None:
+        if requested_agent is None:
+            return None
+        return {
+            "routing": {
+                "mode": "forced",
+                "status": "pending",
+                "ai_response_required": True,
+                "target_agent_key": None,
+                "message_type": MessageType.GENERAL.value,
+                "reason": "forced_agent_pending",
+                "requested_agent": requested_agent,
+            }
+        }
 
     @staticmethod
     async def list_messages(
@@ -95,16 +91,15 @@ class ChatService:
     ) -> tuple[list[MessageRead], PendingChatResponse]:
         task = await TaskService.get_task_with_chat_access(task_id, current_user, db)
         requested_agent, routed_content = parse_requested_agent(payload.content)
-        message_type = ChatService._detect_message_type(routed_content)
         stripped_content = payload.content.strip()
 
         user_message = Message(
             task_id=task.id,
             author_id=current_user.id,
             agent_name=None,
-            message_type=message_type,
+            message_type=MessageType.GENERAL,
             content=stripped_content,
-            source_ref=None,
+            source_ref=ChatService._initial_source_ref(requested_agent),
         )
         db.add(user_message)
         await db.flush()
@@ -116,7 +111,7 @@ class ChatService:
             entity_id=user_message.id,
             project_id=task.project_id,
             task_id=task.id,
-            metadata={"message_type": message_type.value},
+            metadata={"message_type": MessageType.GENERAL.value},
         )
         from app.services.notification_service import NotificationService
 
@@ -134,7 +129,6 @@ class ChatService:
             ],
             PendingChatResponse(
                 actor_user_id=current_user.id,
-                message_type=message_type,
                 raw_message_content=stripped_content,
                 requested_agent=requested_agent,
                 routed_content=routed_content,
@@ -145,6 +139,33 @@ class ChatService:
                 user_message_id=user_message.id,
                 validation_result=task.validation_result,
             ),
+        )
+
+    @staticmethod
+    async def _apply_source_message_routing(
+        db: AsyncSession,
+        *,
+        source_message_id: str | None,
+        routing_source_ref: dict,
+    ) -> MessageRead | None:
+        routing = dict(routing_source_ref.get("routing", {}))
+        if not source_message_id or not routing:
+            return None
+
+        source_message = await db.get(Message, source_message_id)
+        if source_message is None:
+            return None
+
+        source_ref = dict(source_message.source_ref or {})
+        source_ref["routing"] = routing
+        source_message.source_ref = source_ref
+        await db.flush()
+
+        author = await db.get(User, source_message.author_id) if source_message.author_id else None
+        return serialize_message(
+            source_message,
+            author_name=(author.nickname or author.full_name) if author else None,
+            author_avatar_url=author.avatar_url if author else None,
         )
 
     @staticmethod
@@ -162,14 +183,25 @@ class ChatService:
                 task_title=pending.task_title,
                 task_status=pending.task_status,
                 task_content=pending.task_content,
-                message_type=pending.message_type.value,
+                message_type=MessageType.GENERAL.value,
                 message_content=pending.routed_content,
                 validation_result=task.validation_result,
                 requested_agent=pending.requested_agent,
                 raw_message_content=pending.raw_message_content,
                 source_message_id=pending.user_message_id,
             )
+            updated_source_message = await ChatService._apply_source_message_routing(
+                db,
+                source_message_id=pending.user_message_id,
+                routing_source_ref=dict(graph_state.get("source_ref", {})),
+            )
             if not graph_state.get("ai_response_required"):
+                await db.commit()
+                if updated_source_message is not None:
+                    await chat_connection_manager.broadcast_messages(
+                        pending.task_id,
+                        [updated_source_message],
+                    )
                 return
 
             agent_message_type = MessageType(
@@ -201,9 +233,23 @@ class ChatService:
                 await NotificationService.notify_qa_needs_analyst(task, agent_message, db)
             await db.commit()
             await db.refresh(agent_message)
+            if updated_source_message is not None:
+                source_message = await db.get(Message, updated_source_message.id)
+                if source_message is not None:
+                    author = (
+                        await db.get(User, source_message.author_id)
+                        if source_message.author_id
+                        else None
+                    )
+                    updated_source_message = serialize_message(
+                        source_message,
+                        author_name=(author.nickname or author.full_name) if author else None,
+                        author_avatar_url=author.avatar_url if author else None,
+                    )
             await chat_connection_manager.broadcast_messages(
                 pending.task_id,
                 [
+                    *([updated_source_message] if updated_source_message is not None else []),
                     serialize_message(
                         agent_message,
                         author_name=None,
