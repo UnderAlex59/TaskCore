@@ -4,14 +4,41 @@ export interface ValidationResult {
   verdict: "approved" | "needs_rework";
   issues: Array<{
     code: string;
+    finding_id?: string | null;
     message: string;
     severity: "low" | "medium" | "high";
+    source?: "core_rules" | "custom_rules" | "context_questions" | null;
   }>;
   questions: Array<
     | string
     | { content?: string; message?: string; question?: string; text?: string }
   >;
   validated_at: string;
+  automated_verdict?: "approved" | "needs_rework" | null;
+  appeal?: ValidationAppeal | null;
+}
+
+export interface ValidationAppealItem {
+  finding_id: string;
+  source?: "core_rules" | "custom_rules" | "context_questions" | null;
+  code: string;
+  severity: "low" | "medium" | "high";
+  message: string;
+  reason: string;
+}
+
+export interface ValidationAppeal {
+  status: "accepted";
+  appealed_at: string;
+  appealed_by: string;
+  items: ValidationAppealItem[];
+}
+
+export interface ValidationAppealCreate {
+  items: Array<{
+    finding_id: string;
+    reason: string;
+  }>;
 }
 
 export interface TaskTagSuggestionItem {
@@ -113,6 +140,17 @@ export const tasksApi = {
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/commit`)).data,
   approve: async (projectId: string, taskId: string, payload: TaskApprove) =>
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/approve`, payload)).data,
+  appealValidation: async (
+    projectId: string,
+    taskId: string,
+    payload: ValidationAppealCreate,
+  ) =>
+    (
+      await apiClient.post<TaskRead>(
+        `/projects/${projectId}/tasks/${taskId}/validation-appeal`,
+        payload,
+      )
+    ).data,
   startDevelopment: async (projectId: string, taskId: string) =>
     (await apiClient.post<TaskRead>(`/projects/${projectId}/tasks/${taskId}/start-development`)).data,
   markReadyForTesting: async (projectId: string, taskId: string) =>

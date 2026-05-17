@@ -66,7 +66,12 @@ class AuthService:
         stmt: Select[tuple[User]] = select(User).where(User.email == email)
         user = (await db.execute(stmt)).scalar_one_or_none()
 
-        if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        if (
+            user is None
+            or not user.is_active
+            or user.deleted_at is not None
+            or not verify_password(password, user.password_hash)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверные учётные данные",
@@ -148,7 +153,7 @@ class AuthService:
         token.revoked_at = now
 
         user = await db.get(User, token.user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.deleted_at is not None:
             await db.commit()
             response.delete_cookie("refresh_token", domain=settings.COOKIE_DOMAIN)
             raise HTTPException(

@@ -32,6 +32,19 @@ class TaskApprove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ValidationAppealItemCreate(BaseModel):
+    finding_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=1000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ValidationAppealCreate(BaseModel):
+    items: list[ValidationAppealItemCreate] = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TaskAttachmentRead(BaseModel):
     id: str
     task_id: str
@@ -67,6 +80,24 @@ class ValidationIssue(BaseModel):
     code: str
     message: str
     severity: Literal["low", "medium", "high"]
+    finding_id: str | None = None
+    source: Literal["core_rules", "custom_rules", "context_questions"] | None = None
+
+
+class ValidationAppealItem(BaseModel):
+    finding_id: str
+    source: Literal["core_rules", "custom_rules", "context_questions"] | None = None
+    code: str
+    severity: Literal["low", "medium", "high"]
+    message: str
+    reason: str
+
+
+class ValidationAppeal(BaseModel):
+    status: Literal["accepted"]
+    appealed_at: datetime
+    appealed_by: str
+    items: list[ValidationAppealItem]
 
 
 class TaskRead(BaseModel):
@@ -98,3 +129,5 @@ class ValidationResult(BaseModel):
     issues: list[ValidationIssue]
     questions: list[str]
     validated_at: datetime
+    automated_verdict: Literal["approved", "needs_rework"] | None = None
+    appeal: ValidationAppeal | None = None

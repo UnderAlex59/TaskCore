@@ -5,8 +5,9 @@ import base64
 import hashlib
 import ssl
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
@@ -40,6 +41,7 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "gigachat": "https://gigachat.devices.sberbank.ru/api/v1",
 }
 GIGACHAT_TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+GIGACHAT_VISION_TEMPERATURE = 0.1
 PROMPT_LOG_MODE_DISABLED = "disabled"
 PROMPT_LOG_MODE_FULL = "full"
 MAX_LOG_TEXT_CHARS = 50_000
@@ -192,10 +194,16 @@ class LLMRuntimeService:
         db: AsyncSession,
         *,
         agent_key: str | None,
+        provider_config_id: str | None = None,
     ) -> ResolvedLLMProvider:
         await cls.ensure_bootstrap()
 
         selected: LLMProviderConfig | None = None
+        if provider_config_id:
+            selected = await db.get(LLMProviderConfig, provider_config_id)
+            if selected is None or not selected.enabled:
+                raise RuntimeError("Выбранный LLM-провайдер не найден или отключён.")
+
         if agent_key:
             override_stmt = (
                 select(LLMAgentOverride, LLMProviderConfig)
@@ -210,7 +218,7 @@ class LLMRuntimeService:
                 )
             )
             override_row = (await db.execute(override_stmt)).first()
-            if override_row is not None:
+            if selected is None and override_row is not None:
                 _, selected = override_row
 
         if selected is None:
@@ -274,7 +282,7 @@ class LLMRuntimeService:
         *,
         verify: bool | ssl.SSLContext | None = None,
     ) -> str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cached = cls._gigachat_token_cache.get(cache_key)
         if cached is not None and cached[1] > now + timedelta(minutes=2):
             return cached[0]
@@ -316,17 +324,27 @@ class LLMRuntimeService:
         system_prompt: str,
         user_prompt: str,
         prompt_key: str | None = None,
+        provider_config_id: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> LLMInvocationResult:
         try:
-            resolved = await cls.resolve_provider(db, agent_key=agent_key)
+            resolved = await cls.resolve_provider(
+                db,
+                agent_key=agent_key,
+                provider_config_id=provider_config_id,
+            )
         except Exception as exc:  # noqa: BLE001
             return cls._build_unavailable_result(error_message=str(exc))
         from app.services.llm_prompt_service import LLMPromptService
 
-        effective_system_prompt = await LLMPromptService.resolve_system_prompt(
-            db,
-            prompt_key=prompt_key or agent_key,
-            default_system_prompt=system_prompt,
+        effective_system_prompt = (
+            system_prompt_override
+            if system_prompt_override is not None
+            else await LLMPromptService.resolve_system_prompt(
+                db,
+                prompt_key=prompt_key or agent_key,
+                default_system_prompt=system_prompt,
+            )
         )
         return await cls._execute_prompt(
             db,
@@ -369,6 +387,20 @@ class LLMRuntimeService:
             "Ты преобразуешь изображение из требований в текст, "
             "пригодный для семантического поиска."
         )
+        if resolved.config.provider_kind == "gigachat":
+            return await cls._execute_gigachat_vision(
+                db,
+                config=resolved.config,
+                profile=resolved.profile,
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                prompt=prompt,
+                system_prompt=system_prompt,
+            )
         return await cls._execute_messages(
             db,
             config=resolved.config,
@@ -505,15 +537,11 @@ class LLMRuntimeService:
     @classmethod
     async def _close_profile_clients(cls, profile: ChatAgentLLMProfile) -> None:
         if isinstance(profile.http_async_client, httpx.AsyncClient):
-            try:
+            with suppress(Exception):
                 await profile.http_async_client.aclose()
-            except Exception:  # noqa: BLE001
-                pass
         if isinstance(profile.http_client, httpx.Client):
-            try:
+            with suppress(Exception):
                 profile.http_client.close()
-            except Exception:  # noqa: BLE001
-                pass
 
     @classmethod
     async def _execute_messages(
@@ -617,6 +645,136 @@ class LLMRuntimeService:
             await cls._close_profile_clients(profile)
 
     @classmethod
+    async def _execute_gigachat_vision(
+        cls,
+        db: AsyncSession,
+        *,
+        config: LLMProviderConfig,
+        profile: ChatAgentLLMProfile,
+        actor_user_id: str | None,
+        task_id: str | None,
+        project_id: str | None,
+        agent_key: str | None,
+        image_bytes: bytes,
+        content_type: str,
+        prompt: str,
+        system_prompt: str,
+    ) -> LLMInvocationResult:
+        started = perf_counter()
+        prompt_log_mode = await cls._get_prompt_log_mode(db)
+        user_content = cls._build_gigachat_vision_user_content(
+            system_prompt=system_prompt,
+            prompt=prompt,
+        )
+        request_messages = (
+            cls._build_gigachat_vision_log_messages(user_content)
+            if prompt_log_mode == PROMPT_LOG_MODE_FULL
+            else None
+        )
+        file_id: str | None = None
+        try:
+            if profile.http_async_client is None:
+                raise RuntimeError("Для GigaChat Vision не настроен HTTP-клиент.")
+
+            file_id = await cls._upload_gigachat_vision_file(
+                profile.http_async_client,
+                base_url=config.base_url,
+                access_token=str(profile.api_key or ""),
+                image_bytes=image_bytes,
+                content_type=content_type,
+            )
+            payload = await cls._call_gigachat_vision_completion(
+                profile.http_async_client,
+                base_url=config.base_url,
+                access_token=str(profile.api_key or ""),
+                model=config.model,
+                user_content=user_content,
+                file_id=file_id,
+            )
+            latency_ms = int((perf_counter() - started) * 1000)
+            prompt_tokens, completion_tokens, total_tokens = cls._extract_gigachat_usage(payload)
+            estimated_cost = cls._estimate_cost(
+                config,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            text = cls._extract_gigachat_message_text(payload)
+            cls._add_request_log(
+                db,
+                prompt_log_mode=prompt_log_mode,
+                request_kind="vision_alt_text",
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                config=config,
+                status="success",
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=estimated_cost,
+                request_messages=request_messages,
+                response_text=text,
+                error_message=None,
+            )
+            return LLMInvocationResult(
+                ok=True,
+                text=text,
+                provider_config_id=config.id,
+                provider_kind=config.provider_kind,
+                model=config.model,
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=estimated_cost,
+            )
+        except Exception as exc:  # noqa: BLE001
+            latency_ms = int((perf_counter() - started) * 1000)
+            cls._add_request_log(
+                db,
+                prompt_log_mode=prompt_log_mode,
+                request_kind="vision_alt_text",
+                actor_user_id=actor_user_id,
+                task_id=task_id,
+                project_id=project_id,
+                agent_key=agent_key,
+                config=config,
+                status="error",
+                latency_ms=latency_ms,
+                prompt_tokens=None,
+                completion_tokens=None,
+                total_tokens=None,
+                estimated_cost_usd=None,
+                request_messages=request_messages,
+                response_text=None,
+                error_message=str(exc)[:1000],
+            )
+            return LLMInvocationResult(
+                ok=False,
+                text=None,
+                provider_config_id=config.id,
+                provider_kind=config.provider_kind,
+                model=config.model,
+                latency_ms=latency_ms,
+                prompt_tokens=None,
+                completion_tokens=None,
+                total_tokens=None,
+                estimated_cost_usd=None,
+                error_message=str(exc),
+            )
+        finally:
+            if file_id and profile.http_async_client is not None:
+                await cls._delete_gigachat_file(
+                    profile.http_async_client,
+                    base_url=config.base_url,
+                    access_token=str(profile.api_key or ""),
+                    file_id=file_id,
+                )
+            await cls._close_profile_clients(profile)
+
+    @classmethod
     def _normalize_messages_for_model(
         cls,
         profile: ChatAgentLLMProfile,
@@ -683,6 +841,156 @@ class LLMRuntimeService:
             messages.append(SystemMessage(content=system_prompt))
         messages.append(HumanMessage(content=content_parts))
         return messages
+
+    @staticmethod
+    def _build_gigachat_vision_user_content(
+        *,
+        system_prompt: str,
+        prompt: str,
+    ) -> str:
+        return f"{system_prompt.strip()}\n\n{prompt.strip()}".strip()
+
+    @staticmethod
+    def _build_gigachat_vision_log_messages(user_content: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "user",
+                "content": LLMRuntimeService._limit_log_text(user_content),
+                "attachments": ["[gigachat file id omitted]"],
+            }
+        ]
+
+    @classmethod
+    async def _upload_gigachat_vision_file(
+        cls,
+        client: httpx.AsyncClient,
+        *,
+        base_url: str,
+        access_token: str,
+        image_bytes: bytes,
+        content_type: str,
+    ) -> str:
+        response = await client.post(
+            f"{base_url.rstrip('/')}/files",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+            data={"purpose": "general"},
+            files={
+                "file": (
+                    cls._gigachat_upload_filename(content_type),
+                    image_bytes,
+                    content_type,
+                )
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        file_id = payload.get("id") or payload.get("id_")
+        if not isinstance(file_id, str) or not file_id.strip():
+            raise RuntimeError("GigaChat не вернул идентификатор загруженного файла.")
+        return file_id
+
+    @staticmethod
+    async def _call_gigachat_vision_completion(
+        client: httpx.AsyncClient,
+        *,
+        base_url: str,
+        access_token: str,
+        model: str,
+        user_content: str,
+        file_id: str,
+    ) -> dict[str, Any]:
+        response = await client.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": user_content,
+                        "attachments": [file_id],
+                    }
+                ],
+                "temperature": GIGACHAT_VISION_TEMPERATURE,
+                "stream": False,
+                "update_interval": 0,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("GigaChat вернул некорректный ответ Vision.")
+        return payload
+
+    @staticmethod
+    async def _delete_gigachat_file(
+        client: httpx.AsyncClient,
+        *,
+        base_url: str,
+        access_token: str,
+        file_id: str,
+    ) -> None:
+        try:
+            response = await client.post(
+                f"{base_url.rstrip('/')}/files/{file_id}/delete",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                },
+            )
+            response.raise_for_status()
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _gigachat_upload_filename(content_type: str) -> str:
+        extension_by_type = {
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+            "image/gif": "gif",
+            "image/bmp": "bmp",
+        }
+        extension = extension_by_type.get(content_type.casefold(), "bin")
+        return f"vision-upload.{extension}"
+
+    @staticmethod
+    def _extract_gigachat_message_text(payload: dict[str, Any]) -> str:
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("GigaChat не вернул текстовый ответ Vision.")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise RuntimeError("GigaChat вернул некорректный ответ Vision.")
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError("GigaChat вернул ответ Vision без message.")
+        return LLMRuntimeService._stringify_content(message.get("content", ""))
+
+    @staticmethod
+    def _extract_gigachat_usage(
+        payload: dict[str, Any],
+    ) -> tuple[int | None, int | None, int | None]:
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            return None, None, None
+
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+        return (
+            int(prompt_tokens) if prompt_tokens is not None else None,
+            int(completion_tokens) if completion_tokens is not None else None,
+            int(total_tokens) if total_tokens is not None else None,
+        )
 
     @staticmethod
     def _merge_system_prompt_into_human_message(message: Any, system_prompt: str) -> HumanMessage:

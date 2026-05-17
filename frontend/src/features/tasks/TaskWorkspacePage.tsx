@@ -147,6 +147,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
   const [suggestingTags, setSuggestingTags] = useState(false);
   const [committingTask, setCommittingTask] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [appealingValidation, setAppealingValidation] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -364,6 +365,30 @@ export default function TaskWorkspacePage({ mode }: Props) {
       setError(getApiErrorMessage(caught, "Не удалось запустить проверку."));
     } finally {
       setValidating(false);
+    }
+  }
+
+  async function handleValidationAppeal(
+    items: Array<{ finding_id: string; reason: string }>,
+  ) {
+    if (!projectId || !taskId) {
+      return;
+    }
+
+    try {
+      setAppealingValidation(true);
+      setError(null);
+      setTask(await tasksApi.appealValidation(projectId, taskId, { items }));
+      await refreshTaskAndMessages();
+    } catch (caught) {
+      setError(
+        getApiErrorMessage(
+          caught,
+          "Не удалось сохранить апелляцию по проверке.",
+        ),
+      );
+    } finally {
+      setAppealingValidation(false);
     }
   }
 
@@ -708,6 +733,11 @@ export default function TaskWorkspacePage({ mode }: Props) {
     (task.status === "draft" ||
       task.status === "needs_rework" ||
       canRunPostApprovalRevalidation);
+  const canAppealValidation =
+    hasApprovalRole &&
+    task.status === "needs_rework" &&
+    task.validation_result?.verdict === "needs_rework" &&
+    (task.validation_result?.issues.length ?? 0) > 0;
   const canApprove = hasReviewRole && task.status === "awaiting_approval";
   const canConfigureApproval =
     canApprove &&
@@ -984,8 +1014,11 @@ export default function TaskWorkspacePage({ mode }: Props) {
           <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
             <InspectorCard eyebrow="Процесс" title="Проверка требования">
               <ValidationPanel
+                appealing={appealingValidation}
                 blockedReason={validationBlockedReason}
+                canAppeal={canAppealValidation}
                 canValidate={canValidate}
+                onAppeal={handleValidationAppeal}
                 onValidate={handleValidate}
                 requiresRevalidation={task.requires_revalidation}
                 result={task.validation_result}

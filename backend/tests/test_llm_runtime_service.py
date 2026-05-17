@@ -99,13 +99,20 @@ def test_gigachat_ssl_verify_loads_custom_ca_bundle_from_pem_env(
     loaded_cadata: list[str] = []
 
     class FakeSSLContext:
-        def load_verify_locations(self, cafile: str | None = None, cadata: str | None = None) -> None:
+        def load_verify_locations(
+            self,
+            cafile: str | None = None,
+            cadata: str | None = None,
+        ) -> None:
             if cadata is not None:
                 loaded_cadata.append(cadata)
 
     monkeypatch.setenv("GIGACHAT_VERIFY_SSL", "true")
     monkeypatch.delenv("GIGACHAT_CA_BUNDLE_FILE", raising=False)
-    monkeypatch.setenv("GIGACHAT_CA_BUNDLE_PEM", "-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----")
+    monkeypatch.setenv(
+        "GIGACHAT_CA_BUNDLE_PEM",
+        "-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----",
+    )
     monkeypatch.setattr("ssl.create_default_context", lambda: FakeSSLContext())
     get_settings.cache_clear()
 
@@ -288,3 +295,175 @@ def test_build_vision_messages_can_inline_system_prompt_and_put_image_first() ->
             "text": "Не добавляй пояснения.\n\nИзвлеки текст",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_gigachat_vision_uses_files_attachments_and_deletes_file() -> None:
+    requests: list[dict[str, object]] = []
+    logs: list[object] = []
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(prompt_log_mode="full")
+
+        def add(self, item: object) -> None:
+            logs.append(item)
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self.payload
+
+    class FakeAsyncClient:
+        async def post(self, url: str, **kwargs):  # type: ignore[no-untyped-def]
+            requests.append({"url": url, **kwargs})
+            if url.endswith("/files"):
+                return FakeResponse({"id": "real-gigachat-file-id"})
+            if url.endswith("/chat/completions"):
+                return FakeResponse(
+                    {
+                        "choices": [{"message": {"content": "Счет №42"}}],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 3,
+                            "total_tokens": 13,
+                        },
+                    }
+                )
+            return FakeResponse({"deleted": True})
+
+        async def aclose(self) -> None:
+            return None
+
+    result = await LLMRuntimeService._execute_gigachat_vision(
+        FakeDB(),  # type: ignore[arg-type]
+        config=SimpleNamespace(
+            id="provider-1",
+            provider_kind="gigachat",
+            base_url="https://gigachat.devices.sberbank.ru/api/v1",
+            model="GigaChat-2-Max",
+            input_cost_per_1k_tokens=None,
+            output_cost_per_1k_tokens=None,
+        ),
+        profile=ChatAgentLLMProfile(
+            provider="gigachat",
+            model="GigaChat-2-Max",
+            api_key="access-token",
+            base_url="https://gigachat.devices.sberbank.ru/api/v1",
+            http_async_client=FakeAsyncClient(),
+        ),
+        actor_user_id="user-1",
+        task_id="task-1",
+        project_id="project-1",
+        agent_key="rag-vision",
+        image_bytes=b"image bytes",
+        content_type="image/png",
+        prompt="Извлеки текст",
+        system_prompt="Ты OCR агент.",
+    )
+
+    assert result.ok is True
+    assert result.text == "Счет №42"
+    assert [request["url"] for request in requests] == [
+        "https://gigachat.devices.sberbank.ru/api/v1/files",
+        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        "https://gigachat.devices.sberbank.ru/api/v1/files/real-gigachat-file-id/delete",
+    ]
+    upload_request = requests[0]
+    assert upload_request["data"] == {"purpose": "general"}
+    assert upload_request["files"] == {
+        "file": ("vision-upload.png", b"image bytes", "image/png")
+    }
+    chat_payload = requests[1]["json"]
+    assert chat_payload == {
+        "model": "GigaChat-2-Max",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Ты OCR агент.\n\nИзвлеки текст",
+                "attachments": ["real-gigachat-file-id"],
+            }
+        ],
+        "temperature": 0.1,
+        "stream": False,
+        "update_interval": 0,
+    }
+    assert logs[0].request_messages == [
+        {
+            "role": "user",
+            "content": "Ты OCR агент.\n\nИзвлеки текст",
+            "attachments": ["[gigachat file id omitted]"],
+        }
+    ]
+    assert "real-gigachat-file-id" not in str(logs[0].request_messages)
+
+
+@pytest.mark.asyncio
+async def test_execute_gigachat_vision_deletes_file_when_completion_fails() -> None:
+    requests: list[str] = []
+
+    class FakeDB:
+        async def get(self, model, identifier):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(prompt_log_mode="metadata_only")
+
+        def add(self, item: object) -> None:
+            return None
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object], should_fail: bool = False) -> None:
+            self.payload = payload
+            self.should_fail = should_fail
+
+        def raise_for_status(self) -> None:
+            if self.should_fail:
+                raise RuntimeError("completion failed")
+
+        def json(self) -> dict[str, object]:
+            return self.payload
+
+    class FakeAsyncClient:
+        async def post(self, url: str, **kwargs):  # type: ignore[no-untyped-def]
+            requests.append(url)
+            if url.endswith("/files"):
+                return FakeResponse({"id": "file-to-clean"})
+            if url.endswith("/chat/completions"):
+                return FakeResponse({}, should_fail=True)
+            return FakeResponse({"deleted": True})
+
+        async def aclose(self) -> None:
+            return None
+
+    result = await LLMRuntimeService._execute_gigachat_vision(
+        FakeDB(),  # type: ignore[arg-type]
+        config=SimpleNamespace(
+            id="provider-1",
+            provider_kind="gigachat",
+            base_url="https://gigachat.devices.sberbank.ru/api/v1",
+            model="GigaChat-2-Max",
+            input_cost_per_1k_tokens=None,
+            output_cost_per_1k_tokens=None,
+        ),
+        profile=ChatAgentLLMProfile(
+            provider="gigachat",
+            model="GigaChat-2-Max",
+            api_key="access-token",
+            http_async_client=FakeAsyncClient(),
+        ),
+        actor_user_id=None,
+        task_id=None,
+        project_id=None,
+        agent_key="rag-vision",
+        image_bytes=b"image bytes",
+        content_type="image/png",
+        prompt="Извлеки текст",
+        system_prompt="Ты OCR агент.",
+    )
+
+    assert result.ok is False
+    assert result.error_message == "completion failed"
+    assert requests[-1] == "https://gigachat.devices.sberbank.ru/api/v1/files/file-to-clean/delete"

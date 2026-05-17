@@ -14,6 +14,7 @@ from app.schemas.task import (
     TaskTagSuggestionRequest,
     TaskTagSuggestionResponse,
     TaskUpdate,
+    ValidationAppealCreate,
 )
 from app.services.task_service import TaskService
 
@@ -108,6 +109,17 @@ async def approve_task(
     db: DBSession,
 ) -> TaskRead:
     return await TaskService.approve_task(task_id, payload, current_user, db)
+
+
+@router.post("/{task_id}/validation-appeal", response_model=TaskRead)
+async def appeal_validation(
+    project_id: str,
+    task_id: str,
+    payload: ValidationAppealCreate,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> TaskRead:
+    return await TaskService.appeal_validation(project_id, task_id, payload, current_user, db)
 
 
 @router.post("/{task_id}/start-development", response_model=TaskRead)

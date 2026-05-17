@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from hashlib import sha256
 from ast import literal_eval
 from functools import lru_cache
 from typing import Any, Literal
@@ -18,7 +19,12 @@ from app.agents.system_prompts import (
     VALIDATION_CUSTOM_RULES_SYSTEM_PROMPT,
 )
 from app.core.validation_settings import normalize_validation_node_settings
-from app.services.graph_run_tracing import run_traced_graph, traced_condition, traced_node
+from app.services.graph_run_tracing import (
+    get_current_graph_run_id,
+    run_traced_graph,
+    traced_condition,
+    traced_node,
+)
 from app.services.llm_runtime_service import LLMRuntimeService
 from app.services.qdrant_service import QdrantService
 
@@ -29,6 +35,7 @@ VALIDATION_AGENT_DESCRIPTION = (
 )
 VALIDATION_AGENT_ALIASES: tuple[str, ...] = ()
 _ALLOWED_SEVERITIES = {"low", "medium", "high"}
+_VALIDATION_SOURCES = {"core_rules", "custom_rules", "context_questions"}
 _TASK_SECTION_HEADING_PATTERN = re.compile(
     (
         r"^##\s+"
@@ -54,6 +61,11 @@ class ValidationGraphState(ValidationState, total=False):
     normalized_content: str
     lower_text: str
     validation_node_settings: dict[str, bool]
+    historical_questions_override: list[str] | None
+    prompt_overrides: dict[str, str]
+    provider_config_id: str | None
+    llm_diagnostics: list[dict[str, object]]
+    graph_run_id: str | None
     rag_questions: list[str]
     core_system_prompt: str
     core_user_prompt: str
@@ -175,6 +187,64 @@ def _normalize_issue_list(candidate: object) -> list[dict[str, str]]:
         issues.append({"code": code, "severity": severity, "message": message})
 
     return issues
+
+
+def _finding_id(*, source: str, code: str, message: str) -> str:
+    normalized = "\n".join(
+        (
+            source.strip().casefold(),
+            code.strip().casefold(),
+            re.sub(r"\s+", " ", message.strip()).casefold(),
+        )
+    )
+    return sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _normalize_blocking_issues(
+    issues: list[dict[str, str]],
+    *,
+    source: str,
+) -> list[dict[str, str]]:
+    normalized_source = source if source in _VALIDATION_SOURCES else "core_rules"
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(issues, start=1):
+        message = str(item.get("message", "")).strip()
+        if not message:
+            continue
+        code = str(item.get("code", "")).strip() or f"{normalized_source}_{index}"
+        severity = str(item.get("severity", "medium")).strip().lower()
+        if severity not in _ALLOWED_SEVERITIES:
+            severity = "medium"
+        normalized.append(
+            {
+                "finding_id": _finding_id(
+                    source=normalized_source,
+                    code=code,
+                    message=message,
+                ),
+                "source": normalized_source,
+                "code": code,
+                "severity": severity,
+                "message": message,
+            }
+        )
+    return normalized
+
+
+def _context_questions_to_issues(questions: list[str]) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for question in questions:
+        message = question.strip()
+        if not message:
+            continue
+        issues.append(
+            {
+                "code": "context_question",
+                "severity": "medium",
+                "message": message,
+            }
+        )
+    return _normalize_blocking_issues(issues, source="context_questions")
 
 
 def _normalize_question_list(candidate: object) -> list[str]:
@@ -336,11 +406,23 @@ async def _invoke_validation_llm(
     prompt_key: str,
     system_prompt_key: str,
     user_prompt_key: str,
-) -> dict[str, object] | None:
+) -> tuple[dict[str, object] | None, dict[str, object]]:
     db = state.get("db")
+    metadata: dict[str, object] = {
+        "prompt_key": prompt_key,
+        "ok": False,
+        "used_fallback": False,
+        "parse_error": None,
+        "error_message": None,
+    }
     if db is None:
-        return None
+        metadata["error_message"] = "LLM runtime skipped: no database session."
+        return None, metadata
 
+    prompt_overrides = state.get("prompt_overrides", {})
+    system_prompt_override = (
+        prompt_overrides.get(prompt_key) if isinstance(prompt_overrides, dict) else None
+    )
     result = await LLMRuntimeService.invoke_chat(
         db,
         agent_key=VALIDATION_AGENT_KEY,
@@ -350,10 +432,34 @@ async def _invoke_validation_llm(
         system_prompt=str(state.get(system_prompt_key, "")),
         user_prompt=str(state.get(user_prompt_key, "")),
         prompt_key=prompt_key,
+        provider_config_id=state.get("provider_config_id"),
+        system_prompt_override=system_prompt_override,
+    )
+    metadata.update(
+        {
+            "ok": bool(result.ok),
+            "provider_config_id": result.provider_config_id,
+            "provider_kind": result.provider_kind,
+            "model": result.model,
+            "latency_ms": result.latency_ms,
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+            "total_tokens": result.total_tokens,
+            "estimated_cost_usd": float(result.estimated_cost_usd)
+            if result.estimated_cost_usd is not None
+            else None,
+            "error_message": result.error_message,
+            "system_prompt_overridden": system_prompt_override is not None,
+        }
     )
     if not result.ok or not result.text:
-        return None
-    return _extract_json_payload(result.text)
+        metadata["used_fallback"] = True
+        return None, metadata
+    payload = _extract_json_payload(result.text)
+    if payload is None:
+        metadata["parse_error"] = "invalid_json"
+        metadata["used_fallback"] = True
+    return payload, metadata
 
 
 def _prepare_core_rules_request(state: ValidationGraphState) -> ValidationGraphState:
@@ -380,7 +486,7 @@ async def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphSt
     if not settings.get("core_rules", True):
         return {"core_issues": [], "core_questions": []}
 
-    payload = await _invoke_validation_llm(
+    payload, metadata = await _invoke_validation_llm(
         state,
         prompt_key=VALIDATION_CORE_PROMPT_KEY,
         system_prompt_key="core_system_prompt",
@@ -392,7 +498,11 @@ async def _evaluate_core_rules(state: ValidationGraphState) -> ValidationGraphSt
         issues = _normalize_issue_list(payload.get("issues"))
         questions = _normalize_question_list(payload.get("questions"))
 
-    return {"core_issues": issues, "core_questions": questions}
+    return {
+        "core_issues": issues,
+        "core_questions": questions,
+        "llm_diagnostics": [*list(state.get("llm_diagnostics", [])), metadata],
+    }
 
 
 def _prepare_custom_rules_request(state: ValidationGraphState) -> ValidationGraphState:
@@ -426,7 +536,7 @@ async def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraph
     if not settings.get("custom_rules", True):
         return {"custom_rule_issues": []}
 
-    payload = await _invoke_validation_llm(
+    payload, metadata = await _invoke_validation_llm(
         state,
         prompt_key=VALIDATION_CUSTOM_RULES_PROMPT_KEY,
         system_prompt_key="custom_rules_system_prompt",
@@ -437,13 +547,23 @@ async def _evaluate_custom_rules(state: ValidationGraphState) -> ValidationGraph
         if payload is None
         else _normalize_issue_list(payload.get("issues"))
     )
-    return {"custom_rule_issues": issues}
+    return {
+        "custom_rule_issues": issues,
+        "llm_diagnostics": [*list(state.get("llm_diagnostics", [])), metadata],
+    }
 
 
 async def _search_project_questions(state: ValidationGraphState) -> ValidationGraphState:
     settings = state.get("validation_node_settings", {})
     if not settings.get("context_questions", True):
         return {"rag_questions": []}
+
+    if "historical_questions_override" in state:
+        return {
+            "rag_questions": _normalize_question_list(
+                state.get("historical_questions_override") or []
+            )
+        }
 
     project_id = str(state.get("project_id", "")).strip()
     if not project_id:
@@ -496,7 +616,7 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
     if not settings.get("context_questions", True):
         return {"context_questions": []}
 
-    payload = await _invoke_validation_llm(
+    payload, metadata = await _invoke_validation_llm(
         state,
         prompt_key=VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
         system_prompt_key="context_system_prompt",
@@ -507,7 +627,10 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
         if payload is None
         else _normalize_question_list(payload.get("questions"))
     )
-    return {"context_questions": questions}
+    return {
+        "context_questions": questions,
+        "llm_diagnostics": [*list(state.get("llm_diagnostics", [])), metadata],
+    }
 
 
 def _route_after_normalization(
@@ -562,8 +685,12 @@ def _route_after_custom_rules(
 
 def _finalize_validation_result(state: ValidationGraphState) -> ValidationGraphState:
     issues = [
-        *list(state.get("core_issues", [])),
-        *list(state.get("custom_rule_issues", [])),
+        *_normalize_blocking_issues(list(state.get("core_issues", [])), source="core_rules"),
+        *_normalize_blocking_issues(
+            list(state.get("custom_rule_issues", [])),
+            source="custom_rules",
+        ),
+        *_context_questions_to_issues(list(state.get("context_questions", []))),
     ]
 
     if issues:
@@ -571,17 +698,14 @@ def _finalize_validation_result(state: ValidationGraphState) -> ValidationGraphS
             "issues": issues,
             "questions": list(state.get("core_questions", [])),
             "verdict": "needs_rework",
+            "graph_run_id": get_current_graph_run_id(),
         }
 
     return {
         "issues": [],
-        "questions": _dedupe_questions(
-            [
-                *list(state.get("core_questions", [])),
-                *list(state.get("context_questions", [])),
-            ]
-        ),
+        "questions": _dedupe_questions(list(state.get("core_questions", []))),
         "verdict": "approved",
+        "graph_run_id": get_current_graph_run_id(),
     }
 
 
@@ -698,4 +822,57 @@ async def run_validation_graph(
         "issues": list(state.get("issues", [])),
         "questions": list(state.get("questions", [])),
         "verdict": str(state.get("verdict", "approved")),
+    }
+
+
+async def run_validation_eval_graph(
+    *,
+    db: Any,
+    actor_user_id: str | None = None,
+    project_id: str,
+    title: str,
+    content: str,
+    tags: list[str],
+    custom_rules: list[dict[str, object]],
+    related_tasks: list[dict[str, object]],
+    attachment_names: list[str],
+    historical_questions: list[str] | None = None,
+    validation_node_settings: dict[str, bool] | None = None,
+    provider_config_id: str | None = None,
+    prompt_overrides: dict[str, str] | None = None,
+) -> ValidationGraphState:
+    state = await run_traced_graph(
+        graph_key="validation_graph",
+        graph=get_validation_graph(),
+        source="validation_eval",
+        force_trace=True,
+        input_state={
+            "db": db,
+            "actor_user_id": actor_user_id,
+            "task_id": None,
+            "project_id": project_id,
+            "title": title,
+            "content": content,
+            "tags": tags,
+            "custom_rules": custom_rules,
+            "related_tasks": related_tasks,
+            "attachment_names": attachment_names,
+            "historical_questions_override": historical_questions or [],
+            "validation_node_settings": validation_node_settings,
+            "provider_config_id": provider_config_id,
+            "prompt_overrides": prompt_overrides or {},
+            "llm_diagnostics": [],
+        },
+    )
+    return {
+        "issues": list(state.get("issues", [])),
+        "questions": list(state.get("questions", [])),
+        "verdict": str(state.get("verdict", "approved")),
+        "graph_run_id": state.get("graph_run_id"),
+        "llm_diagnostics": list(state.get("llm_diagnostics", [])),
+        "core_issues": list(state.get("core_issues", [])),
+        "core_questions": list(state.get("core_questions", [])),
+        "custom_rule_issues": list(state.get("custom_rule_issues", [])),
+        "context_questions": list(state.get("context_questions", [])),
+        "rag_questions": list(state.get("rag_questions", [])),
     }

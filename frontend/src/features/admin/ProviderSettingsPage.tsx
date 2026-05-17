@@ -333,6 +333,7 @@ export default function ProviderSettingsPage() {
   const agentNameByKey = new Map(
     availableAgents.map((agent) => [agent.key, agent.name]),
   );
+  const isGigachatForm = form.provider_kind === "gigachat";
 
   function getResolvedAgentLabel(agentKey: string) {
     return agentNameByKey.get(agentKey) ?? getAgentKeyLabel(agentKey);
@@ -415,6 +416,13 @@ export default function ProviderSettingsPage() {
                       current.model === DEFAULT_MODELS[current.provider_kind]
                         ? DEFAULT_MODELS[provider_kind]
                         : current.model,
+                    ...(provider_kind === "gigachat"
+                      ? {
+                          vision_system_prompt_mode: "inline_user" as const,
+                          vision_message_order: "text_first" as const,
+                          vision_detail: "default" as const,
+                        }
+                      : {}),
                   }));
                 }}
                 value={form.provider_kind}
@@ -574,6 +582,14 @@ export default function ProviderSettingsPage() {
                 с изображениями. Здесь можно адаптировать профиль под требования
                 конкретной vision-модели без правок runtime.
               </p>
+              {isGigachatForm ? (
+                <p className="mt-3 rounded-2xl border border-pine/20 bg-pine/10 px-4 py-3 text-sm leading-6 text-ink/75">
+                  Для GigaChat Vision изображение автоматически загружается в
+                  файловое хранилище провайдера и передается в запрос через
+                  attachments. Порядок text/image и detail к этому формату не
+                  применяются.
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-4 space-y-4">
@@ -591,96 +607,105 @@ export default function ProviderSettingsPage() {
                 Разрешить использовать профиль для vision- и OCR-сценариев
               </label>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
-                    Системная инструкция
-                  </span>
-                  <select
-                    className="ui-field"
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        vision_system_prompt_mode:
-                          event.target.value as VisionSystemPromptMode,
-                      }))
-                    }
-                    value={form.vision_system_prompt_mode}
-                  >
-                    {VISION_SYSTEM_PROMPT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="mt-2 block text-xs leading-5 text-ink/55">
-                    {
-                      VISION_SYSTEM_PROMPT_OPTIONS.find(
-                        (option) => option.value === form.vision_system_prompt_mode,
-                      )?.description
-                    }
-                  </span>
-                </label>
+              {isGigachatForm ? (
+                <p className="rounded-2xl border border-black/10 bg-[#f8fafc] px-4 py-3 text-sm leading-6 text-ink/65">
+                  Системная инструкция для GigaChat встраивается в user.content,
+                  а изображение передается отдельным attachment после загрузки
+                  файла.
+                </p>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-ink/70">
+                      Системная инструкция
+                    </span>
+                    <select
+                      className="ui-field"
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          vision_system_prompt_mode:
+                            event.target.value as VisionSystemPromptMode,
+                        }))
+                      }
+                      value={form.vision_system_prompt_mode}
+                    >
+                      {VISION_SYSTEM_PROMPT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-2 block text-xs leading-5 text-ink/55">
+                      {
+                        VISION_SYSTEM_PROMPT_OPTIONS.find(
+                          (option) =>
+                            option.value === form.vision_system_prompt_mode,
+                        )?.description
+                      }
+                    </span>
+                  </label>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
-                    Порядок частей
-                  </span>
-                  <select
-                    className="ui-field"
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        vision_message_order:
-                          event.target.value as VisionMessageOrder,
-                      }))
-                    }
-                    value={form.vision_message_order}
-                  >
-                    {VISION_MESSAGE_ORDER_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="mt-2 block text-xs leading-5 text-ink/55">
-                    {
-                      VISION_MESSAGE_ORDER_OPTIONS.find(
-                        (option) => option.value === form.vision_message_order,
-                      )?.description
-                    }
-                  </span>
-                </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-ink/70">
+                      Порядок частей
+                    </span>
+                    <select
+                      className="ui-field"
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          vision_message_order:
+                            event.target.value as VisionMessageOrder,
+                        }))
+                      }
+                      value={form.vision_message_order}
+                    >
+                      {VISION_MESSAGE_ORDER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-2 block text-xs leading-5 text-ink/55">
+                      {
+                        VISION_MESSAGE_ORDER_OPTIONS.find(
+                          (option) => option.value === form.vision_message_order,
+                        )?.description
+                      }
+                    </span>
+                  </label>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-ink/70">
-                    Detail
-                  </span>
-                  <select
-                    className="ui-field"
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        vision_detail: event.target.value as VisionDetail,
-                      }))
-                    }
-                    value={form.vision_detail}
-                  >
-                    {VISION_DETAIL_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="mt-2 block text-xs leading-5 text-ink/55">
-                    {
-                      VISION_DETAIL_OPTIONS.find(
-                        (option) => option.value === form.vision_detail,
-                      )?.description
-                    }
-                  </span>
-                </label>
-              </div>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-ink/70">
+                      Detail
+                    </span>
+                    <select
+                      className="ui-field"
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          vision_detail: event.target.value as VisionDetail,
+                        }))
+                      }
+                      value={form.vision_detail}
+                    >
+                      {VISION_DETAIL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-2 block text-xs leading-5 text-ink/55">
+                      {
+                        VISION_DETAIL_OPTIONS.find(
+                          (option) => option.value === form.vision_detail,
+                        )?.description
+                      }
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
 
@@ -870,12 +895,19 @@ export default function ProviderSettingsPage() {
                 </dl>
                 <div className="rounded-[20px] border border-black/10 bg-white/60 px-4 py-4 text-sm text-ink/70">
                   <p className="font-semibold text-ink">Vision-профиль</p>
-                  <p className="mt-2">
-                    {provider.vision_enabled ? "Включен" : "Отключен"} / system:{" "}
-                    {provider.vision_system_prompt_mode} / order:{" "}
-                    {provider.vision_message_order} / detail:{" "}
-                    {provider.vision_detail}
-                  </p>
+                  {provider.provider_kind === "gigachat" ? (
+                    <p className="mt-2">
+                      {provider.vision_enabled ? "Включен" : "Отключен"} / GigaChat
+                      files + attachments
+                    </p>
+                  ) : (
+                    <p className="mt-2">
+                      {provider.vision_enabled ? "Включен" : "Отключен"} / system:{" "}
+                      {provider.vision_system_prompt_mode} / order:{" "}
+                      {provider.vision_message_order} / detail:{" "}
+                      {provider.vision_detail}
+                    </p>
+                  )}
                 </div>
                 {testMessages[provider.id] ? (
                   <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/75">

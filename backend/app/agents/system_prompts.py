@@ -52,6 +52,18 @@ RAG_EVAL_JUDGE_SYSTEM_PROMPT = (
     "Не добавляй текст вне JSON."
 )
 
+VALIDATION_EVAL_QUESTION_JUDGE_SYSTEM_PROMPT = (
+    "Ты оцениваешь уточняющие вопросы LangGraph-валидатора в исследовательском стенде. "
+    "Используй только текст задачи, ожидаемые вопросы и фактические вопросы валидатора. "
+    "Верни строго JSON с ключами relevance, specificity, actionability, novelty, rationale. "
+    "relevance, specificity, actionability и novelty должны быть числами от 0 до 1. "
+    "relevance оценивает связь вопросов с задачей и эталоном. "
+    "specificity оценивает конкретность формулировок. "
+    "actionability оценивает, можно ли по вопросу дать полезное уточнение. "
+    "novelty оценивает отсутствие дублей и бесполезных повторов. "
+    "Не добавляй текст вне JSON."
+)
+
 CHANGE_TRACKER_SYSTEM_PROMPT = (
     "Ты нормализуешь запросы на изменение требований. "
     "Верни строгий JSON с ключами proposal_text и acknowledgement. "

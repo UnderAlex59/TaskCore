@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
+from app.agents.chat_agents.llm import ChatAgentLLMProfile
 from app.core.database import AsyncSessionLocal, engine
 from app.services.llm_prompt_service import LLMPromptService
 from app.services.llm_runtime_service import LLMInvocationResult
@@ -259,6 +260,91 @@ async def test_admin_can_run_vision_test_with_uploaded_image(
     assert payload["provider_kind"] == "openai"
     assert payload["model"] == "gpt-4o"
     assert payload["result_text"] == "Счет №42\nИтого: 15 000 ₽"
+
+
+@pytest.mark.asyncio
+async def test_admin_vision_test_uses_gigachat_vision_branch(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-gigachat-vision-test@example.com",
+        full_name="Admin GigaChat Vision",
+    )
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    create_response = await client.post(
+        "/admin/llm/providers",
+        headers=headers,
+        json={
+            "name": "GigaChat Vision provider",
+            "provider_kind": "gigachat",
+            "base_url": "",
+            "model": "GigaChat-2-Max",
+            "temperature": 0.2,
+            "enabled": True,
+            "secret": "gigachat-auth-key",
+        },
+    )
+    assert create_response.status_code == 201
+    provider_id = create_response.json()["id"]
+
+    default_response = await client.post(
+        "/admin/llm/runtime/default-provider",
+        headers=headers,
+        json={"provider_config_id": provider_id},
+    )
+    assert default_response.status_code == 200
+
+    async def fake_build_profile(cls, config):  # type: ignore[no-untyped-def]
+        return ChatAgentLLMProfile(
+            provider="gigachat",
+            model=config.model,
+            api_key="access-token",
+            base_url=config.base_url,
+        )
+
+    async def fake_execute_gigachat_vision(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        config = kwargs["config"]
+        assert config.provider_kind == "gigachat"
+        assert kwargs["prompt"] == "Извлеки текст без пояснений."
+        return LLMInvocationResult(
+            ok=True,
+            text="GigaChat OCR result",
+            provider_config_id=config.id,
+            provider_kind=config.provider_kind,
+            model=config.model,
+            latency_ms=31,
+            prompt_tokens=2,
+            completion_tokens=3,
+            total_tokens=5,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService._build_profile",
+        fake_build_profile,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService._execute_gigachat_vision",
+        fake_execute_gigachat_vision,
+    )
+
+    response = await client.post(
+        "/admin/llm/vision-test",
+        headers=headers,
+        data={"prompt": "Извлеки текст без пояснений."},
+        files={"file": ("scan.png", b"fake image bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["provider_config_id"] == provider_id
+    assert payload["provider_kind"] == "gigachat"
+    assert payload["model"] == "GigaChat-2-Max"
+    assert payload["result_text"] == "GigaChat OCR result"
 
 
 @pytest.mark.asyncio

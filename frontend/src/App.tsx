@@ -16,6 +16,7 @@ import MonitoringPage from "@/features/admin/MonitoringPage";
 import OrchestratorEvalPage from "@/features/admin/OrchestratorEvalPage";
 import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 import TaskTagsPage from "@/features/admin/TaskTagsPage";
+import ValidationEvalPage from "@/features/admin/ValidationEvalPage";
 import ValidationQuestionsPage from "@/features/admin/ValidationQuestionsPage";
 import VisionTestPage from "@/features/admin/VisionTestPage";
 import ProfilePage from "@/features/profile/ProfilePage";
@@ -73,6 +74,10 @@ export default function App() {
                   />
                   <Route path="qdrant" element={<QdrantAdminPage />} />
                   <Route path="rag-eval" element={<RagEvalPage />} />
+                  <Route
+                    path="validation-eval"
+                    element={<ValidationEvalPage />}
+                  />
                   <Route path="llm-requests" element={<LLMRequestLogsPage />} />
                   <Route
                     path="validation-questions"

@@ -37,6 +37,12 @@ from app.models.refresh_token import RefreshToken
 from app.models.task import Task, TaskAttachment
 from app.models.task_tag import TaskTag
 from app.models.user import User
+from app.models.validation_eval import (
+    ValidationEvalCase,
+    ValidationEvalCaseResult,
+    ValidationEvalDataset,
+    ValidationEvalRun,
+)
 from app.models.validation_question import ValidationQuestion
 
 __all__ = [
@@ -75,5 +81,9 @@ __all__ = [
     "TelegramConnection",
     "TelegramLinkToken",
     "User",
+    "ValidationEvalCase",
+    "ValidationEvalCaseResult",
+    "ValidationEvalDataset",
+    "ValidationEvalRun",
     "ValidationQuestion",
 ]

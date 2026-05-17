@@ -15,6 +15,7 @@ from app.agents.system_prompts import (
     VALIDATION_CORE_SYSTEM_PROMPT,
     VALIDATION_CUSTOM_RULES_PROMPT_KEY,
     VALIDATION_CUSTOM_RULES_SYSTEM_PROMPT,
+    VALIDATION_EVAL_QUESTION_JUDGE_SYSTEM_PROMPT,
 )
 
 
@@ -64,6 +65,17 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
             ),
             default_system_prompt=RAG_EVAL_JUDGE_SYSTEM_PROMPT,
             priority=40,
+        ),
+        LLMPromptDefinition(
+            prompt_key="validation-eval-question-judge",
+            agent_key="validation-eval-question-judge",
+            name="ValidationEvalQuestionJudgeAgent",
+            description=(
+                "Оценивает качество уточняющих вопросов validation eval по relevance, "
+                "specificity, actionability и novelty."
+            ),
+            default_system_prompt=VALIDATION_EVAL_QUESTION_JUDGE_SYSTEM_PROMPT,
+            priority=45,
         ),
         LLMPromptDefinition(
             prompt_key="change-tracker",

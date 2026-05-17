@@ -24,6 +24,7 @@ vi.mock("@/api/adminApi", () => ({
 
 describe("ProviderSettingsPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     adminApiMock.listProviders.mockResolvedValue([
       {
         id: "provider-1",
@@ -93,20 +94,37 @@ describe("ProviderSettingsPage", () => {
     expect(screen.getByText("TaskValidationAgent")).toBeInTheDocument();
   });
 
+  it("shows GigaChat-specific vision settings in the provider form", async () => {
+    render(<ProviderSettingsPage />);
+
+    await screen.findByText("Default provider");
+    fireEvent.change(screen.getByLabelText("Тип подключения"), {
+      target: { value: "gigachat" },
+    });
+
+    expect(
+      screen.getByText(
+        /Для GigaChat Vision изображение автоматически загружается/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Порядок частей")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Detail")).not.toBeInTheDocument();
+  });
+
   it("loads provider settings once on mount", async () => {
     render(<ProviderSettingsPage />);
 
     await screen.findByText("Default provider");
     await waitFor(() => {
-      expect(adminApiMock.listProviders).toHaveBeenCalledTimes(2);
-      expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(2);
-      expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(2);
+      expect(adminApiMock.listProviders).toHaveBeenCalledTimes(1);
+      expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(1);
+      expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(1);
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(adminApiMock.listProviders).toHaveBeenCalledTimes(2);
-    expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(2);
-    expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(2);
+    expect(adminApiMock.listProviders).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.listOverrides).toHaveBeenCalledTimes(1);
+    expect(adminApiMock.listAvailableAgents).toHaveBeenCalledTimes(1);
   });
 
   it("tests and promotes a provider", async () => {

@@ -706,10 +706,17 @@ export interface RagEvalRunRead {
 }
 
 export type OrchestratorEvalImportFormat = "json" | "csv";
-export type OrchestratorEvalRunStatus = "queued" | "running" | "success" | "error";
+export type OrchestratorEvalRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "error";
 export type OrchestratorEvalCaseStatus = "passed" | "failed" | "error";
 export type OrchestratorRoutingMode = "auto" | "forced";
-export type OrchestratorMessageType = "general" | "question" | "change_proposal";
+export type OrchestratorMessageType =
+  | "general"
+  | "question"
+  | "change_proposal";
 
 export interface OrchestratorEvalExpectedRoute {
   ai_response_required?: boolean | null;
@@ -840,6 +847,159 @@ export interface OrchestratorEvalRunRead extends Omit<
 > {
   summary_metrics: Record<string, unknown> | null;
   case_results: OrchestratorEvalCaseResultRead[];
+}
+
+export type ValidationEvalImportFormat = "json" | "csv";
+export type ValidationEvalRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "error";
+export type ValidationEvalCaseResultStatus = "passed" | "failed" | "error";
+export type ValidationEvalVerdict = "approved" | "needs_rework";
+export type ValidationEvalSeverity = "low" | "medium" | "high";
+export type ValidationEvalExportArtifact =
+  | "case_results"
+  | "metrics"
+  | "confusion_matrix"
+  | "ablation"
+  | "errors";
+
+export interface ValidationEvalExpectedIssue extends Record<string, unknown> {
+  code?: string | null;
+  severity?: ValidationEvalSeverity | null;
+  message: string;
+  rule_title?: string | null;
+  source?: string | null;
+}
+
+export interface ValidationEvalCustomRule extends Record<string, unknown> {
+  title: string;
+  description: string;
+  applies_to_tags: string[];
+}
+
+export interface ValidationEvalCasePayload {
+  external_id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  attachment_names: string[];
+  custom_rules: ValidationEvalCustomRule[];
+  related_tasks: Array<Record<string, unknown>>;
+  historical_questions: string[];
+  expected_verdict: ValidationEvalVerdict;
+  expected_issues: ValidationEvalExpectedIssue[];
+  expected_questions: string[];
+  expected_context_questions: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface ValidationEvalStructuredImport {
+  dataset_name: string;
+  project_id: string;
+  cases: ValidationEvalCasePayload[];
+}
+
+export interface ValidationEvalImportPayload {
+  format: ValidationEvalImportFormat;
+  dataset_name?: string | null;
+  project_id?: string | null;
+  content?: string | null;
+  payload?: ValidationEvalStructuredImport | null;
+}
+
+export interface ValidationEvalVariantConfig {
+  key: string;
+  label?: string | null;
+  validation_node_settings: Record<string, boolean>;
+  provider_config_id?: string | null;
+  prompt_version_ids: Record<string, string>;
+}
+
+export interface ValidationEvalRunConfig {
+  variants: ValidationEvalVariantConfig[];
+  run_question_judge: boolean;
+}
+
+export interface ValidationEvalDatasetRead {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  name: string;
+  cases_total: number;
+  last_run_id: string | null;
+  last_run_status: ValidationEvalRunStatus | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ValidationEvalCaseRead extends ValidationEvalCasePayload {
+  id: string;
+  updated_at: string;
+}
+
+export interface ValidationEvalDatasetDetailRead extends ValidationEvalDatasetRead {
+  cases: ValidationEvalCaseRead[];
+}
+
+export interface ValidationEvalImportResultRead {
+  dataset: ValidationEvalDatasetDetailRead;
+  imported_cases: number;
+  warnings: string[];
+}
+
+export interface ValidationEvalRunCreateRead {
+  id: string;
+  dataset_id: string;
+  status: ValidationEvalRunStatus;
+  config: ValidationEvalRunConfig;
+  created_at: string;
+}
+
+export interface ValidationEvalRunListItemRead {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  project_id: string;
+  status: ValidationEvalRunStatus;
+  config: ValidationEvalRunConfig;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ValidationEvalRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: ValidationEvalRunListItemRead[];
+}
+
+export interface ValidationEvalCaseResultRead {
+  id: string;
+  case_id: string;
+  case_external_id: string;
+  variant_key: string;
+  variant_label: string | null;
+  status: ValidationEvalCaseResultStatus;
+  graph_run_id: string | null;
+  judge_graph_run_id: string | null;
+  expected_result: Record<string, unknown>;
+  actual_result: Record<string, unknown>;
+  diffs: Record<string, unknown>;
+  judge_payload: Record<string, unknown> | null;
+  metrics: Record<string, unknown>;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ValidationEvalRunRead extends ValidationEvalRunListItemRead {
+  case_results: ValidationEvalCaseResultRead[];
 }
 
 export const adminApi = {
@@ -1219,6 +1379,101 @@ export const adminApi = {
         `/admin/orchestrator-eval/runs/${runId}/export`,
         {
           params: { format },
+          responseType: "text",
+        },
+      )
+    ).data,
+  listValidationEvalDatasets: async () =>
+    (
+      await apiClient.get<ValidationEvalDatasetRead[]>(
+        "/admin/validation-eval/datasets",
+      )
+    ).data,
+  importValidationEvalDataset: async (payload: ValidationEvalImportPayload) =>
+    (
+      await apiClient.post<ValidationEvalImportResultRead>(
+        "/admin/validation-eval/datasets/import",
+        payload,
+      )
+    ).data,
+  getValidationEvalDataset: async (datasetId: string) =>
+    (
+      await apiClient.get<ValidationEvalDatasetDetailRead>(
+        `/admin/validation-eval/datasets/${datasetId}`,
+      )
+    ).data,
+  deleteValidationEvalDataset: async (datasetId: string) => {
+    await apiClient.delete(`/admin/validation-eval/datasets/${datasetId}`);
+  },
+  createValidationEvalCase: async (
+    datasetId: string,
+    payload: ValidationEvalCasePayload,
+  ) =>
+    (
+      await apiClient.post<ValidationEvalCaseRead>(
+        `/admin/validation-eval/datasets/${datasetId}/cases`,
+        payload,
+      )
+    ).data,
+  updateValidationEvalCase: async (
+    datasetId: string,
+    caseId: string,
+    payload: Partial<ValidationEvalCasePayload>,
+  ) =>
+    (
+      await apiClient.patch<ValidationEvalCaseRead>(
+        `/admin/validation-eval/datasets/${datasetId}/cases/${caseId}`,
+        payload,
+      )
+    ).data,
+  deleteValidationEvalCase: async (datasetId: string, caseId: string) => {
+    await apiClient.delete(
+      `/admin/validation-eval/datasets/${datasetId}/cases/${caseId}`,
+    );
+  },
+  createValidationEvalRun: async (
+    datasetId: string,
+    config: ValidationEvalRunConfig,
+  ) =>
+    (
+      await apiClient.post<ValidationEvalRunCreateRead>(
+        `/admin/validation-eval/datasets/${datasetId}/runs`,
+        config,
+      )
+    ).data,
+  listValidationEvalRuns: async (
+    datasetId: string,
+    params: {
+      page?: number;
+      size?: number;
+      status?: ValidationEvalRunStatus;
+    } = {},
+  ) =>
+    (
+      await apiClient.get<ValidationEvalRunPageRead>(
+        `/admin/validation-eval/datasets/${datasetId}/runs`,
+        { params },
+      )
+    ).data,
+  getValidationEvalRun: async (runId: string) =>
+    (
+      await apiClient.get<ValidationEvalRunRead>(
+        `/admin/validation-eval/runs/${runId}`,
+      )
+    ).data,
+  deleteValidationEvalRun: async (runId: string) => {
+    await apiClient.delete(`/admin/validation-eval/runs/${runId}`);
+  },
+  exportValidationEvalRun: async (
+    runId: string,
+    artifact: ValidationEvalExportArtifact,
+    format: "json" | "csv",
+  ) =>
+    (
+      await apiClient.get<string>(
+        `/admin/validation-eval/runs/${runId}/export`,
+        {
+          params: { artifact, format },
           responseType: "text",
         },
       )

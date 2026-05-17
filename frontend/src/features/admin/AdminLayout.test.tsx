@@ -24,6 +24,9 @@ describe("AdminLayout", () => {
       "href",
       "/admin/qdrant",
     );
+    expect(
+      screen.getByRole("link", { name: "Validation Eval" }),
+    ).toHaveAttribute("href", "/admin/validation-eval");
     expect(screen.getByText("Qdrant diagnostics page")).toBeInTheDocument();
   });
 });

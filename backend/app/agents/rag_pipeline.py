@@ -370,6 +370,29 @@ def _validation_text_items(items: object, *, prefix: str) -> list[str]:
     return text_items
 
 
+def _validation_appeal_text_items(validation_result: dict) -> list[str]:
+    appeal = validation_result.get("appeal")
+    if not isinstance(appeal, dict):
+        return []
+    items = appeal.get("items")
+    if not isinstance(items, list):
+        return []
+
+    text_items: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        message = str(item.get("message", "")).strip()
+        reason = str(item.get("reason", "")).strip()
+        if not message:
+            continue
+        if reason:
+            text_items.append(f"Пропущенное замечание валидации: {message}. Причина: {reason}")
+        else:
+            text_items.append(f"Пропущенное замечание валидации: {message}")
+    return text_items
+
+
 def _collect_validation_sources(state: RagPipelineState) -> RagPipelineState:
     validation_result = state.get("validation_result")
     if not validation_result:
@@ -378,6 +401,7 @@ def _collect_validation_sources(state: RagPipelineState) -> RagPipelineState:
     validation_lines = [
         *_validation_text_items(validation_result.get("issues"), prefix="Замечание валидации"),
         *_validation_text_items(validation_result.get("questions"), prefix="Вопрос валидации"),
+        *_validation_appeal_text_items(validation_result),
     ]
     if not validation_lines:
         return {"validation_sources": []}

@@ -6,6 +6,7 @@ Thumbs.db
 test_task/
 docs/
 work_report/
+.playwright-mcp/
 
 
 # Python

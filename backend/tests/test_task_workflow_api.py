@@ -616,6 +616,188 @@ async def test_project_validation_node_settings_affect_task_validation(client: A
     assert validate_response.json()["questions"] == []
 
 
+async def test_validation_context_questions_block_and_can_be_appealed(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register_user(client, email="admin-appeal@example.com", full_name="Alice Admin")
+    await register_user(client, email="analyst-appeal@example.com", full_name="Nina Analyst")
+    await register_user(client, email="developer-appeal@example.com", full_name="Dan Developer")
+    await register_user(client, email="manager-appeal@example.com", full_name="Mira Manager")
+
+    admin_token = await login_user(client, email="admin-appeal@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    users_response = await client.get("/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    users_by_email = {user["email"]: user for user in users_response.json()}
+    analyst_id = users_by_email["analyst-appeal@example.com"]["id"]
+    developer_id = users_by_email["developer-appeal@example.com"]["id"]
+    manager_id = users_by_email["manager-appeal@example.com"]["id"]
+
+    for user_id, role in [
+        (analyst_id, "ANALYST"),
+        (developer_id, "DEVELOPER"),
+        (manager_id, "MANAGER"),
+    ]:
+        role_response = await client.patch(
+            f"/users/{user_id}",
+            headers=admin_headers,
+            json={"role": role},
+        )
+        assert role_response.status_code == 200
+
+    analyst_token = await login_user(client, email="analyst-appeal@example.com")
+    developer_token = await login_user(client, email="developer-appeal@example.com")
+    manager_token = await login_user(client, email="manager-appeal@example.com")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    developer_headers = {"Authorization": f"Bearer {developer_token}"}
+    manager_headers = {"Authorization": f"Bearer {manager_token}"}
+
+    project_response = await client.post(
+        "/projects",
+        headers=analyst_headers,
+        json={"name": "Validation appeal", "description": "Appeal workflow"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    for user_id, role in [(developer_id, "DEVELOPER"), (manager_id, "MANAGER")]:
+        member_response = await client.post(
+            f"/projects/{project_id}/members",
+            headers=analyst_headers,
+            json={"user_id": user_id, "role": role},
+        )
+        assert member_response.status_code == 201
+
+    create_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=analyst_headers,
+        json={
+            "title": "Status sync appeal",
+            "content": (
+                "When an operator changes order status, the backend should persist the "
+                "new value, publish an event and expose the status in the UI."
+            ),
+            "tags": ["integration"],
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["prompt_key"] == "task-validation-context-questions":
+            text = (
+                '{"questions":['
+                '"Какие статусы считаются терминальными?",'
+                '"Кто инициирует повторную синхронизацию?"'
+                "]}"
+            )
+        else:
+            text = '{"issues":[],"questions":[]}'
+        return LLMInvocationResult(
+            ok=True,
+            text=text,
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=20,
+            prompt_tokens=8,
+            completion_tokens=10,
+            total_tokens=18,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    validate_response = await client.post(
+        f"/tasks/{task_id}/validate",
+        headers=analyst_headers,
+    )
+    assert validate_response.status_code == 200
+    validation_payload = validate_response.json()
+    assert validation_payload["verdict"] == "needs_rework"
+    assert validation_payload["questions"] == []
+    assert [issue["source"] for issue in validation_payload["issues"]] == [
+        "context_questions",
+        "context_questions",
+    ]
+    finding_ids = [issue["finding_id"] for issue in validation_payload["issues"]]
+    assert all(finding_ids)
+
+    partial_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/validation-appeal",
+        headers=analyst_headers,
+        json={"items": [{"finding_id": finding_ids[0], "reason": "Риск принят аналитиком."}]},
+    )
+    assert partial_response.status_code == 422
+
+    unknown_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/validation-appeal",
+        headers=analyst_headers,
+        json={
+            "items": [
+                {"finding_id": finding_ids[0], "reason": "Риск принят аналитиком."},
+                {"finding_id": "unknown-finding", "reason": "Риск принят аналитиком."},
+            ]
+        },
+    )
+    assert unknown_response.status_code == 422
+
+    appeal_payload = {
+        "items": [
+            {"finding_id": finding_id, "reason": "Риск принят аналитиком."}
+            for finding_id in finding_ids
+        ]
+    }
+    developer_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/validation-appeal",
+        headers=developer_headers,
+        json=appeal_payload,
+    )
+    assert developer_response.status_code == 403
+
+    manager_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/validation-appeal",
+        headers=manager_headers,
+        json=appeal_payload,
+    )
+    assert manager_response.status_code == 403
+
+    appeal_response = await client.post(
+        f"/projects/{project_id}/tasks/{task_id}/validation-appeal",
+        headers=analyst_headers,
+        json=appeal_payload,
+    )
+    assert appeal_response.status_code == 200
+    appealed_task = appeal_response.json()
+    assert appealed_task["status"] == "awaiting_approval"
+    result = appealed_task["validation_result"]
+    assert result["verdict"] == "approved"
+    assert result["automated_verdict"] == "needs_rework"
+    assert result["issues"] == []
+    assert result["appeal"]["status"] == "accepted"
+    assert result["appeal"]["appealed_by"] == analyst_id
+    assert [item["finding_id"] for item in result["appeal"]["items"]] == finding_ids
+
+    messages_response = await client.get(f"/tasks/{task_id}/messages", headers=analyst_headers)
+    assert messages_response.status_code == 200
+    assert any(
+        "Пропущенные замечания системы" in message["content"]
+        for message in messages_response.json()
+    )
+
+    audit_response = await client.get("/admin/audit", headers=admin_headers)
+    assert audit_response.status_code == 200
+    assert any(
+        item["event_type"] == "task.validation_appealed"
+        for item in audit_response.json()["items"]
+    )
+
+
 async def test_llm_validation_open_questions_do_not_enter_chat_question_pool(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,

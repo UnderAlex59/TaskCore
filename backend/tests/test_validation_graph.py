@@ -95,13 +95,15 @@ async def test_validation_graph_stops_after_core_rule_failure(
     )
 
     assert result["verdict"] == "needs_rework"
-    assert result["issues"] == [
-        {
-            "code": "missing_terminal_statuses",
-            "severity": "high",
-            "message": "Не перечислены терминальные статусы и не описан запуск повторной синхронизации.",
-        }
-    ]
+    assert len(result["issues"]) == 1
+    assert result["issues"][0] == {
+        "finding_id": result["issues"][0]["finding_id"],
+        "source": "core_rules",
+        "code": "missing_terminal_statuses",
+        "severity": "high",
+        "message": "Не перечислены терминальные статусы и не описан запуск повторной синхронизации.",
+    }
+    assert result["issues"][0]["finding_id"]
     assert result["questions"] == ["Кто инициирует повторную синхронизацию статусов?"]
     assert llm_calls == 1
 
@@ -283,12 +285,13 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
         attachment_names=[],
     )
 
-    assert result["verdict"] == "approved"
-    assert result["issues"] == []
-    assert result["questions"] == [
-        "Нужно ли фиксировать SLA обновления?",
-        "Какие статусы считаются источником истины?",
-    ]
+    assert result["verdict"] == "needs_rework"
+    assert result["questions"] == ["Нужно ли фиксировать SLA обновления?"]
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["source"] == "context_questions"
+    assert result["issues"][0]["severity"] == "medium"
+    assert result["issues"][0]["message"] == "Какие статусы считаются источником истины?"
+    assert result["issues"][0]["finding_id"]
 
 
 @pytest.mark.asyncio
@@ -319,4 +322,9 @@ async def test_validation_graph_uses_qdrant_questions_as_fallback_without_llm(
         attachment_names=[],
     )
 
-    assert "Какие статусы считаются терминальными?" in result["questions"]
+    assert result["verdict"] == "needs_rework"
+    assert result["questions"] == []
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["source"] == "context_questions"
+    assert result["issues"][0]["message"] == "Какие статусы считаются терминальными?"
+    assert result["issues"][0]["finding_id"]

@@ -6,6 +6,7 @@ const adminNavItems = [
   { href: "/admin/orchestrator-eval", label: "Оркестратор" },
   { href: "/admin/qdrant", label: "Qdrant и RAG" },
   { href: "/admin/rag-eval", label: "RAG Eval" },
+  { href: "/admin/validation-eval", label: "Validation Eval" },
   { href: "/admin/llm-requests", label: "LLM-запросы" },
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },
@@ -23,7 +24,10 @@ export default function AdminLayout() {
         <h2 className="mt-3 text-3xl font-semibold text-[#172b4d] sm:text-4xl">
           Администрирование платформы
         </h2>
-        <nav aria-label="Администрирование" className="mt-6 flex flex-wrap gap-2">
+        <nav
+          aria-label="Администрирование"
+          className="mt-6 flex flex-wrap gap-2"
+        >
           {adminNavItems.map((item) => (
             <NavLink
               key={item.href}

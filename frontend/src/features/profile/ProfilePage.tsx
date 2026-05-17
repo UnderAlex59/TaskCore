@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   notificationsApi,
@@ -6,12 +7,15 @@ import {
 } from "@/api/notificationsApi";
 import { usersApi } from "@/api/usersApi";
 import { Avatar } from "@/shared/components/Avatar";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { getUserDisplayName } from "@/shared/lib/userProfile";
 import { useAuthStore } from "@/store/authStore";
 
 export default function ProfilePage() {
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
   const setUser = useAuthStore((state) => state.setUser);
   const [nickname, setNickname] = useState(user?.nickname ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -19,6 +23,8 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [removingAvatar, setRemovingAvatar] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettingsRead | null>(null);
   const [telegramDeepLink, setTelegramDeepLink] = useState<string | null>(null);
@@ -171,6 +177,20 @@ export default function ProfilePage() {
       setError(getApiErrorMessage(caught, "Не удалось отключить Telegram."));
     } finally {
       setTelegramBusy(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    try {
+      setDeletingAccount(true);
+      setError(null);
+      await usersApi.deleteMe();
+      logout();
+      navigate("/login", { replace: true });
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить аккаунт."));
+      setDeletingAccount(false);
+      setDeleteDialogOpen(false);
     }
   }
 
@@ -385,7 +405,39 @@ export default function ProfilePage() {
             </button>
           </div>
         </section>
+
+        <section className="space-y-4 rounded-[18px] border border-[rgba(174,46,36,0.18)] bg-white p-6 xl:col-start-2">
+          <div>
+            <p className="section-eyebrow">Аккаунт</p>
+            <h3 className="mt-2 text-2xl font-semibold text-[#172b4d]">
+              Удаление аккаунта
+            </h3>
+          </div>
+          <p className="text-sm leading-7 text-[#44546f]">
+            Аккаунт будет отключён, персональные данные профиля будут очищены,
+            а активные сессии завершены. История задач и проектов сохранится.
+          </p>
+          <button
+            className="ui-button-danger"
+            disabled={deletingAccount}
+            onClick={() => setDeleteDialogOpen(true)}
+            type="button"
+          >
+            {deletingAccount ? "Удаляем..." : "Удалить аккаунт"}
+          </button>
+        </section>
       </div>
+
+      <ConfirmDialog
+        busy={deletingAccount}
+        confirmLabel="Удалить"
+        description="Это действие нельзя отменить. Аккаунт будет отключён, данные профиля очищены, а текущая сессия завершена."
+        destructive
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={() => void handleDeleteAccount()}
+        open={deleteDialogOpen}
+        title="Удалить аккаунт?"
+      />
     </section>
   );
 }

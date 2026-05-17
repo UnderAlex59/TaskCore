@@ -31,23 +31,29 @@ from app.agents.qa_agent_graph import (
     QA_VERIFIER_AGENT_KEY,
     QA_VERIFIER_AGENT_NAME,
 )
-from app.agents.rag_retrieval_graph import (
-    QA_QUERY_REWRITER_AGENT_ALIASES,
-    QA_QUERY_REWRITER_AGENT_DESCRIPTION,
-    QA_QUERY_REWRITER_AGENT_KEY,
-    QA_QUERY_REWRITER_AGENT_NAME,
-)
 from app.agents.rag_eval_judge_graph import (
     RAG_EVAL_JUDGE_AGENT_ALIASES,
     RAG_EVAL_JUDGE_AGENT_DESCRIPTION,
     RAG_EVAL_JUDGE_AGENT_KEY,
     RAG_EVAL_JUDGE_AGENT_NAME,
 )
+from app.agents.rag_retrieval_graph import (
+    QA_QUERY_REWRITER_AGENT_ALIASES,
+    QA_QUERY_REWRITER_AGENT_DESCRIPTION,
+    QA_QUERY_REWRITER_AGENT_KEY,
+    QA_QUERY_REWRITER_AGENT_NAME,
+)
 from app.agents.task_tag_suggestion_graph import (
     TASK_TAG_SUGGESTER_AGENT_ALIASES,
     TASK_TAG_SUGGESTER_AGENT_DESCRIPTION,
     TASK_TAG_SUGGESTER_AGENT_KEY,
     TASK_TAG_SUGGESTER_AGENT_NAME,
+)
+from app.agents.validation_eval_question_judge_graph import (
+    VALIDATION_EVAL_QUESTION_JUDGE_AGENT_ALIASES,
+    VALIDATION_EVAL_QUESTION_JUDGE_AGENT_DESCRIPTION,
+    VALIDATION_EVAL_QUESTION_JUDGE_AGENT_KEY,
+    VALIDATION_EVAL_QUESTION_JUDGE_AGENT_NAME,
 )
 from app.agents.validation_graph import (
     VALIDATION_AGENT_ALIASES,
@@ -87,6 +93,13 @@ def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
             description=RAG_EVAL_JUDGE_AGENT_DESCRIPTION,
             aliases=RAG_EVAL_JUDGE_AGENT_ALIASES,
             priority=40,
+        ),
+        ChatAgentMetadata(
+            key=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_KEY,
+            name=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_NAME,
+            description=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_DESCRIPTION,
+            aliases=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_ALIASES,
+            priority=45,
         ),
         ChatAgentMetadata(
             key=CHANGE_TRACKER_AGENT_KEY,

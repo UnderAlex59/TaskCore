@@ -82,11 +82,27 @@ from app.schemas.admin_rag_eval import (
     RagEvalRunStatus,
 )
 from app.schemas.admin_validation import ValidationQuestionPageRead
+from app.schemas.admin_validation_eval import (
+    ValidationEvalCaseCreate,
+    ValidationEvalCaseRead,
+    ValidationEvalCaseUpdate,
+    ValidationEvalDatasetDetailRead,
+    ValidationEvalDatasetRead,
+    ValidationEvalExportArtifact,
+    ValidationEvalImportPayload,
+    ValidationEvalImportResultRead,
+    ValidationEvalRunConfig,
+    ValidationEvalRunCreateRead,
+    ValidationEvalRunPageRead,
+    ValidationEvalRunRead,
+    ValidationEvalRunStatus,
+)
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_llm_service import AdminLLMService
 from app.services.admin_orchestrator_eval_service import AdminOrchestratorEvalService
 from app.services.admin_qdrant_service import AdminQdrantService
 from app.services.admin_rag_eval_service import AdminRagEvalService
+from app.services.admin_validation_eval_service import AdminValidationEvalService
 from app.services.llm_prompt_service import LLMPromptService
 from app.services.monitoring_service import MonitoringService
 from app.services.task_tag_service import TaskTagService
@@ -566,6 +582,183 @@ async def export_orchestrator_eval_run(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get(
+    "/validation-eval/datasets",
+    response_model=list[ValidationEvalDatasetRead],
+)
+async def list_validation_eval_datasets(
+    _: AdminUser,
+    db: DBSession,
+) -> list[ValidationEvalDatasetRead]:
+    return await AdminValidationEvalService.list_datasets(db)
+
+
+@router.post(
+    "/validation-eval/datasets/import",
+    response_model=ValidationEvalImportResultRead,
+    status_code=201,
+)
+async def import_validation_eval_dataset(
+    payload: ValidationEvalImportPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ValidationEvalImportResultRead:
+    return await AdminValidationEvalService.import_dataset(payload, current_user, db)
+
+
+@router.get(
+    "/validation-eval/datasets/{dataset_id}",
+    response_model=ValidationEvalDatasetDetailRead,
+)
+async def get_validation_eval_dataset(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> ValidationEvalDatasetDetailRead:
+    return await AdminValidationEvalService.get_dataset(dataset_id, db)
+
+
+@router.post(
+    "/validation-eval/datasets/{dataset_id}/cases",
+    response_model=ValidationEvalCaseRead,
+    status_code=201,
+)
+async def create_validation_eval_case(
+    dataset_id: str,
+    payload: ValidationEvalCaseCreate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ValidationEvalCaseRead:
+    return await AdminValidationEvalService.create_case(
+        dataset_id,
+        payload,
+        current_user,
+        db,
+    )
+
+
+@router.patch(
+    "/validation-eval/datasets/{dataset_id}/cases/{case_id}",
+    response_model=ValidationEvalCaseRead,
+)
+async def update_validation_eval_case(
+    dataset_id: str,
+    case_id: str,
+    payload: ValidationEvalCaseUpdate,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ValidationEvalCaseRead:
+    return await AdminValidationEvalService.update_case(
+        dataset_id,
+        case_id,
+        payload,
+        current_user,
+        db,
+    )
+
+
+@router.delete("/validation-eval/datasets/{dataset_id}/cases/{case_id}", status_code=204)
+async def delete_validation_eval_case(
+    dataset_id: str,
+    case_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminValidationEvalService.delete_case(dataset_id, case_id, current_user, db)
+    return Response(status_code=204)
+
+
+@router.post(
+    "/validation-eval/datasets/{dataset_id}/runs",
+    response_model=ValidationEvalRunCreateRead,
+    status_code=201,
+)
+async def create_validation_eval_run(
+    dataset_id: str,
+    payload: ValidationEvalRunConfig,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ValidationEvalRunCreateRead:
+    run = await AdminValidationEvalService.create_run(dataset_id, payload, current_user, db)
+    background_tasks.add_task(AdminValidationEvalService.process_run, run.id)
+    return run
+
+
+@router.get(
+    "/validation-eval/datasets/{dataset_id}/runs",
+    response_model=ValidationEvalRunPageRead,
+)
+async def list_validation_eval_runs(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+    run_status: ValidationEvalRunStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> ValidationEvalRunPageRead:
+    return await AdminValidationEvalService.list_runs(
+        dataset_id,
+        db,
+        run_status=run_status,
+        page=page,
+        page_size=size,
+    )
+
+
+@router.get(
+    "/validation-eval/runs/{run_id}",
+    response_model=ValidationEvalRunRead,
+)
+async def get_validation_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> ValidationEvalRunRead:
+    return await AdminValidationEvalService.get_run(run_id, db)
+
+
+@router.get("/validation-eval/runs/{run_id}/export")
+async def export_validation_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+    artifact: ValidationEvalExportArtifact = Query(default="case_results"),
+    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
+) -> Response:
+    filename, media_type, content = await AdminValidationEvalService.export_run(
+        run_id,
+        export_format,
+        artifact,
+        db,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/validation-eval/runs/{run_id}", status_code=204)
+async def delete_validation_eval_run(
+    run_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminValidationEvalService.delete_run(run_id, current_user, db)
+    return Response(status_code=204)
+
+
+@router.delete("/validation-eval/datasets/{dataset_id}", status_code=204)
+async def delete_validation_eval_dataset(
+    dataset_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminValidationEvalService.delete_dataset(dataset_id, current_user, db)
+    return Response(status_code=204)
 
 
 @router.get("/monitoring/llm/requests", response_model=LLMRequestLogPageRead)

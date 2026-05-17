@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import type { UserRole } from "@/api/authApi";
 import { usersApi, type UserSummary } from "@/api/usersApi";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { getRoleLabel } from "@/shared/lib/locale";
+import { useAuthStore } from "@/store/authStore";
 
 const ROLE_OPTIONS: UserRole[] = ["ADMIN", "ANALYST", "DEVELOPER", "TESTER", "MANAGER"];
 
 export default function UserList() {
+  const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [userPendingDeletion, setUserPendingDeletion] =
+    useState<UserSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadUsers() {
@@ -54,6 +62,30 @@ export default function UserList() {
     }
   }
 
+  async function handleDeleteUser() {
+    if (!userPendingDeletion) {
+      return;
+    }
+
+    const userId = userPendingDeletion.id;
+    try {
+      setSavingUserId(userId);
+      setError(null);
+      await usersApi.delete(userId);
+      setUsers((current) => current.filter((user) => user.id !== userId));
+      setUserPendingDeletion(null);
+
+      if (currentUser?.id === userId) {
+        logout();
+        navigate("/login", { replace: true });
+      }
+    } catch (caught) {
+      setError(getApiErrorMessage(caught, "Не удалось удалить пользователя."));
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
   if (loading) {
     return <LoadingSpinner label="Загрузка пользователей" />;
   }
@@ -76,14 +108,17 @@ export default function UserList() {
 
       <div className="space-y-4">
         {users.map((user) => (
-          <article key={user.id} className="glass-panel rounded-[28px] border border-black/10 p-5 shadow-panel">
+          <article
+            key={user.id}
+            className="glass-panel rounded-[18px] border border-black/10 p-5 shadow-panel"
+          >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h3 className="text-xl font-bold text-ink">{user.full_name}</h3>
                 <p className="text-sm text-ink/60">{user.email}</p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:w-[30rem]">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:w-[40rem]">
                 <select
                   aria-label={`Глобальная роль для ${user.full_name}`}
                   className="ui-field"
@@ -108,11 +143,35 @@ export default function UserList() {
                     type="checkbox"
                   />
                 </label>
+
+                <button
+                  className="ui-button-danger"
+                  disabled={savingUserId === user.id}
+                  onClick={() => setUserPendingDeletion(user)}
+                  type="button"
+                >
+                  Удалить
+                </button>
               </div>
             </div>
           </article>
         ))}
       </div>
+
+      <ConfirmDialog
+        busy={savingUserId === userPendingDeletion?.id}
+        confirmLabel="Удалить"
+        description={
+          userPendingDeletion
+            ? `Аккаунт ${userPendingDeletion.email} будет отключён, персональные данные профиля будут очищены, а все активные сессии завершены.`
+            : ""
+        }
+        destructive
+        onClose={() => setUserPendingDeletion(null)}
+        onConfirm={() => void handleDeleteUser()}
+        open={userPendingDeletion !== null}
+        title="Удалить пользователя?"
+      />
     </section>
   );
 }

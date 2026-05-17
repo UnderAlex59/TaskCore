@@ -19,8 +19,14 @@ export const usersApi = {
   list: async () => (await apiClient.get<UserSummary[]>("/users")).data,
   update: async (userId: string, payload: UserUpdatePayload) =>
     (await apiClient.patch<UserSummary>(`/users/${userId}`, payload)).data,
+  delete: async (userId: string) => {
+    await apiClient.delete<void>(`/users/${userId}`);
+  },
   updateMe: async (payload: UserProfileUpdatePayload) =>
     (await apiClient.patch<UserRead>("/users/me", payload)).data,
+  deleteMe: async () => {
+    await apiClient.delete<void>("/users/me");
+  },
   uploadAvatar: async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);

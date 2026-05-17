@@ -4,6 +4,7 @@ import mimetypes
 import re
 import uuid
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -27,6 +28,7 @@ from app.schemas.task import (
     TaskTagSuggestionRequest,
     TaskTagSuggestionResponse,
     TaskUpdate,
+    ValidationAppealCreate,
     ValidationIssue,
     ValidationResult,
 )
@@ -1267,6 +1269,166 @@ class TaskService:
                 ],
             )
         return validation_result
+
+    @staticmethod
+    def _validation_finding_id(issue: dict) -> str:
+        existing = str(issue.get("finding_id", "")).strip()
+        if existing:
+            return existing
+        source = str(issue.get("source", "core_rules")).strip() or "core_rules"
+        code = str(issue.get("code", "")).strip()
+        message = re.sub(r"\s+", " ", str(issue.get("message", "")).strip())
+        normalized = "\n".join((source.casefold(), code.casefold(), message.casefold()))
+        return sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _normalize_issue_snapshot(issue: dict, *, reason: str) -> dict[str, str]:
+        severity = str(issue.get("severity", "medium")).strip().lower()
+        if severity not in {"low", "medium", "high"}:
+            severity = "medium"
+        source = str(issue.get("source", "core_rules")).strip()
+        if source not in {"core_rules", "custom_rules", "context_questions"}:
+            source = "core_rules"
+        return {
+            "finding_id": TaskService._validation_finding_id(issue),
+            "source": source,
+            "code": str(issue.get("code", "validation_issue")).strip() or "validation_issue",
+            "severity": severity,
+            "message": str(issue.get("message", "")).strip(),
+            "reason": reason.strip(),
+        }
+
+    @staticmethod
+    def _format_validation_appeal_message(appeal_items: list[dict[str, str]]) -> str:
+        issue_lines = "; ".join(
+            f"{item['message']}. Причина: {item['reason']}" for item in appeal_items
+        )
+        return (
+            "Аналитик отклонил рекомендации автоматической проверки. "
+            f"Пропущенные замечания системы: {issue_lines}"
+        )
+
+    @staticmethod
+    async def appeal_validation(
+        project_id: str,
+        task_id: str,
+        payload: ValidationAppealCreate,
+        current_user: User,
+        db: AsyncSession,
+    ) -> TaskRead:
+        task = await TaskService.get_task_or_404(project_id, task_id, db)
+        await ProjectService.ensure_project_access(project_id, current_user, db)
+        if current_user.role not in TaskService.validation_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только аналитики и администраторы могут отклонять рекомендации проверки",
+            )
+        if task.status != TaskStatus.NEEDS_REWORK:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Апелляция доступна только для задач, отправленных на доработку",
+            )
+
+        validation_result = dict(task.validation_result or {})
+        if validation_result.get("verdict") != "needs_rework":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Апелляция доступна только после отказа автоматической проверки",
+            )
+
+        current_issues = [
+            dict(issue)
+            for issue in list(validation_result.get("issues", []))
+            if isinstance(issue, dict) and str(issue.get("message", "")).strip()
+        ]
+        if not current_issues:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="В текущем результате проверки нет замечаний для апелляции",
+            )
+
+        appeal_items = payload.items
+        requested_ids = [item.finding_id.strip() for item in appeal_items]
+        if len(set(requested_ids)) != len(requested_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Каждое замечание можно указать в апелляции только один раз",
+            )
+
+        issue_by_id = {
+            TaskService._validation_finding_id(issue): issue for issue in current_issues
+        }
+        expected_ids = set(issue_by_id)
+        actual_ids = set(requested_ids)
+        if actual_ids != expected_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Апелляция должна покрывать все текущие замечания проверки без лишних идентификаторов",
+            )
+
+        reason_by_id = {item.finding_id.strip(): item.reason for item in appeal_items}
+        accepted_at = datetime.now(UTC)
+        skipped_items = [
+            TaskService._normalize_issue_snapshot(
+                issue_by_id[finding_id],
+                reason=reason_by_id[finding_id],
+            )
+            for finding_id in requested_ids
+        ]
+        validation_result["automated_verdict"] = "needs_rework"
+        validation_result["verdict"] = "approved"
+        validation_result["issues"] = []
+        validation_result["appeal"] = {
+            "status": "accepted",
+            "appealed_at": accepted_at.isoformat(),
+            "appealed_by": current_user.id,
+            "items": skipped_items,
+        }
+        task.validation_result = validation_result
+        task.status = TaskStatus.AWAITING_APPROVAL
+        task.updated_at = accepted_at
+
+        attachments = await TaskService._get_attachments(task.id, db)
+        chunk_ids = await RagService.index_task_context(
+            db,
+            task,
+            attachments,
+            actor_user_id=current_user.id,
+            validation_result=task.validation_result,
+        )
+        db.add(
+            Message(
+                task_id=task.id,
+                author_id=None,
+                agent_name="QAAgent",
+                message_type=MessageType.AGENT_ANSWER,
+                content=TaskService._format_validation_appeal_message(skipped_items),
+                source_ref={
+                    "collection": "task_knowledge" if chunk_ids else "tasks",
+                    "chunk_ids": chunk_ids,
+                    "validation_appeal": True,
+                    "skipped_finding_ids": [item["finding_id"] for item in skipped_items],
+                },
+            )
+        )
+        AuditService.record(
+            db,
+            actor_user_id=current_user.id,
+            event_type="task.validation_appealed",
+            entity_type="task",
+            entity_id=task.id,
+            project_id=task.project_id,
+            task_id=task.id,
+            metadata={
+                "skipped_findings": skipped_items,
+                "automated_verdict": "needs_rework",
+                "final_verdict": "approved",
+            },
+        )
+        await db.commit()
+        await db.refresh(task)
+        await TaskService._broadcast_latest_agent_message(task.id, "QAAgent", db)
+        return TaskService._serialize_task(task, attachments)
 
     @staticmethod
     def _format_validation_message(result: ValidationResult) -> str:
