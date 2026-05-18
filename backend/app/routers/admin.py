@@ -17,6 +17,18 @@ from fastapi import (
 from app.core.dependencies import DBSession, require_role
 from app.models.task import TaskStatus
 from app.models.user import User, UserRole
+from app.schemas.admin_adaptation_eval import (
+    AdaptationEvalDatasetDetailRead,
+    AdaptationEvalDatasetRead,
+    AdaptationEvalExportArtifact,
+    AdaptationEvalImportPayload,
+    AdaptationEvalImportResultRead,
+    AdaptationEvalRunConfig,
+    AdaptationEvalRunCreateRead,
+    AdaptationEvalRunPageRead,
+    AdaptationEvalRunRead,
+    AdaptationEvalRunStatus,
+)
 from app.schemas.admin_llm import (
     AgentDirectoryRead,
     AgentOverrideRead,
@@ -98,6 +110,7 @@ from app.schemas.admin_validation_eval import (
     ValidationEvalRunStatus,
 )
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
+from app.services.admin_adaptation_eval_service import AdminAdaptationEvalService
 from app.services.admin_llm_service import AdminLLMService
 from app.services.admin_orchestrator_eval_service import AdminOrchestratorEvalService
 from app.services.admin_qdrant_service import AdminQdrantService
@@ -582,6 +595,141 @@ async def export_orchestrator_eval_run(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get(
+    "/adaptation-eval/datasets",
+    response_model=list[AdaptationEvalDatasetRead],
+)
+async def list_adaptation_eval_datasets(
+    _: AdminUser,
+    db: DBSession,
+) -> list[AdaptationEvalDatasetRead]:
+    return await AdminAdaptationEvalService.list_datasets(db)
+
+
+@router.get("/adaptation-eval/datasets/import")
+async def get_adaptation_eval_import_template(
+    _: AdminUser,
+    project_id: str | None = Query(default=None),
+) -> dict[str, object]:
+    return AdminAdaptationEvalService.import_template(project_id)
+
+
+@router.post(
+    "/adaptation-eval/datasets/import",
+    response_model=AdaptationEvalImportResultRead,
+    status_code=201,
+)
+async def import_adaptation_eval_dataset(
+    payload: AdaptationEvalImportPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AdaptationEvalImportResultRead:
+    return await AdminAdaptationEvalService.import_dataset(payload, current_user, db)
+
+
+@router.get(
+    "/adaptation-eval/datasets/{dataset_id}",
+    response_model=AdaptationEvalDatasetDetailRead,
+)
+async def get_adaptation_eval_dataset(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> AdaptationEvalDatasetDetailRead:
+    return await AdminAdaptationEvalService.get_dataset(dataset_id, db)
+
+
+@router.post(
+    "/adaptation-eval/datasets/{dataset_id}/runs",
+    response_model=AdaptationEvalRunCreateRead,
+    status_code=201,
+)
+async def create_adaptation_eval_run(
+    dataset_id: str,
+    payload: AdaptationEvalRunConfig,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser,
+    db: DBSession,
+) -> AdaptationEvalRunCreateRead:
+    run = await AdminAdaptationEvalService.create_run(dataset_id, payload, current_user, db)
+    background_tasks.add_task(AdminAdaptationEvalService.process_run, run.id)
+    return run
+
+
+@router.get(
+    "/adaptation-eval/datasets/{dataset_id}/runs",
+    response_model=AdaptationEvalRunPageRead,
+)
+async def list_adaptation_eval_runs(
+    dataset_id: str,
+    _: AdminUser,
+    db: DBSession,
+    run_status: AdaptationEvalRunStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> AdaptationEvalRunPageRead:
+    return await AdminAdaptationEvalService.list_runs(
+        dataset_id,
+        db,
+        run_status=run_status,
+        page=page,
+        page_size=size,
+    )
+
+
+@router.get(
+    "/adaptation-eval/runs/{run_id}",
+    response_model=AdaptationEvalRunRead,
+)
+async def get_adaptation_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> AdaptationEvalRunRead:
+    return await AdminAdaptationEvalService.get_run(run_id, db)
+
+
+@router.get("/adaptation-eval/runs/{run_id}/export")
+async def export_adaptation_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+    artifact: AdaptationEvalExportArtifact = Query(default="case_results"),
+    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
+) -> Response:
+    filename, media_type, content = await AdminAdaptationEvalService.export_run(
+        run_id,
+        export_format,
+        artifact,
+        db,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/adaptation-eval/runs/{run_id}", status_code=204)
+async def delete_adaptation_eval_run(
+    run_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminAdaptationEvalService.delete_run(run_id, current_user, db)
+    return Response(status_code=204)
+
+
+@router.delete("/adaptation-eval/datasets/{dataset_id}", status_code=204)
+async def delete_adaptation_eval_dataset(
+    dataset_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminAdaptationEvalService.delete_dataset(dataset_id, current_user, db)
+    return Response(status_code=204)
 
 
 @router.get(

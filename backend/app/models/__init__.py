@@ -1,4 +1,10 @@
 from app.models.audit_event import AuditEvent
+from app.models.adaptation_eval import (
+    AdaptationEvalCase,
+    AdaptationEvalCaseResult,
+    AdaptationEvalDataset,
+    AdaptationEvalRun,
+)
 from app.models.change_proposal import ChangeProposal
 from app.models.custom_rule import CustomRule
 from app.models.graph_run_event import GraphRunEvent
@@ -47,6 +53,10 @@ from app.models.validation_question import ValidationQuestion
 
 __all__ = [
     "AuditEvent",
+    "AdaptationEvalCase",
+    "AdaptationEvalCaseResult",
+    "AdaptationEvalDataset",
+    "AdaptationEvalRun",
     "ChangeProposal",
     "CustomRule",
     "GraphRunEvent",

@@ -4,6 +4,7 @@ import { AuthProvider } from "@/auth/AuthProvider";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { RoleGuard } from "@/auth/RoleGuard";
 import LoginPage from "@/auth/pages/LoginPage";
+import AdaptationEvalPage from "@/features/admin/AdaptationEvalPage";
 import AgentPromptsPage from "@/features/admin/AgentPromptsPage";
 import AdminLayout from "@/features/admin/AdminLayout";
 import QdrantAdminPage from "@/features/admin/QdrantAdminPage";
@@ -74,6 +75,10 @@ export default function App() {
                   />
                   <Route path="qdrant" element={<QdrantAdminPage />} />
                   <Route path="rag-eval" element={<RagEvalPage />} />
+                  <Route
+                    path="adaptation-eval"
+                    element={<AdaptationEvalPage />}
+                  />
                   <Route
                     path="validation-eval"
                     element={<ValidationEvalPage />}

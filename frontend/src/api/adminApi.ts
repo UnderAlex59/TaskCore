@@ -534,6 +534,151 @@ export interface QdrantTaskResyncRead {
   warnings: string[];
 }
 
+export type AdaptationEvalRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "error";
+export type AdaptationEvalCaseResultStatus = "passed" | "failed" | "error";
+export type AdaptationEvalScenarioType =
+  | "positive"
+  | "negative_control"
+  | "partial_match"
+  | "noise"
+  | "regression";
+export type AdaptationEvalVerdict = "approved" | "needs_rework";
+export type AdaptationEvalExportArtifact = "case_results" | "metrics";
+
+export interface AdaptationEvalHistoricalTaskPayload {
+  title: string;
+  content: string;
+  tags: string[];
+  chat_messages: string[];
+}
+
+export interface AdaptationEvalProbeTaskPayload {
+  title: string;
+  content: string;
+  tags: string[];
+  custom_rules?: Array<Record<string, unknown>>;
+  related_tasks?: Array<Record<string, unknown>>;
+  attachment_names?: string[];
+}
+
+export interface AdaptationEvalCasePayload {
+  external_id: string;
+  scenario_type: AdaptationEvalScenarioType;
+  historical_tasks: AdaptationEvalHistoricalTaskPayload[];
+  probe_task: AdaptationEvalProbeTaskPayload;
+  expected_captured_questions: string[];
+  expected_retrieved_questions: string[];
+  expected_context_questions: string[];
+  expected_verdict: AdaptationEvalVerdict;
+  expected_context_issues: Array<Record<string, unknown>>;
+  metadata: Record<string, unknown>;
+}
+
+export interface AdaptationEvalImportPayload {
+  dataset_name: string;
+  project_id: string;
+  cases: AdaptationEvalCasePayload[];
+}
+
+export interface AdaptationEvalQualityGates {
+  capture_recall_min: number;
+  retrieval_recall_at_k_min: number;
+  context_question_f1_min: number;
+  context_issue_f1_min: number;
+  duplicate_rate_max: number;
+  require_full_improvement: boolean;
+}
+
+export interface AdaptationEvalRunConfig {
+  retrieval_limit: number;
+  cleanup_synthetic_tasks: boolean;
+  quality_gates: AdaptationEvalQualityGates;
+}
+
+export interface AdaptationEvalDatasetRead {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  name: string;
+  cases_total: number;
+  last_run_id: string | null;
+  last_run_status: AdaptationEvalRunStatus | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdaptationEvalCaseRead extends AdaptationEvalCasePayload {
+  id: string;
+  updated_at: string;
+}
+
+export interface AdaptationEvalDatasetDetailRead
+  extends AdaptationEvalDatasetRead {
+  cases: AdaptationEvalCaseRead[];
+}
+
+export interface AdaptationEvalImportResultRead {
+  dataset: AdaptationEvalDatasetDetailRead;
+  imported_cases: number;
+  warnings: string[];
+}
+
+export interface AdaptationEvalRunCreateRead {
+  id: string;
+  dataset_id: string;
+  status: AdaptationEvalRunStatus;
+  config: AdaptationEvalRunConfig;
+  created_at: string;
+}
+
+export interface AdaptationEvalRunListItemRead {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  project_id: string;
+  status: AdaptationEvalRunStatus;
+  config: AdaptationEvalRunConfig;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface AdaptationEvalRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: AdaptationEvalRunListItemRead[];
+}
+
+export interface AdaptationEvalCaseResultRead {
+  id: string;
+  case_id: string;
+  case_external_id: string;
+  scenario_type: string;
+  status: AdaptationEvalCaseResultStatus;
+  core_graph_run_id: string | null;
+  full_graph_run_id: string | null;
+  synthetic_task_ids: string[];
+  expected_result: Record<string, unknown>;
+  actual_result: Record<string, unknown>;
+  diffs: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface AdaptationEvalRunRead extends AdaptationEvalRunListItemRead {
+  case_results: AdaptationEvalCaseResultRead[];
+}
+
 export type RagEvalImportFormat = "json" | "csv";
 export type RagEvalRunStatus = "queued" | "running" | "success" | "error";
 export type RagEvalIndexingMode = "all" | "stale_only" | "none";
@@ -1379,6 +1524,84 @@ export const adminApi = {
         `/admin/orchestrator-eval/runs/${runId}/export`,
         {
           params: { format },
+          responseType: "text",
+        },
+      )
+    ).data,
+  listAdaptationEvalDatasets: async () =>
+    (
+      await apiClient.get<AdaptationEvalDatasetRead[]>(
+        "/admin/adaptation-eval/datasets",
+      )
+    ).data,
+  getAdaptationEvalImportTemplate: async (projectId?: string) =>
+    (
+      await apiClient.get<AdaptationEvalImportPayload>(
+        "/admin/adaptation-eval/datasets/import",
+        { params: projectId ? { project_id: projectId } : undefined },
+      )
+    ).data,
+  importAdaptationEvalDataset: async (
+    payload: AdaptationEvalImportPayload,
+  ) =>
+    (
+      await apiClient.post<AdaptationEvalImportResultRead>(
+        "/admin/adaptation-eval/datasets/import",
+        payload,
+      )
+    ).data,
+  getAdaptationEvalDataset: async (datasetId: string) =>
+    (
+      await apiClient.get<AdaptationEvalDatasetDetailRead>(
+        `/admin/adaptation-eval/datasets/${datasetId}`,
+      )
+    ).data,
+  deleteAdaptationEvalDataset: async (datasetId: string) => {
+    await apiClient.delete(`/admin/adaptation-eval/datasets/${datasetId}`);
+  },
+  createAdaptationEvalRun: async (
+    datasetId: string,
+    config: AdaptationEvalRunConfig,
+  ) =>
+    (
+      await apiClient.post<AdaptationEvalRunCreateRead>(
+        `/admin/adaptation-eval/datasets/${datasetId}/runs`,
+        config,
+      )
+    ).data,
+  listAdaptationEvalRuns: async (
+    datasetId: string,
+    params: {
+      page?: number;
+      size?: number;
+      status?: AdaptationEvalRunStatus;
+    } = {},
+  ) =>
+    (
+      await apiClient.get<AdaptationEvalRunPageRead>(
+        `/admin/adaptation-eval/datasets/${datasetId}/runs`,
+        { params },
+      )
+    ).data,
+  getAdaptationEvalRun: async (runId: string) =>
+    (
+      await apiClient.get<AdaptationEvalRunRead>(
+        `/admin/adaptation-eval/runs/${runId}`,
+      )
+    ).data,
+  deleteAdaptationEvalRun: async (runId: string) => {
+    await apiClient.delete(`/admin/adaptation-eval/runs/${runId}`);
+  },
+  exportAdaptationEvalRun: async (
+    runId: string,
+    artifact: AdaptationEvalExportArtifact,
+    format: "json" | "csv",
+  ) =>
+    (
+      await apiClient.get<string>(
+        `/admin/adaptation-eval/runs/${runId}/export`,
+        {
+          params: { artifact, format },
           responseType: "text",
         },
       )

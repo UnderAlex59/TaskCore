@@ -787,6 +787,44 @@ class QdrantService:
             return []
 
     @staticmethod
+    async def probe_project_questions_with_scores(
+        *,
+        project_id: str,
+        query_text: str,
+        tags: list[str],
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        try:
+            if not await QdrantService.ensure_collections():
+                return []
+
+            normalized_limit = max(1, min(int(limit), 10))
+            must_conditions: list[models.FieldCondition] = [
+                QdrantService._metadata_value_condition("project_id", project_id)
+            ]
+            if tags:
+                must_conditions.append(QdrantService._metadata_any_condition("tags", tags))
+
+            hits = await QdrantService._get_store(
+                PROJECT_QUESTIONS_COLLECTION
+            ).asimilarity_search_with_score(
+                query_text,
+                k=normalized_limit,
+                filter=models.Filter(must=must_conditions),
+            )
+            return [
+                {
+                    "document": document,
+                    "score": float(score),
+                    "rank": index,
+                }
+                for index, (document, score) in enumerate(hits, start=1)
+            ]
+        except Exception:
+            logger.exception("Failed to probe project questions for project %s", project_id)
+            return []
+
+    @staticmethod
     async def delete_project_questions_for_task(*, task_id: str) -> bool:
         try:
             client = QdrantService._get_client()

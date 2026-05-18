@@ -13,6 +13,9 @@ from app.services.qdrant_service import QdrantService
 REAL_REPLACE_TASK_KNOWLEDGE = QdrantService.replace_task_knowledge
 REAL_SEARCH_TASK_KNOWLEDGE = QdrantService.search_task_knowledge
 REAL_SEARCH_PROJECT_TASK_KNOWLEDGE = QdrantService.search_project_task_knowledge
+REAL_PROBE_PROJECT_QUESTIONS_WITH_SCORES = (
+    QdrantService.probe_project_questions_with_scores
+)
 
 
 def make_settings(**overrides: object) -> SimpleNamespace:
@@ -383,6 +386,68 @@ async def test_replace_task_knowledge_uses_normalized_point_ids(monkeypatch) -> 
     assert store.documents is not None
     assert store.documents[0].metadata["status"] == "ready_for_dev"
     assert "task_status" not in store.documents[0].metadata
+
+
+@pytest.mark.asyncio
+async def test_probe_project_questions_with_scores_returns_ranked_hits(
+    monkeypatch,
+) -> None:
+    first_document = Document(
+        page_content="Does the SLA escalation window need approval?",
+        metadata={"question_id": "question-1", "task_id": "task-1"},
+    )
+    second_document = Document(
+        page_content="Should retries be idempotent?",
+        metadata={"question_id": "question-2", "task_id": "task-2"},
+    )
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.filter_: models.Filter | None = None
+            self.k: int | None = None
+
+        async def asimilarity_search_with_score(  # type: ignore[no-untyped-def]
+            self,
+            query_text,
+            *,
+            k,
+            filter,
+        ):
+            self.filter_ = filter
+            self.k = k
+            return [
+                (first_document, 0.91),
+                (second_document, 0.72),
+            ]
+
+    store = FakeStore()
+    monkeypatch.setattr(QdrantService, "ensure_collections", AsyncMock(return_value=True))
+    monkeypatch.setattr(QdrantService, "_get_store", Mock(return_value=store))
+
+    hits = await REAL_PROBE_PROJECT_QUESTIONS_WITH_SCORES(
+        project_id="project-1",
+        query_text="approval for SLA incidents",
+        tags=["ops", "sla"],
+        limit=50,
+    )
+
+    assert store.k == 10
+    assert store.filter_ is not None
+    must_conditions = list(store.filter_.must or [])
+    assert any(
+        condition.key == "metadata.project_id"
+        and getattr(condition.match, "value", None) == "project-1"
+        for condition in must_conditions
+    )
+    assert any(
+        condition.key == "metadata.tags"
+        and getattr(condition.match, "any", None) == ["ops", "sla"]
+        for condition in must_conditions
+    )
+    assert hits == [
+        {"document": first_document, "score": 0.91, "rank": 1},
+        {"document": second_document, "score": 0.72, "rank": 2},
+    ]
 
 
 @pytest.mark.asyncio

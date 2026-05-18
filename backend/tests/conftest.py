@@ -41,6 +41,10 @@ TRUNCATE_TARGETS = [
     "orchestrator_eval_runs",
     "orchestrator_eval_cases",
     "orchestrator_eval_datasets",
+    "adaptation_eval_case_results",
+    "adaptation_eval_runs",
+    "adaptation_eval_cases",
+    "adaptation_eval_datasets",
     "validation_eval_case_results",
     "validation_eval_runs",
     "validation_eval_cases",
@@ -105,6 +109,9 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _search_project_questions(**kwargs):  # type: ignore[no-untyped-def]
         return []
 
+    async def _probe_project_questions_with_scores(**kwargs):  # type: ignore[no-untyped-def]
+        return []
+
     async def _delete_project_questions_for_task(**kwargs) -> bool:  # type: ignore[no-untyped-def]
         return True
 
@@ -156,6 +163,10 @@ def stub_qdrant_service(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.qdrant_service.QdrantService.search_project_questions",
         _search_project_questions,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.probe_project_questions_with_scores",
+        _probe_project_questions_with_scores,
     )
     monkeypatch.setattr(
         "app.services.qdrant_service.QdrantService.delete_project_questions_for_task",
