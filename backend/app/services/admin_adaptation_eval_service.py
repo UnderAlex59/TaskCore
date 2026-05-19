@@ -262,71 +262,52 @@ class AdminAdaptationEvalService:
             [str(item) for item in actual.get("retrieved_questions", [])],
         )
 
-        full_validation = dict(actual.get("full_validation") or {})
-        core_validation = dict(actual.get("core_custom_validation") or {})
-        full_context_question_metrics, full_context_question_diffs = (
+        context_validation = dict(
+            actual.get("context_validation") or actual.get("full_validation") or {}
+        )
+        context_question_metrics, context_question_diffs = (
             AdminAdaptationEvalService._text_scores(
                 expected_items=[str(item) for item in expected.get("context_questions", [])],
-                actual_items=[str(item) for item in full_validation.get("context_questions", [])],
+                actual_items=[
+                    str(item) for item in context_validation.get("context_questions", [])
+                ],
                 prefix="context_question",
             )
         )
-        core_context_question_metrics, _ = AdminAdaptationEvalService._text_scores(
-            expected_items=[str(item) for item in expected.get("context_questions", [])],
-            actual_items=[str(item) for item in core_validation.get("context_questions", [])],
-            prefix="core_context_question",
-        )
-        full_context_issue_metrics, full_context_issue_diffs = (
+        context_issue_metrics, context_issue_diffs = (
             AdminAdaptationEvalService._issue_scores(
                 expected_issues=[dict(item) for item in expected.get("context_issues", [])],
-                actual_issues=AdminAdaptationEvalService._context_issues(full_validation),
+                actual_issues=AdminAdaptationEvalService._context_issues(
+                    context_validation
+                ),
                 prefix="context_issue",
             )
         )
-        core_context_issue_metrics, _ = AdminAdaptationEvalService._issue_scores(
-            expected_issues=[dict(item) for item in expected.get("context_issues", [])],
-            actual_issues=AdminAdaptationEvalService._context_issues(core_validation),
-            prefix="core_context_issue",
-        )
-        verdict_match = expected.get("verdict") == full_validation.get("verdict")
+        verdict_match = expected.get("verdict") == context_validation.get("verdict")
         duplicate_total = int(capture_metrics["capture_duplicates"]) + int(
-            full_context_question_metrics["context_question_duplicates"]
+            context_question_metrics["context_question_duplicates"]
         )
         duplicate_denominator = len(captured_questions) + len(
-            list(full_validation.get("context_questions", []))
+            list(context_validation.get("context_questions", []))
         )
         metrics = {
             "passed": bool(
                 verdict_match
                 and capture_metrics["capture_f1"] == 1
                 and retrieval_metrics["retrieval_f1"] == 1
-                and full_context_question_metrics["context_question_f1"] == 1
-                and full_context_issue_metrics["context_issue_f1"] == 1
+                and context_question_metrics["context_question_f1"] == 1
+                and context_issue_metrics["context_issue_f1"] == 1
             ),
             "verdict_match": verdict_match,
             "expected_verdict": expected.get("verdict"),
-            "actual_verdict": full_validation.get("verdict"),
+            "actual_verdict": context_validation.get("verdict"),
             **capture_metrics,
             "capture_rate": capture_metrics["capture_recall"],
             **retrieval_metrics,
             "retrieval_precision_at_k": retrieval_metrics["retrieval_precision"],
             "retrieval_recall_at_k": retrieval_metrics["retrieval_recall"],
-            **full_context_question_metrics,
-            **full_context_issue_metrics,
-            "core_context_question_f1": core_context_question_metrics[
-                "core_context_question_f1"
-            ],
-            "core_context_issue_f1": core_context_issue_metrics["core_context_issue_f1"],
-            "full_vs_core_custom_context_question_f1_delta": round(
-                float(full_context_question_metrics["context_question_f1"])
-                - float(core_context_question_metrics["core_context_question_f1"]),
-                4,
-            ),
-            "full_vs_core_custom_context_issue_f1_delta": round(
-                float(full_context_issue_metrics["context_issue_f1"])
-                - float(core_context_issue_metrics["core_context_issue_f1"]),
-                4,
-            ),
+            **context_question_metrics,
+            **context_issue_metrics,
             "overall_question_duplicate_rate": round(
                 duplicate_total / duplicate_denominator,
                 4,
@@ -337,8 +318,8 @@ class AdminAdaptationEvalService:
         diffs = {
             **capture_diffs,
             **retrieval_diffs,
-            **full_context_question_diffs,
-            **full_context_issue_diffs,
+            **context_question_diffs,
+            **context_issue_diffs,
         }
         return metrics, diffs
 
@@ -797,8 +778,12 @@ class AdminAdaptationEvalService:
         run: AdaptationEvalRun,
         probe_task_id: str,
         probe_task: dict[str, Any],
-        context_questions_enabled: bool,
     ) -> dict[str, Any]:
+        validation_node_settings = {
+            "core_rules": False,
+            "custom_rules": False,
+            "context_questions": True,
+        }
         state = await run_validation_graph(
             db=db,
             actor_user_id=actor.id,
@@ -812,11 +797,7 @@ class AdminAdaptationEvalService:
             attachment_names=[
                 str(item) for item in list(probe_task.get("attachment_names") or [])
             ],
-            validation_node_settings={
-                "core_rules": True,
-                "custom_rules": True,
-                "context_questions": context_questions_enabled,
-            },
+            validation_node_settings=validation_node_settings,
         )
         return {
             "verdict": str(state.get("verdict", "approved")),
@@ -826,6 +807,7 @@ class AdminAdaptationEvalService:
             "rag_questions": list(state.get("rag_questions", [])),
             "llm_diagnostics": list(state.get("llm_diagnostics", [])),
             "graph_run_id": state.get("graph_run_id"),
+            "validation_node_settings": validation_node_settings,
         }
 
     @staticmethod
@@ -907,30 +889,16 @@ class AdminAdaptationEvalService:
                 limit=config.retrieval_limit,
                 db=db,
             )
-            core_validation = await AdminAdaptationEvalService._run_validation_variant(
+            context_validation = await AdminAdaptationEvalService._run_validation_variant(
                 db=db,
                 actor=actor,
                 run=run,
                 probe_task_id=probe_task.id,
                 probe_task=dict(case.probe_task or {}),
-                context_questions_enabled=False,
-            )
-            full_validation = await AdminAdaptationEvalService._run_validation_variant(
-                db=db,
-                actor=actor,
-                run=run,
-                probe_task_id=probe_task.id,
-                probe_task=dict(case.probe_task or {}),
-                context_questions_enabled=True,
-            )
-            core_graph_run_id = (
-                str(core_validation.get("graph_run_id"))
-                if core_validation.get("graph_run_id")
-                else None
             )
             full_graph_run_id = (
-                str(full_validation.get("graph_run_id"))
-                if full_validation.get("graph_run_id")
+                str(context_validation.get("graph_run_id"))
+                if context_validation.get("graph_run_id")
                 else None
             )
             actual = {
@@ -943,8 +911,7 @@ class AdminAdaptationEvalService:
                     str(item["question_text"]) for item in retrieval_rows
                 ],
                 "retrieval_results": retrieval_rows,
-                "core_custom_validation": core_validation,
-                "full_validation": full_validation,
+                "context_validation": context_validation,
             }
             metrics, diffs = AdminAdaptationEvalService._case_metrics(
                 expected=expected,
@@ -1062,7 +1029,11 @@ class AdminAdaptationEvalService:
         actual_question_total = sum(
             len(item.actual_result.get("captured_questions", []))
             + len(
-                dict(item.actual_result.get("full_validation") or {}).get(
+                dict(
+                    item.actual_result.get("context_validation")
+                    or item.actual_result.get("full_validation")
+                    or {}
+                ).get(
                     "context_questions",
                     [],
                 )
@@ -1076,30 +1047,6 @@ class AdminAdaptationEvalService:
             for item in results
             if "retrieval_mrr" in item.metrics
         ]
-        question_delta = round(
-            sum(
-                float(
-                    item.metrics.get(
-                        "full_vs_core_custom_context_question_f1_delta",
-                    )
-                    or 0
-                )
-                for item in results
-            )
-            / max(total, 1),
-            4,
-        )
-        issue_delta = round(
-            sum(
-                float(
-                    item.metrics.get("full_vs_core_custom_context_issue_f1_delta")
-                    or 0
-                )
-                for item in results
-            )
-            / max(total, 1),
-            4,
-        )
         gates_config = config.quality_gates
         gates = [
             AdminAdaptationEvalService._gate(
@@ -1140,16 +1087,6 @@ class AdminAdaptationEvalService:
                 passed=duplicate_rate <= gates_config.duplicate_rate_max,
             ),
         ]
-        if gates_config.require_full_improvement:
-            gates.append(
-                AdminAdaptationEvalService._gate(
-                    key="full_improvement",
-                    label="Full improves over core_custom",
-                    value=max(question_delta, issue_delta),
-                    threshold=0,
-                    passed=question_delta > 0 or issue_delta > 0,
-                )
-            )
         return {
             "cases_total": total,
             "passed": passed,
@@ -1172,8 +1109,6 @@ class AdminAdaptationEvalService:
             "context_issue_precision": context_issue_scores["precision"],
             "context_issue_recall": context_issue_scores["recall"],
             "context_issue_f1": context_issue_scores["f1"],
-            "full_vs_core_custom_context_question_f1_delta": question_delta,
-            "full_vs_core_custom_context_issue_f1_delta": issue_delta,
             "overall_question_duplicate_rate": duplicate_rate,
             "quality_gates": gates,
             "gate_status": "passed" if all(gate["passed"] for gate in gates) else "failed",
@@ -1383,8 +1318,6 @@ class AdminAdaptationEvalService:
                     "retrieval_mrr",
                     "context_question_f1",
                     "context_issue_f1",
-                    "full_vs_core_custom_context_question_f1_delta",
-                    "full_vs_core_custom_context_issue_f1_delta",
                     "overall_question_duplicate_rate",
                     "latency_ms",
                     "error_message",
@@ -1406,12 +1339,6 @@ class AdminAdaptationEvalService:
                             "context_question_f1"
                         ),
                         "context_issue_f1": item.metrics.get("context_issue_f1"),
-                        "full_vs_core_custom_context_question_f1_delta": item.metrics.get(
-                            "full_vs_core_custom_context_question_f1_delta"
-                        ),
-                        "full_vs_core_custom_context_issue_f1_delta": item.metrics.get(
-                            "full_vs_core_custom_context_issue_f1_delta"
-                        ),
                         "overall_question_duplicate_rate": item.metrics.get(
                             "overall_question_duplicate_rate"
                         ),

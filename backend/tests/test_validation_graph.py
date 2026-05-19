@@ -48,7 +48,8 @@ async def test_validation_graph_stops_after_core_rule_failure(
             ok=True,
             text=(
                 '{"issues":[{"code":"missing_terminal_statuses","severity":"high",'
-                '"message":"Не перечислены терминальные статусы и не описан запуск повторной синхронизации."}],'
+                '"message":"Не перечислены терминальные статусы и не описан запуск '
+                'повторной синхронизации."}],'
                 '"questions":["Кто инициирует повторную синхронизацию статусов?"]}'
             ),
             provider_config_id="provider-1",
@@ -80,8 +81,9 @@ async def test_validation_graph_stops_after_core_rule_failure(
         project_id="project-1",
         title="Status sync contract",
         content=(
-            "When an operator changes the order status in the CRM, the backend should persist the "
-            "new value, publish an event for downstream services and expose the updated status in the UI."
+            "When an operator changes the order status in the CRM, the backend should "
+            "persist the new value, publish an event for downstream services and "
+            "expose the updated status in the UI."
         ),
         tags=["integration"],
         custom_rules=[
@@ -101,7 +103,10 @@ async def test_validation_graph_stops_after_core_rule_failure(
         "source": "core_rules",
         "code": "missing_terminal_statuses",
         "severity": "high",
-        "message": "Не перечислены терминальные статусы и не описан запуск повторной синхронизации.",
+        "message": (
+            "Не перечислены терминальные статусы и не описан запуск "
+            "повторной синхронизации."
+        ),
     }
     assert result["issues"][0]["finding_id"]
     assert result["questions"] == ["Кто инициирует повторную синхронизацию статусов?"]
@@ -231,7 +236,7 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
         [
             '{"issues":[],"questions":["Нужно ли фиксировать SLA обновления?"]}',
             '{"issues":[]}',
-            '{"questions":["Какие статусы считаются источником истины?"]}',
+            '{"questions":["Какие статусы считаются терминальными?"]}',
         ]
     )
 
@@ -271,8 +276,9 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
         project_id="project-1",
         title="Status sync contract",
         content=(
-            "When an operator changes the order status in the CRM, the backend should persist the "
-            "new value, publish an event for downstream services and expose the updated status in the UI."
+            "When an operator changes the order status in the CRM, the backend should "
+            "persist the new value, publish an event for downstream services and "
+            "expose the updated status in the UI."
         ),
         tags=["integration"],
         custom_rules=[
@@ -290,8 +296,68 @@ async def test_validation_graph_reaches_context_stage_only_after_clean_checks(
     assert len(result["issues"]) == 1
     assert result["issues"][0]["source"] == "context_questions"
     assert result["issues"][0]["severity"] == "medium"
-    assert result["issues"][0]["message"] == "Какие статусы считаются источником истины?"
+    assert result["issues"][0]["message"] == "Какие статусы считаются терминальными?"
     assert result["issues"][0]["finding_id"]
+
+
+@pytest.mark.asyncio
+async def test_validation_graph_context_stage_keeps_only_canonical_questions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"questions":['
+                '"Какие статусы считаются источником истины?",'
+                '"Какие статусы считаются терминальными?"'
+                "]}"
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=50,
+            prompt_tokens=20,
+            completion_tokens=20,
+            total_tokens=40,
+            estimated_cost_usd=None,
+        )
+
+    async def fake_search_project_questions(**kwargs):  # type: ignore[no-untyped-def]
+        return [Document(page_content="Какие статусы считаются терминальными?")]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.search_project_questions",
+        fake_search_project_questions,
+    )
+
+    result = await run_validation_graph(
+        db=object(),
+        actor_user_id="user-1",
+        task_id="task-1",
+        project_id="project-1",
+        title="Status sync",
+        content=(
+            "When an operator changes the order status in the CRM, the backend should "
+            "persist the new value and publish an event for downstream services."
+        ),
+        tags=["integration"],
+        custom_rules=[],
+        related_tasks=[],
+        attachment_names=[],
+        validation_node_settings={
+            "core_rules": False,
+            "custom_rules": False,
+            "context_questions": True,
+        },
+    )
+
+    assert result["context_questions"] == ["Какие статусы считаются терминальными?"]
+    assert result["issues"][0]["message"] == "Какие статусы считаются терминальными?"
 
 
 @pytest.mark.asyncio

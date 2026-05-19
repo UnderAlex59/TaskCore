@@ -83,7 +83,7 @@ class AdaptationEvalQualityGates(BaseModel):
     context_question_f1_min: float = Field(default=0.75, ge=0, le=1)
     context_issue_f1_min: float = Field(default=0.7, ge=0, le=1)
     duplicate_rate_max: float = Field(default=0.1, ge=0, le=1)
-    require_full_improvement: bool = True
+    require_full_improvement: bool = False
 
     model_config = ConfigDict(extra="forbid")
 

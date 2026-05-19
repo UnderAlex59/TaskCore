@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -117,12 +118,7 @@ def test_adaptation_eval_case_metrics_cover_chain() -> None:
         actual={
             "captured_questions": ["Какие роли нужны?", "Какие роли нужны?"],
             "retrieved_questions": ["Какие роли нужны?"],
-            "core_custom_validation": {
-                "verdict": "approved",
-                "issues": [],
-                "context_questions": [],
-            },
-            "full_validation": {
+            "context_validation": {
                 "verdict": "needs_rework",
                 "issues": [
                     {
@@ -140,7 +136,10 @@ def test_adaptation_eval_case_metrics_cover_chain() -> None:
     assert metrics["retrieval_recall_at_k"] == 1
     assert metrics["context_question_f1"] == 1
     assert metrics["context_issue_f1"] == 1
-    assert metrics["full_vs_core_custom_context_question_f1_delta"] == 1
+    assert "full_vs_core_custom_context_question_f1_delta" not in metrics
+    assert "full_vs_core_custom_context_issue_f1_delta" not in metrics
+    assert "core_context_question_f1" not in metrics
+    assert "core_context_issue_f1" not in metrics
     assert metrics["overall_question_duplicate_rate"] > 0
     assert diffs["capture_matches"][0]["expected"] == "Какие роли нужны?"
 
@@ -157,12 +156,7 @@ def test_adaptation_eval_metrics_cover_partial_negative_and_missing() -> None:
         actual={
             "captured_questions": ["Уточнить, есть ли SLA эскалации инцидента"],
             "retrieved_questions": [],
-            "core_custom_validation": {
-                "verdict": "approved",
-                "issues": [],
-                "context_questions": [],
-            },
-            "full_validation": {
+            "context_validation": {
                 "verdict": "approved",
                 "issues": [],
                 "context_questions": [],
@@ -176,6 +170,51 @@ def test_adaptation_eval_metrics_cover_partial_negative_and_missing() -> None:
     assert metrics["context_issue_f1"] == 1
     assert metrics["passed"] is False
     assert diffs["missing_retrievals"] == ["Есть ли SLA эскалации инцидента?"]
+
+
+@pytest.mark.asyncio
+async def test_adaptation_eval_validation_variant_uses_context_level_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_settings: list[dict[str, bool]] = []
+
+    async def fake_validation_graph(**kwargs):  # type: ignore[no-untyped-def]
+        seen_settings.append(dict(kwargs["validation_node_settings"]))
+        return {
+            "verdict": "approved",
+            "issues": [],
+            "questions": [],
+            "context_questions": [],
+            "rag_questions": [],
+            "llm_diagnostics": [],
+            "graph_run_id": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.admin_adaptation_eval_service.run_validation_graph",
+        fake_validation_graph,
+    )
+
+    result = await AdminAdaptationEvalService._run_validation_variant(
+        db=SimpleNamespace(),
+        actor=SimpleNamespace(id="user-1"),
+        run=SimpleNamespace(project_id="project-1"),
+        probe_task_id="task-1",
+        probe_task={
+            "title": "Проверка контекстного уровня",
+            "content": "Описание задачи",
+            "tags": ["auth"],
+        },
+    )
+    assert result["validation_node_settings"] == {
+        "core_rules": False,
+        "custom_rules": False,
+        "context_questions": True,
+    }
+
+    assert seen_settings == [
+        {"core_rules": False, "custom_rules": False, "context_questions": True},
+    ]
 
 
 @pytest.mark.asyncio
@@ -223,7 +262,10 @@ async def test_admin_can_run_adaptation_eval(
             }
         ]
 
+    seen_validation_settings: list[dict[str, bool]] = []
+
     async def fake_validation_graph(**kwargs):  # type: ignore[no-untyped-def]
+        seen_validation_settings.append(dict(kwargs["validation_node_settings"]))
         if kwargs["validation_node_settings"].get("context_questions"):
             question = "Какие роли пользователей должны поддерживаться?"
             return {
@@ -301,10 +343,31 @@ async def test_admin_can_run_adaptation_eval(
     assert detail["summary_metrics"]["capture_recall"] == 1
     assert detail["summary_metrics"]["retrieval_recall_at_k"] == 1
     assert detail["summary_metrics"]["context_question_f1"] == 1
+    assert "full_vs_core_custom_context_question_f1_delta" not in detail[
+        "summary_metrics"
+    ]
+    assert [gate["key"] for gate in detail["summary_metrics"]["quality_gates"]] == [
+        "capture_recall",
+        "retrieval_recall_at_k",
+        "context_question_f1",
+        "context_issue_f1",
+        "overall_question_duplicate_rate",
+    ]
     assert detail["case_results"][0]["status"] == "passed"
     assert detail["case_results"][0]["actual_result"]["captured_questions"] == [
         "Какие роли пользователей должны поддерживаться?"
     ]
+    assert seen_validation_settings == [
+        {"core_rules": False, "custom_rules": False, "context_questions": True}
+    ]
+    actual_result = detail["case_results"][0]["actual_result"]
+    assert "core_custom_validation" not in actual_result
+    assert "full_validation" not in actual_result
+    assert actual_result["context_validation"]["validation_node_settings"] == {
+        "core_rules": False,
+        "custom_rules": False,
+        "context_questions": True,
+    }
 
     metrics_export = await client.get(
         f"/admin/adaptation-eval/runs/{run_id}/export",

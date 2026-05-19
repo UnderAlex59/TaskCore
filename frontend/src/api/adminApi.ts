@@ -590,7 +590,7 @@ export interface AdaptationEvalQualityGates {
   context_question_f1_min: number;
   context_issue_f1_min: number;
   duplicate_rate_max: number;
-  require_full_improvement: boolean;
+  require_full_improvement?: boolean;
 }
 
 export interface AdaptationEvalRunConfig {

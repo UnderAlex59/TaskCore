@@ -8,6 +8,13 @@ class ValidationState(TypedDict, total=False):
     issues: list[dict[str, str]]
     questions: list[str]
     verdict: str
+    graph_run_id: str | None
+    llm_diagnostics: list[dict[str, Any]]
+    core_issues: list[dict[str, str]]
+    core_questions: list[str]
+    custom_rule_issues: list[dict[str, str]]
+    context_questions: list[str]
+    rag_questions: list[str]
 
 
 class ChatState(TypedDict, total=False):

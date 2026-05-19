@@ -259,6 +259,26 @@ def _normalize_question_list(candidate: object) -> list[str]:
     return _dedupe_questions(questions)
 
 
+def _canonical_question_key(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip()).casefold()
+
+
+def _select_canonical_context_questions(
+    candidate_questions: object,
+    canonical_questions: object,
+) -> list[str]:
+    normalized_canonical = _normalize_question_list(canonical_questions)
+    canonical_by_key = {
+        _canonical_question_key(question): question for question in normalized_canonical
+    }
+    selected: list[str] = []
+    for candidate in _normalize_question_list(candidate_questions):
+        canonical = canonical_by_key.get(_canonical_question_key(candidate))
+        if canonical:
+            selected.append(canonical)
+    return _dedupe_questions(selected)
+
+
 def _normalize_question_item(item: object) -> str:
     if isinstance(item, dict):
         for key in ("message", "question", "text", "content"):
@@ -371,33 +391,7 @@ def _fallback_context_questions(state: ValidationGraphState) -> list[str]:
     if not settings.get("context_questions", True):
         return []
 
-    lower_text = str(state.get("lower_text", ""))
-    questions: list[str] = []
-
-    if not state.get("tags"):
-        questions.append(
-            "Укажите хотя бы один тег, чтобы правила проверки и маршрутизация были предсказуемыми."
-        )
-
-    if not state.get("attachment_names") and any(
-        token in lower_text for token in ("макет", "diagram", "ui", "экран", "schema")
-    ):
-        questions.append(
-            "В тексте упомянут визуальный или структурный артефакт. Можно ли приложить изображение, макет или схему?"
-        )
-
-    related_tasks = state.get("related_tasks", [])
-    if related_tasks:
-        related_titles = ", ".join(
-            str(item["title"]) for item in related_tasks[:2] if "title" in item
-        )
-        questions.append(
-            "Найдены похожие задачи. Проверьте, не дублирует ли текущее требование уже существующую работу: "
-            + related_titles
-        )
-
-    questions.extend(str(question).strip() for question in state.get("rag_questions", []))
-    return _dedupe_questions([question for question in questions if question.strip()])
+    return _normalize_question_list(state.get("rag_questions", []))
 
 
 async def _invoke_validation_llm(
@@ -605,7 +599,8 @@ def _prepare_context_questions_request(state: ValidationGraphState) -> Validatio
             f"{json.dumps(list(state.get('attachment_names', [])), ensure_ascii=False)}\n\n"
             "Похожие задачи:\n"
             f"{json.dumps(related_titles, ensure_ascii=False)}\n\n"
-            "Исторические вопросы проекта:\n"
+            "Исторические вопросы проекта "
+            "(выбирай только точные строки из этого списка):\n"
             f"{json.dumps(list(state.get('rag_questions', [])), ensure_ascii=False)}"
         ),
     }
@@ -622,11 +617,12 @@ async def _inspect_context(state: ValidationGraphState) -> ValidationGraphState:
         system_prompt_key="context_system_prompt",
         user_prompt_key="context_user_prompt",
     )
-    questions = (
-        _fallback_context_questions(state)
-        if payload is None
-        else _normalize_question_list(payload.get("questions"))
-    )
+    questions = _fallback_context_questions(state)
+    if payload is not None:
+        questions = _select_canonical_context_questions(
+            payload.get("questions"),
+            state.get("rag_questions", []),
+        )
     return {
         "context_questions": questions,
         "llm_diagnostics": [*list(state.get("llm_diagnostics", [])), metadata],
@@ -822,6 +818,13 @@ async def run_validation_graph(
         "issues": list(state.get("issues", [])),
         "questions": list(state.get("questions", [])),
         "verdict": str(state.get("verdict", "approved")),
+        "graph_run_id": state.get("graph_run_id"),
+        "llm_diagnostics": list(state.get("llm_diagnostics", [])),
+        "core_issues": list(state.get("core_issues", [])),
+        "core_questions": list(state.get("core_questions", [])),
+        "custom_rule_issues": list(state.get("custom_rule_issues", [])),
+        "context_questions": list(state.get("context_questions", [])),
+        "rag_questions": list(state.get("rag_questions", [])),
     }
 
 

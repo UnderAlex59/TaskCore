@@ -33,7 +33,6 @@ const DEFAULT_CONFIG: AdaptationEvalRunConfig = {
     context_issue_f1_min: 0.7,
     context_question_f1_min: 0.75,
     duplicate_rate_max: 0.1,
-    require_full_improvement: true,
     retrieval_recall_at_k_min: 0.8,
   },
   retrieval_limit: 5,
@@ -802,8 +801,9 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
   const actual = asRecord(item.actual_result);
   const metrics = asRecord(item.metrics);
-  const fullValidation = asRecord(actual.full_validation);
-  const coreValidation = asRecord(actual.core_custom_validation);
+  const contextValidation = asRecord(
+    actual.context_validation ?? actual.full_validation,
+  );
   const retrieval = asArray(actual.retrieval_results).map(asRecord);
   return (
     <article className="page-panel overflow-hidden">
@@ -819,7 +819,7 @@ function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
         </span>
       </div>
 
-      <div className="grid gap-4 p-5 lg:grid-cols-4">
+      <div className="grid gap-4 p-5 lg:grid-cols-3">
         <StageBlock
           label="Capture"
           metric={metricValue(metrics.capture_recall)}
@@ -831,32 +831,17 @@ function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
           values={retrieval.map((row) => `${row.rank}. ${row.question_text}`)}
         />
         <StageBlock
-          label="Core custom"
-          metric={metricValue(metrics.core_context_question_f1)}
-          values={asArray(coreValidation.context_questions)}
-        />
-        <StageBlock
-          label="Full validation"
+          label="Context validation"
           metric={metricValue(metrics.context_question_f1)}
-          values={asArray(fullValidation.context_questions)}
+          values={asArray(contextValidation.context_questions)}
         />
       </div>
 
       <div className="border-t border-[rgba(9,30,66,0.08)] p-5">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2">
           <MetricMini
             label="Context issue F1"
             value={metricValue(metrics.context_issue_f1)}
-          />
-          <MetricMini
-            label="Question delta"
-            value={metricValue(
-              metrics.full_vs_core_custom_context_question_f1_delta,
-            )}
-          />
-          <MetricMini
-            label="Issue delta"
-            value={metricValue(metrics.full_vs_core_custom_context_issue_f1_delta)}
           />
           <MetricMini
             label="Duplicate rate"

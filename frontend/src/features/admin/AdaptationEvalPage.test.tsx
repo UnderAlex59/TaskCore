@@ -100,7 +100,6 @@ describe("AdaptationEvalPage", () => {
         context_issue_f1_min: 0.7,
         context_question_f1_min: 0.75,
         duplicate_rate_max: 0.1,
-        require_full_improvement: true,
         retrieval_recall_at_k_min: 0.8,
       },
       retrieval_limit: 5,
@@ -112,12 +111,7 @@ describe("AdaptationEvalPage", () => {
             captured_questions: [
               "Какие роли пользователей должны поддерживаться?",
             ],
-            core_custom_validation: {
-              context_questions: [],
-              issues: [],
-              verdict: "approved",
-            },
-            full_validation: {
+            context_validation: {
               context_questions: [
                 "Какие роли пользователей должны поддерживаться?",
               ],
@@ -153,9 +147,6 @@ describe("AdaptationEvalPage", () => {
             capture_recall: 1,
             context_issue_f1: 1,
             context_question_f1: 1,
-            core_context_question_f1: 0,
-            full_vs_core_custom_context_issue_f1_delta: 1,
-            full_vs_core_custom_context_question_f1_delta: 1,
             overall_question_duplicate_rate: 0,
             retrieval_mrr: 1,
             retrieval_recall_at_k: 1,
@@ -292,6 +283,9 @@ describe("AdaptationEvalPage", () => {
       screen.getAllByText("Какие роли пользователей должны поддерживаться?")
         .length,
     ).toBeGreaterThan(0);
+    expect(screen.getByText("Context validation")).toBeInTheDocument();
+    expect(screen.queryByText("Baseline")).not.toBeInTheDocument();
+    expect(screen.queryByText("Question delta")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     await waitFor(() => {
