@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from app.agents.system_prompts import (
+    ADAPTATION_EVAL_MATCH_JUDGE_SYSTEM_PROMPT,
     CHANGE_TRACKER_SYSTEM_PROMPT,
     CHAT_ROUTING_SYSTEM_PROMPT,
     QA_ANSWER_SYSTEM_PROMPT,
     QA_VERIFIER_SYSTEM_PROMPT,
+    QURE_EVAL_WEAK_WORD_JUDGE_SYSTEM_PROMPT,
     RAG_EVAL_JUDGE_SYSTEM_PROMPT,
     VALIDATION_CONTEXT_QUESTIONS_PROMPT_KEY,
     VALIDATION_CONTEXT_QUESTIONS_SYSTEM_PROMPT,
@@ -76,6 +78,28 @@ def list_llm_prompt_definitions() -> tuple[LLMPromptDefinition, ...]:
             ),
             default_system_prompt=VALIDATION_EVAL_QUESTION_JUDGE_SYSTEM_PROMPT,
             priority=45,
+        ),
+        LLMPromptDefinition(
+            prompt_key="adaptation-eval-match-judge",
+            agent_key="adaptation-eval-match-judge",
+            name="AdaptationEvalMatchJudgeAgent",
+            description=(
+                "Сопоставляет expected и actual элементы Adaptation Eval "
+                "по смысловой эквивалентности."
+            ),
+            default_system_prompt=ADAPTATION_EVAL_MATCH_JUDGE_SYSTEM_PROMPT,
+            priority=47,
+        ),
+        LLMPromptDefinition(
+            prompt_key="qure-eval-weak-word-judge",
+            agent_key="qure-eval-weak-word-judge",
+            name="QuREEvalWeakWordJudgeAgent",
+            description=(
+                "Принимает итоговое решение о прохождении QuRE Eval кейса "
+                "по ответу валидатора."
+            ),
+            default_system_prompt=QURE_EVAL_WEAK_WORD_JUDGE_SYSTEM_PROMPT,
+            priority=48,
         ),
         LLMPromptDefinition(
             prompt_key="change-tracker",

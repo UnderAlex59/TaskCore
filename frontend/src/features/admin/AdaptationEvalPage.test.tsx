@@ -95,6 +95,7 @@ describe("AdaptationEvalPage", () => {
     };
     const config = {
       cleanup_synthetic_tasks: true,
+      judge_match_confidence_min: 0.75,
       quality_gates: {
         capture_recall_min: 0.95,
         context_issue_f1_min: 0.7,
@@ -103,6 +104,7 @@ describe("AdaptationEvalPage", () => {
         retrieval_recall_at_k_min: 0.8,
       },
       retrieval_limit: 5,
+      run_match_judge: true,
     };
     const runDetail = {
       case_results: [
@@ -137,7 +139,12 @@ describe("AdaptationEvalPage", () => {
           case_id: "case-1",
           core_graph_run_id: null,
           created_at: now,
-          diffs: {},
+          diffs: {
+            capture_match_source: { deterministic: 1, judge: 0 },
+            context_issue_match_source: { deterministic: 1, judge: 0 },
+            context_question_match_source: { deterministic: 1, judge: 0 },
+            retrieval_match_source: { deterministic: 1, judge: 0 },
+          },
           error_message: null,
           expected_result: {},
           full_graph_run_id: null,
@@ -147,6 +154,7 @@ describe("AdaptationEvalPage", () => {
             capture_recall: 1,
             context_issue_f1: 1,
             context_question_f1: 1,
+            context_question_text_f1: 1,
             overall_question_duplicate_rate: 0,
             retrieval_mrr: 1,
             retrieval_recall_at_k: 1,

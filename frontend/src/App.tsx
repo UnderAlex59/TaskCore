@@ -16,6 +16,7 @@ import LLMRequestLogsPage from "@/features/admin/LLMRequestLogsPage";
 import MonitoringPage from "@/features/admin/MonitoringPage";
 import OrchestratorEvalPage from "@/features/admin/OrchestratorEvalPage";
 import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
+import QureEvalPage from "@/features/admin/QureEvalPage";
 import TaskTagsPage from "@/features/admin/TaskTagsPage";
 import ValidationEvalPage from "@/features/admin/ValidationEvalPage";
 import ValidationQuestionsPage from "@/features/admin/ValidationQuestionsPage";
@@ -83,6 +84,7 @@ export default function App() {
                     path="validation-eval"
                     element={<ValidationEvalPage />}
                   />
+                  <Route path="qure-eval" element={<QureEvalPage />} />
                   <Route path="llm-requests" element={<LLMRequestLogsPage />} />
                   <Route
                     path="validation-questions"

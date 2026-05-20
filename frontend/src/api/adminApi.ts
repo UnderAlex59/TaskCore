@@ -596,6 +596,8 @@ export interface AdaptationEvalQualityGates {
 export interface AdaptationEvalRunConfig {
   retrieval_limit: number;
   cleanup_synthetic_tasks: boolean;
+  run_match_judge: boolean;
+  judge_match_confidence_min: number;
   quality_gates: AdaptationEvalQualityGates;
 }
 
@@ -1145,6 +1147,70 @@ export interface ValidationEvalCaseResultRead {
 
 export interface ValidationEvalRunRead extends ValidationEvalRunListItemRead {
   case_results: ValidationEvalCaseResultRead[];
+}
+
+export type QureEvalRunStatus = "queued" | "running" | "success" | "error";
+export type QureEvalCaseResultStatus = "queued" | "passed" | "failed" | "error";
+
+export interface QureEvalRunCreateRead {
+  id: string;
+  project_id: string;
+  status: QureEvalRunStatus;
+  row_limit: number;
+  total_rows: number;
+  selected_rows: number;
+  selection_strategy: string;
+  created_at: string;
+}
+
+export interface QureEvalRunListItemRead {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  filename: string;
+  file_sha256: string;
+  row_limit: number;
+  selection_strategy: string;
+  total_rows: number;
+  selected_rows: number;
+  status: QureEvalRunStatus;
+  summary_metrics: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface QureEvalRunPageRead {
+  page: number;
+  page_size: number;
+  total: number;
+  items: QureEvalRunListItemRead[];
+}
+
+export interface QureEvalCaseResultRead {
+  id: string;
+  run_id: string;
+  graph_run_id: string | null;
+  judge_graph_run_id: string | null;
+  row_index: number;
+  source_id: string;
+  requirement: string;
+  defect: "ok" | "defect";
+  weak_word: string;
+  expected_verdict: "approved" | "needs_rework";
+  actual_result: Record<string, unknown>;
+  judge_payload: Record<string, unknown> | null;
+  metrics: Record<string, unknown>;
+  status: QureEvalCaseResultStatus;
+  latency_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface QureEvalRunRead extends QureEvalRunListItemRead {
+  case_results: QureEvalCaseResultRead[];
 }
 
 export const adminApi = {
@@ -1700,5 +1766,45 @@ export const adminApi = {
           responseType: "text",
         },
       )
+    ).data,
+  createQureEvalRun: async (
+    file: File,
+    projectId: string,
+    rowLimit: number,
+  ) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("project_id", projectId);
+    formData.append("row_limit", String(rowLimit));
+    return (
+      await apiClient.post<QureEvalRunCreateRead>(
+        "/admin/qure-eval/runs",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        },
+      )
+    ).data;
+  },
+  listQureEvalRuns: async (
+    params: { page?: number; size?: number; status?: QureEvalRunStatus } = {},
+  ) =>
+    (
+      await apiClient.get<QureEvalRunPageRead>("/admin/qure-eval/runs", {
+        params,
+      })
+    ).data,
+  getQureEvalRun: async (runId: string) =>
+    (await apiClient.get<QureEvalRunRead>(`/admin/qure-eval/runs/${runId}`))
+      .data,
+  deleteQureEvalRun: async (runId: string) => {
+    await apiClient.delete(`/admin/qure-eval/runs/${runId}`);
+  },
+  exportQureEvalRun: async (runId: string, format: "json" | "csv") =>
+    (
+      await apiClient.get<string>(`/admin/qure-eval/runs/${runId}/export`, {
+        params: { format },
+        responseType: "text",
+      })
     ).data,
 };

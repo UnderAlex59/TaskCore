@@ -13,6 +13,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.adaptation_eval_match_judge_graph import (
+    run_adaptation_eval_match_judge_graph,
+)
 from app.agents.validation_graph import run_validation_graph
 from app.core.database import AsyncSessionLocal
 from app.models.adaptation_eval import (
@@ -241,86 +244,488 @@ class AdminAdaptationEvalService:
             return None
 
     @staticmethod
+    def _item_text(item: dict[str, Any]) -> str:
+        return str(item.get("text") or "").strip()
+
+    @staticmethod
+    def _question_match_item(index: int, value: object) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {"index": index, "text": str(value)}
+
+        metadata = dict(value.get("metadata") or {})
+        source_task = dict(value.get("source_task") or {})
+        text = str(
+            value.get("question_text")
+            or value.get("message")
+            or value.get("text")
+            or value.get("content")
+            or ""
+        ).strip()
+        item: dict[str, Any] = {"index": index, "text": text}
+        for key in ("rank", "score"):
+            if value.get(key) is not None:
+                item[key] = value.get(key)
+        question_id = metadata.get("question_id") or value.get("question_id")
+        task_id = metadata.get("task_id") or value.get("task_id") or source_task.get("id")
+        if question_id:
+            item["question_id"] = str(question_id)
+        if task_id:
+            item["task_id"] = str(task_id)
+        if metadata.get("validation_verdict") is not None:
+            item["validation_verdict"] = str(metadata.get("validation_verdict"))
+        if source_task.get("title") is not None:
+            item["source_task_title"] = str(source_task.get("title"))
+        return item
+
+    @staticmethod
+    def _issue_match_item(index: int, value: object) -> dict[str, Any]:
+        issue = dict(value) if isinstance(value, dict) else {"message": str(value)}
+        message = str(issue.get("message") or "").strip()
+        return {
+            "index": index,
+            "text": message,
+            "message": message,
+            "code": str(issue.get("code") or ""),
+            "source": str(issue.get("source") or ""),
+            "severity": str(issue.get("severity") or ""),
+        }
+
+    @staticmethod
+    def _case_match_groups(
+        *,
+        expected: dict[str, Any],
+        actual: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        context_validation = dict(
+            actual.get("context_validation") or actual.get("full_validation") or {}
+        )
+        group_specs = {
+            "capture": {
+                "expected": list(expected.get("captured_questions", [])),
+                "actual": list(actual.get("captured_questions", [])),
+                "kind": "question",
+            },
+            "retrieval": {
+                "expected": list(expected.get("retrieved_questions", [])),
+                "actual": list(
+                    actual.get("retrieval_results") or actual.get("retrieved_questions", [])
+                ),
+                "kind": "question",
+            },
+            "context_question": {
+                "expected": list(expected.get("context_questions", [])),
+                "actual": list(context_validation.get("context_questions", [])),
+                "kind": "question",
+            },
+            "context_issue": {
+                "expected": list(expected.get("context_issues", [])),
+                "actual": AdminAdaptationEvalService._context_issues(context_validation),
+                "kind": "issue",
+            },
+        }
+        groups: dict[str, dict[str, Any]] = {}
+        for prefix, spec in group_specs.items():
+            builder = (
+                AdminAdaptationEvalService._issue_match_item
+                if spec["kind"] == "issue"
+                else AdminAdaptationEvalService._question_match_item
+            )
+            groups[prefix] = {
+                "kind": spec["kind"],
+                "expected_items": [
+                    builder(index, item)
+                    for index, item in enumerate(list(spec["expected"]))
+                ],
+                "actual_items": [
+                    builder(index, item) for index, item in enumerate(list(spec["actual"]))
+                ],
+            }
+        return groups
+
+    @staticmethod
+    def _deterministic_item_match(
+        *,
+        kind: str,
+        expected_item: dict[str, Any],
+        actual_item: dict[str, Any],
+    ) -> bool:
+        if kind == "issue":
+            expected_code = str(expected_item.get("code") or "").strip().casefold()
+            actual_code = str(actual_item.get("code") or "").strip().casefold()
+            if expected_code and actual_code and expected_code != actual_code:
+                return False
+        return AdminAdaptationEvalService._text_matches(
+            AdminAdaptationEvalService._item_text(expected_item),
+            AdminAdaptationEvalService._item_text(actual_item),
+        )
+
+    @staticmethod
+    def _match_record(
+        *,
+        expected_item: dict[str, Any],
+        actual_item: dict[str, Any],
+        match_source: str,
+        confidence: float,
+        reason: str,
+    ) -> dict[str, Any]:
+        return {
+            "expected": AdminAdaptationEvalService._item_text(expected_item),
+            "actual": AdminAdaptationEvalService._item_text(actual_item),
+            "expected_index": int(expected_item.get("index", 0)),
+            "actual_index": int(actual_item.get("index", 0)),
+            "match_source": match_source,
+            "confidence": round(confidence, 4),
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _deterministic_group_match(
+        *,
+        kind: str,
+        expected_items: list[dict[str, Any]],
+        actual_items: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        unmatched_actual = list(actual_items)
+        matches: list[dict[str, Any]] = []
+        unmatched_expected: list[dict[str, Any]] = []
+        for expected_item in expected_items:
+            match_index: int | None = None
+            for index, actual_item in enumerate(unmatched_actual):
+                if AdminAdaptationEvalService._deterministic_item_match(
+                    kind=kind,
+                    expected_item=expected_item,
+                    actual_item=actual_item,
+                ):
+                    match_index = index
+                    break
+            if match_index is None:
+                unmatched_expected.append(expected_item)
+                continue
+            actual_item = unmatched_actual.pop(match_index)
+            matches.append(
+                AdminAdaptationEvalService._match_record(
+                    expected_item=expected_item,
+                    actual_item=actual_item,
+                    match_source="deterministic",
+                    confidence=1.0,
+                    reason="deterministic text match",
+                )
+            )
+        return matches, unmatched_expected, unmatched_actual
+
+    @staticmethod
+    def _duplicate_count(items: list[dict[str, Any]]) -> int:
+        normalized = [
+            AdminAdaptationEvalService._normalize_match_text(
+                AdminAdaptationEvalService._item_text(item)
+            )
+            for item in items
+        ]
+        return max(0, len(normalized) - len(set(normalized)))
+
+    @staticmethod
+    def _judge_match_records(
+        *,
+        judge_payload: dict[str, Any],
+        unmatched_expected: list[dict[str, Any]],
+        unmatched_actual: list[dict[str, Any]],
+        confidence_min: float,
+    ) -> list[dict[str, Any]]:
+        expected_by_index = {int(item["index"]): item for item in unmatched_expected}
+        actual_by_index = {int(item["index"]): item for item in unmatched_actual}
+        used_expected: set[int] = set()
+        used_actual: set[int] = set()
+        matches: list[dict[str, Any]] = []
+        for item in list(judge_payload.get("matches") or []):
+            if not isinstance(item, dict) or not item.get("match"):
+                continue
+            try:
+                expected_index = int(item.get("expected_index"))
+                actual_index = int(item.get("actual_index"))
+                confidence = float(item.get("confidence") or 0)
+            except (TypeError, ValueError):
+                continue
+            if confidence < confidence_min:
+                continue
+            if expected_index in used_expected or actual_index in used_actual:
+                continue
+            expected_item = expected_by_index.get(expected_index)
+            actual_item = actual_by_index.get(actual_index)
+            if expected_item is None or actual_item is None:
+                continue
+            used_expected.add(expected_index)
+            used_actual.add(actual_index)
+            matches.append(
+                AdminAdaptationEvalService._match_record(
+                    expected_item=expected_item,
+                    actual_item=actual_item,
+                    match_source="judge",
+                    confidence=confidence,
+                    reason=str(item.get("reason") or "semantic judge match"),
+                )
+            )
+        return matches
+
+    @staticmethod
+    def _match_source_counts(matches: list[dict[str, Any]]) -> dict[str, int]:
+        return {
+            "deterministic": len(
+                [item for item in matches if item.get("match_source") == "deterministic"]
+            ),
+            "judge": len([item for item in matches if item.get("match_source") == "judge"]),
+        }
+
+    @staticmethod
+    def _retrieval_mrr_from_matches(
+        *,
+        expected_count: int,
+        actual_count: int,
+        matches: list[dict[str, Any]],
+    ) -> float:
+        if expected_count == 0:
+            return 1.0 if actual_count == 0 else 0.0
+        if not matches:
+            return 0.0
+        best_rank = min(int(item.get("actual_index") or 0) + 1 for item in matches)
+        return round(1 / best_rank, 4)
+
+    @staticmethod
+    def _score_group(
+        *,
+        prefix: str,
+        group: dict[str, Any],
+        judge_state: dict[str, Any] | None,
+        confidence_min: float,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        expected_items = list(group["expected_items"])
+        actual_items = list(group["actual_items"])
+        deterministic_matches, unmatched_expected, unmatched_actual = (
+            AdminAdaptationEvalService._deterministic_group_match(
+                kind=str(group["kind"]),
+                expected_items=expected_items,
+                actual_items=actual_items,
+            )
+        )
+        judge_payload = dict((judge_state or {}).get("judge_payload") or {})
+        judge_matches = AdminAdaptationEvalService._judge_match_records(
+            judge_payload=judge_payload,
+            unmatched_expected=unmatched_expected,
+            unmatched_actual=unmatched_actual,
+            confidence_min=confidence_min,
+        )
+        matched_expected_indexes = {int(item["expected_index"]) for item in judge_matches}
+        matched_actual_indexes = {int(item["actual_index"]) for item in judge_matches}
+        missing_items = [
+            item
+            for item in unmatched_expected
+            if int(item.get("index", -1)) not in matched_expected_indexes
+        ]
+        extra_items = [
+            item
+            for item in unmatched_actual
+            if int(item.get("index", -1)) not in matched_actual_indexes
+        ]
+        matches = deterministic_matches + judge_matches
+        scores = AdminAdaptationEvalService._prf(
+            len(matches),
+            len(extra_items),
+            len(missing_items),
+        )
+        text_metrics, _ = AdminAdaptationEvalService._text_scores(
+            expected_items=[
+                AdminAdaptationEvalService._item_text(item) for item in expected_items
+            ],
+            actual_items=[
+                AdminAdaptationEvalService._item_text(item) for item in actual_items
+            ],
+            prefix=f"{prefix}_text",
+        )
+        duplicates = AdminAdaptationEvalService._duplicate_count(actual_items)
+        judge_invoked = bool(judge_state)
+        metrics = {
+            f"{prefix}_tp": len(matches),
+            f"{prefix}_fp": len(extra_items),
+            f"{prefix}_fn": len(missing_items),
+            f"{prefix}_precision": scores["precision"],
+            f"{prefix}_recall": scores["recall"],
+            f"{prefix}_f1": scores["f1"],
+            f"{prefix}_duplicates": duplicates,
+            f"{prefix}_duplicate_rate": round(duplicates / len(actual_items), 4)
+            if actual_items
+            else 0,
+            f"{prefix}_judge_calls": 1 if judge_invoked else 0,
+            f"{prefix}_judge_matches": len(judge_matches),
+            f"{prefix}_judge_evaluated_expected": len(unmatched_expected)
+            if judge_invoked
+            else 0,
+            f"{prefix}_judge_invalid_json": int(
+                judge_payload.get("invalid_json_count") or 0
+            ),
+            f"{prefix}_judge_retries": int(judge_payload.get("retry_count") or 0),
+            f"{prefix}_judge_fallback": 1
+            if judge_invoked and not bool(judge_payload.get("ok"))
+            else 0,
+            **text_metrics,
+        }
+        if prefix == "retrieval":
+            metrics["retrieval_mrr"] = AdminAdaptationEvalService._retrieval_mrr_from_matches(
+                expected_count=len(expected_items),
+                actual_count=len(actual_items),
+                matches=matches,
+            )
+            metrics["retrieval_text_mrr"] = AdminAdaptationEvalService._mrr(
+                [AdminAdaptationEvalService._item_text(item) for item in expected_items],
+                [AdminAdaptationEvalService._item_text(item) for item in actual_items],
+            )
+        diffs = {
+            f"{prefix}_matches": matches,
+            f"missing_{prefix}s": [
+                AdminAdaptationEvalService._item_text(item) for item in missing_items
+            ],
+            f"extra_{prefix}s": [
+                AdminAdaptationEvalService._item_text(item) for item in extra_items
+            ],
+            f"{prefix}_judge_payload": judge_payload,
+            f"{prefix}_judge_graph_run_id": (judge_state or {}).get(
+                "judge_graph_run_id"
+            ),
+            f"{prefix}_match_source": AdminAdaptationEvalService._match_source_counts(
+                matches
+            ),
+        }
+        return metrics, diffs
+
+    @staticmethod
+    async def _case_judge_payloads(
+        *,
+        case: AdaptationEvalCase,
+        project_id: str,
+        expected: dict[str, Any],
+        actual: dict[str, Any],
+        config: AdaptationEvalRunConfig,
+        actor: User,
+        db: AsyncSession,
+    ) -> dict[str, dict[str, Any]]:
+        if not config.run_match_judge:
+            return {}
+
+        groups = AdminAdaptationEvalService._case_match_groups(
+            expected=expected,
+            actual=actual,
+        )
+        probe_task = dict(case.probe_task or {})
+        judge_payloads: dict[str, dict[str, Any]] = {}
+        for prefix, group in groups.items():
+            _, unmatched_expected, unmatched_actual = (
+                AdminAdaptationEvalService._deterministic_group_match(
+                    kind=str(group["kind"]),
+                    expected_items=list(group["expected_items"]),
+                    actual_items=list(group["actual_items"]),
+                )
+            )
+            if not unmatched_expected or not unmatched_actual:
+                continue
+            judge_state = await run_adaptation_eval_match_judge_graph(
+                db=db,
+                actor_user_id=actor.id,
+                project_id=project_id,
+                case_external_id=case.external_id,
+                scenario_type=case.scenario_type,
+                group_key=prefix,
+                task_title=str(probe_task.get("title") or ""),
+                task_content=str(probe_task.get("content") or ""),
+                expected_items=unmatched_expected,
+                actual_items=unmatched_actual,
+            )
+            judge_payloads[prefix] = dict(judge_state)
+        return judge_payloads
+
+    @staticmethod
     def _case_metrics(
         *,
         expected: dict[str, Any],
         actual: dict[str, Any],
+        judge_payloads: dict[str, dict[str, Any]] | None = None,
+        judge_match_confidence_min: float = 0.75,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        captured_questions = [str(item) for item in actual.get("captured_questions", [])]
-        capture_metrics, capture_diffs = AdminAdaptationEvalService._text_scores(
-            expected_items=[str(item) for item in expected.get("captured_questions", [])],
-            actual_items=captured_questions,
-            prefix="capture",
+        groups = AdminAdaptationEvalService._case_match_groups(
+            expected=expected,
+            actual=actual,
         )
-        retrieval_metrics, retrieval_diffs = AdminAdaptationEvalService._text_scores(
-            expected_items=[str(item) for item in expected.get("retrieved_questions", [])],
-            actual_items=[str(item) for item in actual.get("retrieved_questions", [])],
-            prefix="retrieval",
-        )
-        retrieval_metrics["retrieval_mrr"] = AdminAdaptationEvalService._mrr(
-            [str(item) for item in expected.get("retrieved_questions", [])],
-            [str(item) for item in actual.get("retrieved_questions", [])],
-        )
+        metrics: dict[str, Any] = {}
+        diffs: dict[str, Any] = {}
+        for prefix, group in groups.items():
+            group_metrics, group_diffs = AdminAdaptationEvalService._score_group(
+                prefix=prefix,
+                group=group,
+                judge_state=(judge_payloads or {}).get(prefix),
+                confidence_min=judge_match_confidence_min,
+            )
+            metrics.update(group_metrics)
+            diffs.update(group_diffs)
 
         context_validation = dict(
             actual.get("context_validation") or actual.get("full_validation") or {}
         )
-        context_question_metrics, context_question_diffs = (
-            AdminAdaptationEvalService._text_scores(
-                expected_items=[str(item) for item in expected.get("context_questions", [])],
-                actual_items=[
-                    str(item) for item in context_validation.get("context_questions", [])
-                ],
-                prefix="context_question",
-            )
-        )
-        context_issue_metrics, context_issue_diffs = (
-            AdminAdaptationEvalService._issue_scores(
-                expected_issues=[dict(item) for item in expected.get("context_issues", [])],
-                actual_issues=AdminAdaptationEvalService._context_issues(
-                    context_validation
-                ),
-                prefix="context_issue",
-            )
-        )
         verdict_match = expected.get("verdict") == context_validation.get("verdict")
-        duplicate_total = int(capture_metrics["capture_duplicates"]) + int(
-            context_question_metrics["context_question_duplicates"]
+        duplicate_total = int(metrics["capture_duplicates"]) + int(
+            metrics["context_question_duplicates"]
         )
-        duplicate_denominator = len(captured_questions) + len(
-            list(context_validation.get("context_questions", []))
+        duplicate_denominator = len(groups["capture"]["actual_items"]) + len(
+            groups["context_question"]["actual_items"]
         )
-        metrics = {
-            "passed": bool(
-                verdict_match
-                and capture_metrics["capture_f1"] == 1
-                and retrieval_metrics["retrieval_f1"] == 1
-                and context_question_metrics["context_question_f1"] == 1
-                and context_issue_metrics["context_issue_f1"] == 1
-            ),
-            "verdict_match": verdict_match,
-            "expected_verdict": expected.get("verdict"),
-            "actual_verdict": context_validation.get("verdict"),
-            **capture_metrics,
-            "capture_rate": capture_metrics["capture_recall"],
-            **retrieval_metrics,
-            "retrieval_precision_at_k": retrieval_metrics["retrieval_precision"],
-            "retrieval_recall_at_k": retrieval_metrics["retrieval_recall"],
-            **context_question_metrics,
-            **context_issue_metrics,
-            "overall_question_duplicate_rate": round(
-                duplicate_total / duplicate_denominator,
-                4,
-            )
-            if duplicate_denominator
-            else 0,
-        }
-        diffs = {
-            **capture_diffs,
-            **retrieval_diffs,
-            **context_question_diffs,
-            **context_issue_diffs,
-        }
+        match_prefixes = ("capture", "retrieval", "context_question", "context_issue")
+        judge_calls_total = sum(
+            int(metrics.get(f"{prefix}_judge_calls") or 0) for prefix in match_prefixes
+        )
+        judge_invalid_json_total = sum(
+            int(metrics.get(f"{prefix}_judge_invalid_json") or 0)
+            for prefix in match_prefixes
+        )
+        judge_fallback_total = sum(
+            int(metrics.get(f"{prefix}_judge_fallback") or 0)
+            for prefix in match_prefixes
+        )
+        judge_matches_total = sum(
+            int(metrics.get(f"{prefix}_judge_matches") or 0)
+            for prefix in match_prefixes
+        )
+        judge_evaluated_total = sum(
+            int(metrics.get(f"{prefix}_judge_evaluated_expected") or 0)
+            for prefix in match_prefixes
+        )
+        metrics.update(
+            {
+                "passed": bool(
+                    verdict_match
+                    and metrics["capture_f1"] == 1
+                    and metrics["retrieval_f1"] == 1
+                    and metrics["context_question_f1"] == 1
+                    and metrics["context_issue_f1"] == 1
+                ),
+                "verdict_match": verdict_match,
+                "expected_verdict": expected.get("verdict"),
+                "actual_verdict": context_validation.get("verdict"),
+                "capture_rate": metrics["capture_recall"],
+                "retrieval_precision_at_k": metrics["retrieval_precision"],
+                "retrieval_recall_at_k": metrics["retrieval_recall"],
+                "overall_question_duplicate_rate": round(
+                    duplicate_total / duplicate_denominator,
+                    4,
+                )
+                if duplicate_denominator
+                else 0,
+                "judge_match_rate": round(
+                    judge_matches_total / judge_evaluated_total,
+                    4,
+                )
+                if judge_evaluated_total
+                else 1.0,
+                "judge_calls_total": judge_calls_total,
+                "judge_invalid_json_total": judge_invalid_json_total,
+                "judge_fallback_total": judge_fallback_total,
+            }
+        )
         return metrics, diffs
 
     @staticmethod
@@ -913,9 +1318,20 @@ class AdminAdaptationEvalService:
                 "retrieval_results": retrieval_rows,
                 "context_validation": context_validation,
             }
+            judge_payloads = await AdminAdaptationEvalService._case_judge_payloads(
+                case=case,
+                project_id=run.project_id,
+                expected=expected,
+                actual=actual,
+                config=config,
+                actor=actor,
+                db=db,
+            )
             metrics, diffs = AdminAdaptationEvalService._case_metrics(
                 expected=expected,
                 actual=actual,
+                judge_payloads=judge_payloads,
+                judge_match_confidence_min=config.judge_match_confidence_min,
             )
             result_status = "passed" if metrics.get("passed") else "failed"
         except Exception as exc:  # noqa: BLE001
@@ -1026,6 +1442,26 @@ class AdminAdaptationEvalService:
             summed("context_issue_fp"),
             summed("context_issue_fn"),
         )
+        capture_text_scores = AdminAdaptationEvalService._prf(
+            summed("capture_text_tp"),
+            summed("capture_text_fp"),
+            summed("capture_text_fn"),
+        )
+        retrieval_text_scores = AdminAdaptationEvalService._prf(
+            summed("retrieval_text_tp"),
+            summed("retrieval_text_fp"),
+            summed("retrieval_text_fn"),
+        )
+        context_question_text_scores = AdminAdaptationEvalService._prf(
+            summed("context_question_text_tp"),
+            summed("context_question_text_fp"),
+            summed("context_question_text_fn"),
+        )
+        context_issue_text_scores = AdminAdaptationEvalService._prf(
+            summed("context_issue_text_tp"),
+            summed("context_issue_text_fp"),
+            summed("context_issue_text_fn"),
+        )
         actual_question_total = sum(
             len(item.actual_result.get("captured_questions", []))
             + len(
@@ -1047,6 +1483,22 @@ class AdminAdaptationEvalService:
             for item in results
             if "retrieval_mrr" in item.metrics
         ]
+        match_prefixes = ("capture", "retrieval", "context_question", "context_issue")
+        judge_calls_total = sum(
+            summed(f"{prefix}_judge_calls") for prefix in match_prefixes
+        )
+        judge_invalid_json_total = sum(
+            summed(f"{prefix}_judge_invalid_json") for prefix in match_prefixes
+        )
+        judge_fallback_total = sum(
+            summed(f"{prefix}_judge_fallback") for prefix in match_prefixes
+        )
+        judge_matches_total = sum(
+            summed(f"{prefix}_judge_matches") for prefix in match_prefixes
+        )
+        judge_evaluated_total = sum(
+            summed(f"{prefix}_judge_evaluated_expected") for prefix in match_prefixes
+        )
         gates_config = config.quality_gates
         gates = [
             AdminAdaptationEvalService._gate(
@@ -1097,19 +1549,29 @@ class AdminAdaptationEvalService:
             "capture_recall": capture_scores["recall"],
             "capture_f1": capture_scores["f1"],
             "capture_rate": capture_scores["recall"],
+            "capture_text_f1": capture_text_scores["f1"],
             "retrieval_precision_at_k": retrieval_scores["precision"],
             "retrieval_recall_at_k": retrieval_scores["recall"],
             "retrieval_f1": retrieval_scores["f1"],
+            "retrieval_text_f1": retrieval_text_scores["f1"],
             "retrieval_mrr": round(sum(mrr_values) / len(mrr_values), 4)
             if mrr_values
             else 0,
             "context_question_precision": context_question_scores["precision"],
             "context_question_recall": context_question_scores["recall"],
             "context_question_f1": context_question_scores["f1"],
+            "context_question_text_f1": context_question_text_scores["f1"],
             "context_issue_precision": context_issue_scores["precision"],
             "context_issue_recall": context_issue_scores["recall"],
             "context_issue_f1": context_issue_scores["f1"],
+            "context_issue_text_f1": context_issue_text_scores["f1"],
             "overall_question_duplicate_rate": duplicate_rate,
+            "judge_match_rate": round(judge_matches_total / judge_evaluated_total, 4)
+            if judge_evaluated_total
+            else 1.0,
+            "judge_calls_total": judge_calls_total,
+            "judge_invalid_json_total": judge_invalid_json_total,
+            "judge_fallback_total": judge_fallback_total,
             "quality_gates": gates,
             "gate_status": "passed" if all(gate["passed"] for gate in gates) else "failed",
         }
@@ -1314,11 +1776,19 @@ class AdminAdaptationEvalService:
                     "scenario_type",
                     "status",
                     "capture_recall",
+                    "capture_text_f1",
                     "retrieval_recall_at_k",
+                    "retrieval_text_f1",
                     "retrieval_mrr",
                     "context_question_f1",
+                    "context_question_text_f1",
                     "context_issue_f1",
+                    "context_issue_text_f1",
                     "overall_question_duplicate_rate",
+                    "judge_calls_total",
+                    "judge_match_rate",
+                    "judge_invalid_json_total",
+                    "judge_fallback_total",
                     "latency_ms",
                     "error_message",
                 ],
@@ -1331,17 +1801,31 @@ class AdminAdaptationEvalService:
                         "scenario_type": item.scenario_type,
                         "status": item.status,
                         "capture_recall": item.metrics.get("capture_recall"),
+                        "capture_text_f1": item.metrics.get("capture_text_f1"),
                         "retrieval_recall_at_k": item.metrics.get(
                             "retrieval_recall_at_k"
                         ),
+                        "retrieval_text_f1": item.metrics.get("retrieval_text_f1"),
                         "retrieval_mrr": item.metrics.get("retrieval_mrr"),
                         "context_question_f1": item.metrics.get(
                             "context_question_f1"
                         ),
+                        "context_question_text_f1": item.metrics.get(
+                            "context_question_text_f1"
+                        ),
                         "context_issue_f1": item.metrics.get("context_issue_f1"),
+                        "context_issue_text_f1": item.metrics.get(
+                            "context_issue_text_f1"
+                        ),
                         "overall_question_duplicate_rate": item.metrics.get(
                             "overall_question_duplicate_rate"
                         ),
+                        "judge_calls_total": item.metrics.get("judge_calls_total"),
+                        "judge_match_rate": item.metrics.get("judge_match_rate"),
+                        "judge_invalid_json_total": item.metrics.get(
+                            "judge_invalid_json_total"
+                        ),
+                        "judge_fallback_total": item.metrics.get("judge_fallback_total"),
                         "latency_ms": item.latency_ms,
                         "error_message": item.error_message or "",
                     }

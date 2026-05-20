@@ -1,0 +1,402 @@
+{
+  "dataset_name": "RAG Eval Quality Dataset",
+  "project_id": "__PROJECT_ID__",
+  "tasks": [
+    {
+      "external_id": "rag-auth-session",
+      "title": "Авторизация и управление пользовательскими сессиями",
+      "content": "Требуется обеспечить регистрацию, вход, refresh-token flow, список активных сессий и отзыв отдельной сессии пользователя. API должен различать короткоживущий access token для запросов к backend и refresh token, который хранится в cookie. Поведение должно быть безопасным для нескольких одновременных устройств пользователя.",
+      "tags": [
+        "auth",
+        "security",
+        "sessions"
+      ],
+      "attachments": [
+        {
+          "filename": "auth-session-policy.md",
+          "content_type": "text/plain",
+          "content": "Refresh token хранится только в httpOnly cookie; параметры COOKIE_SECURE, COOKIE_SAMESITE и COOKIE_DOMAIN управляют защитой cookie.\n\nОтзыв одной refresh-сессии через DELETE /auth/sessions/{session_id} не должен удалять остальные активные сессии пользователя.\n\nAccess token используется как короткоживущий bearer-токен для API; он не имеет отношения к prompt_tokens, completion_tokens и total_tokens в журнале LLM.\n\nПароль при регистрации должен соответствовать базовому требованию StrongPass1-подобного формата: достаточно длинный пароль с буквами и цифрами."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-task-workflow",
+      "title": "Жизненный цикл задачи от черновика до завершения",
+      "content": "Требуется описать workflow задачи: draft, validating, needs_rework, awaiting_approval, ready_for_dev, in_progress, ready_for_testing, testing и done. В процессе участвуют аналитик, проверяющий аналитик, разработчик и тестировщик. Изменения подтвержденной задачи должны фиксироваться и повторно проходить проверку качества.",
+      "tags": [
+        "workflow",
+        "tasks",
+        "roles"
+      ],
+      "attachments": [
+        {
+          "filename": "task-workflow-rules.md",
+          "content_type": "text/plain",
+          "content": "Переход в ready_for_dev разрешен только после успешной валидации, ручного подтверждения требования и назначения команды.\n\nИзменения подтвержденной задачи фиксируются через commit и требуют повторной валидации перед дальнейшей передачей в разработку.\n\nРазработчик переводит задачу из ready_for_dev в in_progress, затем в ready_for_testing; тестировщик переводит ее в testing и done.\n\nЗадача остается заблокированной для разработки, если verdict needs_rework или не назначены обязательные исполнители."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-validation-quality",
+      "title": "Автоматическая проверка качества требований",
+      "content": "Система должна проверять постановки задач на полноту, непротиворечивость, наличие критериев приемки, ограничений и ролей. Проверка строится на базовых правилах, кастомных правилах проекта и контекстных вопросах, которые помогают аналитику уточнять требование до передачи в разработку.",
+      "tags": [
+        "validation",
+        "requirements",
+        "quality"
+      ],
+      "attachments": [
+        {
+          "filename": "validation-quality-rules.md",
+          "content_type": "text/plain",
+          "content": "Вердикт needs_rework выставляется, когда постановка неполная, содержит противоречия или нарушает обязательные правила качества.\n\nКастомные правила проекта дополняют базовую проверку и применяются при валидации требований конкретного проекта.\n\nКонтекстные вопросы нужны для уточнения неявных требований, критериев приемки, ограничений и ролей участников.\n\nApproved означает, что требование достаточно полно для ручного подтверждения, но не заменяет approve со стороны команды."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-rag-indexing",
+      "title": "RAG-индексация задач и retrieval quality",
+      "content": "RAG-контур должен готовить индексируемые фрагменты задач, вложений, результатов валидации и описаний изображений. Qdrant хранит проектную память, а eval-запуски измеряют, насколько retrieval возвращает ожидаемые релевантные chunks и насколько ответы агента grounded в найденном контексте.",
+      "tags": [
+        "rag",
+        "qdrant",
+        "eval"
+      ],
+      "attachments": [
+        {
+          "filename": "rag-indexing-scope.md",
+          "content_type": "text/plain",
+          "content": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks.\n\nПри стандартном запуске retrieval для текущей задачи ищет attachment_text и attachment_image_alt_text; task_content текущей задачи добавляется только если include_current_task_content=true.\n\nCross-task context при include_cross_task=true ищет task_content и вложения других задач проекта, исключая текущую anchor task.\n\nКачество retrieval доказывают recall_at_1, recall_at_3, recall_at_5, mrr, first_relevant_rank и matched_expected."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-attachments-vision",
+      "title": "Индексация вложений и Vision-описаний",
+      "content": "Платформа должна принимать текстовые вложения, извлекать из них содержимое для RAG и отдельно обрабатывать изображения через Vision при включенной настройке. Неподдерживаемые бинарные файлы не должны ухудшать качество индекса и должны быть явно пропущены.",
+      "tags": [
+        "attachments",
+        "vision",
+        "rag"
+      ],
+      "attachments": [
+        {
+          "filename": "attachment-indexing-policy.md",
+          "content_type": "text/plain",
+          "content": "Импорт RAG Eval v1 принимает только текстовые вложения: text/*, application/json, application/xml, application/yaml и application/x-yaml.\n\nНеподдерживаемые бинарные вложения пропускаются с warning и не попадают в индексируемый контекст.\n\nAlt_text изображения попадает в RAG как attachment_image_alt_text только если вложение является изображением, Vision включена и описание успешно получено.\n\nДля обычного текстового файла извлеченный текст индексируется как attachment_text с filename исходного вложения."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-chat-proposals",
+      "title": "Чат задачи, QA Agent и предложения изменений",
+      "content": "Чат задачи должен маршрутизировать сообщения пользователя между агентами. Вопросы по контексту обрабатывает QA Agent, просьбы изменить постановку оформляет ChangeTracker Agent, а fallback и управленческие сценарии обслуживает Manager Agent. Принятие предложения должно быть явным действием.",
+      "tags": [
+        "chat",
+        "agents",
+        "proposals"
+      ],
+      "attachments": [
+        {
+          "filename": "chat-routing-and-proposals.md",
+          "content_type": "text/plain",
+          "content": "QA Agent отвечает на вопросы пользователя по контексту задачи и RAG-сниппетам, не изменяя требование напрямую.\n\nChangeTracker Agent оформляет предложение изменения, когда пользователь просит изменить постановку, добавить критерий или исправить требование.\n\nПредложения изменений имеют статусы new, accepted и rejected; только принятое предложение должно менять требование.\n\nManager Agent используется как fallback и для управленческих сценариев, когда маршрут не уверен в специализированном агенте."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-admin-monitoring",
+      "title": "Администрирование LLM runtime, мониторинга и Qdrant",
+      "content": "Админский контур должен управлять LLM-провайдерами, runtime settings, prompt configs, request logs, аудитом и Qdrant-инструментами. Для доказуемости работы AI-функций нужно видеть токены, стоимость, latency, coverage индекса и возможность вручную переиндексировать задачу.",
+      "tags": [
+        "admin",
+        "monitoring",
+        "llm"
+      ],
+      "attachments": [
+        {
+          "filename": "admin-monitoring-runtime.md",
+          "content_type": "text/plain",
+          "content": "LLMRuntimeService выбирает провайдера и модель, применяет runtime settings и пишет LLMRequestLog для каждого вызова.\n\nВ LLMRequestLog фиксируются prompt_tokens, completion_tokens, total_tokens, latency_ms и estimated_cost_usd.\n\nАдминский Qdrant раздел показывает overview, coverage, probes и ручной resync задачи.\n\nAuditEvent сохраняет админские действия, включая импорт RAG Eval набора, удаление запусков и изменения конфигурации."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-token-distractor",
+      "title": "Термины token в авторизации и LLM-мониторинге",
+      "content": "В системе слово token встречается в разных контекстах. Пользовательские access token и refresh token относятся к авторизации и сессиям. Prompt tokens, completion tokens, total tokens и token budget относятся к LLM-вызовам, стоимости и ограничениям модели.",
+      "tags": [
+        "tokens",
+        "monitoring",
+        "auth"
+      ],
+      "attachments": [
+        {
+          "filename": "token-terminology-distractor.md",
+          "content_type": "text/plain",
+          "content": "Prompt tokens, completion tokens и total tokens описывают расход LLM-вызова и не являются access token или refresh token.\n\nEstimated cost usd рассчитывается по данным LLM runtime и используется для мониторинга стоимости, а не для авторизации.\n\nBearer access token подтверждает пользователя в HTTP API, но не измеряет стоимость генерации ответа.\n\nToken budget модели ограничивает длину prompt и completion; это не срок жизни пользовательской сессии."
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "external_id": "auth-cookie-flags",
+      "task_external_id": "rag-auth-session",
+      "question": "Какие параметры безопасности должны применяться к refresh token cookie, если пользователь входит в систему с нескольких устройств и backend должен защитить refresh-сессию от доступа из JavaScript?",
+      "expected_answer": "Refresh token должен храниться только в httpOnly cookie, а параметры COOKIE_SECURE, COOKIE_SAMESITE и COOKIE_DOMAIN управляют защитой cookie.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-auth-session",
+          "source_type": "attachment_text",
+          "text_contains": "Refresh token хранится только в httpOnly cookie; параметры COOKIE_SECURE, COOKIE_SAMESITE и COOKIE_DOMAIN управляют защитой cookie."
+        }
+      ]
+    },
+    {
+      "external_id": "auth-revoke-single-session",
+      "task_external_id": "rag-auth-session",
+      "question": "Что должно произойти при отзыве одной активной refresh-сессии пользователя через endpoint управления сессиями, если у этого пользователя есть другие устройства с действующими сессиями?",
+      "expected_answer": "Удаляется только выбранная refresh-сессия; остальные активные сессии пользователя не должны удаляться.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-auth-session",
+          "source_type": "attachment_text",
+          "text_contains": "Отзыв одной refresh-сессии через DELETE /auth/sessions/{session_id} не должен удалять остальные активные сессии пользователя."
+        }
+      ]
+    },
+    {
+      "external_id": "auth-token-vs-llm-tokens",
+      "task_external_id": "rag-auth-session",
+      "question": "Как объяснить различие между bearer access token для HTTP API и prompt/completion tokens из LLM-журнала, чтобы RAG не перепутал авторизацию пользователя со стоимостью генерации ответа?",
+      "expected_answer": "Access token подтверждает пользователя в HTTP API, а prompt_tokens, completion_tokens и total_tokens описывают расход LLM-вызова и не являются авторизационными токенами.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-token-distractor",
+          "source_type": "attachment_text",
+          "text_contains": "Prompt tokens, completion tokens и total tokens описывают расход LLM-вызова и не являются access token или refresh token."
+        },
+        {
+          "task_external_id": "rag-auth-session",
+          "source_type": "attachment_text",
+          "text_contains": "Access token используется как короткоживущий bearer-токен для API; он не имеет отношения к prompt_tokens, completion_tokens и total_tokens в журнале LLM."
+        }
+      ]
+    },
+    {
+      "external_id": "auth-password-requirement",
+      "task_external_id": "rag-auth-session",
+      "question": "Какое минимальное смысловое требование к паролю нужно учитывать в тестовых данных регистрации, если пример StrongPass1 считается валидным шаблоном для проверки?",
+      "expected_answer": "Пароль должен быть достаточно длинным и содержать буквы и цифры, как StrongPass1-подобный формат.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-auth-session",
+          "source_type": "attachment_text",
+          "text_contains": "Пароль при регистрации должен соответствовать базовому требованию StrongPass1-подобного формата: достаточно длинный пароль с буквами и цифрами."
+        }
+      ]
+    },
+    {
+      "external_id": "workflow-ready-for-dev",
+      "task_external_id": "rag-task-workflow",
+      "question": "Какие условия должны быть выполнены перед переводом требования в ready_for_dev, если команда хочет избежать передачи в разработку непроверенной или неподтвержденной постановки?",
+      "expected_answer": "Нужны успешная валидация, ручное подтверждение требования и назначение команды.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-task-workflow",
+          "source_type": "attachment_text",
+          "text_contains": "Переход в ready_for_dev разрешен только после успешной валидации, ручного подтверждения требования и назначения команды."
+        }
+      ]
+    },
+    {
+      "external_id": "workflow-commit-revalidation",
+      "task_external_id": "rag-task-workflow",
+      "question": "Что должна делать система с уже подтвержденной задачей после изменения ее содержания, чтобы RAG и статус требования не расходились с последней версией постановки?",
+      "expected_answer": "Изменения подтвержденной задачи нужно зафиксировать через commit и отправить на повторную валидацию перед дальнейшей передачей в разработку.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-task-workflow",
+          "source_type": "attachment_text",
+          "text_contains": "Изменения подтвержденной задачи фиксируются через commit и требуют повторной валидации перед дальнейшей передачей в разработку."
+        }
+      ]
+    },
+    {
+      "external_id": "workflow-dev-tester-transitions",
+      "task_external_id": "rag-task-workflow",
+      "question": "Какие роли отвечают за переходы задачи после передачи в разработку: кто переводит ее в in_progress и ready_for_testing, а кто завершает testing и done?",
+      "expected_answer": "Разработчик переводит задачу в in_progress и ready_for_testing; тестировщик переводит ее в testing и done.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-task-workflow",
+          "source_type": "attachment_text",
+          "text_contains": "Разработчик переводит задачу из ready_for_dev в in_progress, затем в ready_for_testing; тестировщик переводит ее в testing и done."
+        }
+      ]
+    },
+    {
+      "external_id": "workflow-development-blockers",
+      "task_external_id": "rag-task-workflow",
+      "question": "В каких случаях задача должна оставаться заблокированной для разработки, даже если аналитик уже начал готовить ее к передаче команде?",
+      "expected_answer": "Задача блокируется, если verdict равен needs_rework или не назначены обязательные исполнители.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-task-workflow",
+          "source_type": "attachment_text",
+          "text_contains": "Задача остается заблокированной для разработки, если verdict needs_rework или не назначены обязательные исполнители."
+        }
+      ]
+    },
+    {
+      "external_id": "validation-needs-rework",
+      "task_external_id": "rag-validation-quality",
+      "question": "Когда автоматическая проверка качества требований должна вернуть needs_rework вместо продолжения процесса согласования, если постановка выглядит недостаточно готовой для разработки?",
+      "expected_answer": "needs_rework выставляется при неполной постановке, противоречиях или нарушении обязательных правил качества.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-validation-quality",
+          "source_type": "attachment_text",
+          "text_contains": "Вердикт needs_rework выставляется, когда постановка неполная, содержит противоречия или нарушает обязательные правила качества."
+        }
+      ]
+    },
+    {
+      "external_id": "validation-custom-rules",
+      "task_external_id": "rag-validation-quality",
+      "question": "Как должны применяться кастомные правила проекта при проверке требований, если базовых системных правил недостаточно для конкретного проекта?",
+      "expected_answer": "Кастомные правила проекта дополняют базовую проверку и применяются при валидации требований этого проекта.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-validation-quality",
+          "source_type": "attachment_text",
+          "text_contains": "Кастомные правила проекта дополняют базовую проверку и применяются при валидации требований конкретного проекта."
+        }
+      ]
+    },
+    {
+      "external_id": "validation-context-questions",
+      "task_external_id": "rag-validation-quality",
+      "question": "Зачем системе нужны контекстные вопросы при валидации требования, если аналитик уже написал основное описание задачи?",
+      "expected_answer": "Контекстные вопросы помогают уточнить неявные требования, критерии приемки, ограничения и роли участников.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-validation-quality",
+          "source_type": "attachment_text",
+          "text_contains": "Контекстные вопросы нужны для уточнения неявных требований, критериев приемки, ограничений и ролей участников."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-indexed-source-types",
+      "task_external_id": "rag-rag-indexing",
+      "question": "Какие типы источников должен хранить RAG-контур в коллекции task_knowledge, чтобы eval-набор мог проверять не только описание задачи, но и вложения, alt_text изображений и результат валидации?",
+      "expected_answer": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-rag-indexing",
+          "source_type": "attachment_text",
+          "text_contains": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-current-task-content-default",
+      "task_external_id": "rag-rag-indexing",
+      "question": "Почему вопрос к текущей задаче может не найти ее task_content при стандартном запуске RAG Eval, если настройка include_current_task_content оставлена выключенной?",
+      "expected_answer": "При стандартном retrieval для текущей задачи ищутся вложения и alt_text изображений, а task_content текущей задачи добавляется только при include_current_task_content=true.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-rag-indexing",
+          "source_type": "attachment_text",
+          "text_contains": "При стандартном запуске retrieval для текущей задачи ищет attachment_text и attachment_image_alt_text; task_content текущей задачи добавляется только если include_current_task_content=true."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-cross-task-scope",
+      "task_external_id": "rag-chat-proposals",
+      "question": "Если пользователь задает вопрос в чате одной задачи, как включенный cross-task context должен искать знания по другим задачам проекта и что он обязан исключить из поиска?",
+      "expected_answer": "При include_cross_task=true cross-task context ищет task_content и вложения других задач проекта, исключая текущую anchor task.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-rag-indexing",
+          "source_type": "attachment_text",
+          "text_contains": "Cross-task context при include_cross_task=true ищет task_content и вложения других задач проекта, исключая текущую anchor task."
+        }
+      ]
+    },
+    {
+      "external_id": "rag-quality-metrics",
+      "task_external_id": "rag-rag-indexing",
+      "question": "Какими метриками должен подтверждаться качественный retrieval в RAG Eval, чтобы было видно не только наличие ответа, но и ранг первого релевантного фрагмента?",
+      "expected_answer": "Качество retrieval подтверждают recall_at_1, recall_at_3, recall_at_5, mrr, first_relevant_rank и matched_expected.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-rag-indexing",
+          "source_type": "attachment_text",
+          "text_contains": "Качество retrieval доказывают recall_at_1, recall_at_3, recall_at_5, mrr, first_relevant_rank и matched_expected."
+        }
+      ]
+    },
+    {
+      "external_id": "attachments-supported-import-types",
+      "task_external_id": "rag-attachments-vision",
+      "question": "Какие типы вложений RAG Eval импорт должен принимать в первом варианте, если набор качества должен гарантированно индексировать только текстовые данные?",
+      "expected_answer": "Импорт принимает text/*, application/json, application/xml, application/yaml и application/x-yaml.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-attachments-vision",
+          "source_type": "attachment_text",
+          "text_contains": "Импорт RAG Eval v1 принимает только текстовые вложения: text/*, application/json, application/xml, application/yaml и application/x-yaml."
+        }
+      ]
+    },
+    {
+      "external_id": "attachments-image-alt-text",
+      "task_external_id": "rag-attachments-vision",
+      "question": "При каких условиях описание изображения должно попасть в RAG как attachment_image_alt_text, а не остаться просто метаданными файла без полезного контекста?",
+      "expected_answer": "alt_text попадает в RAG как attachment_image_alt_text, если вложение является изображением, Vision включена и описание успешно получено.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-attachments-vision",
+          "source_type": "attachment_text",
+          "text_contains": "Alt_text изображения попадает в RAG как attachment_image_alt_text только если вложение является изображением, Vision включена и описание успешно получено."
+        }
+      ]
+    },
+    {
+      "external_id": "chat-qa-vs-change-proposal",
+      "task_external_id": "rag-chat-proposals",
+      "question": "Как RAG-система должна различать обычный вопрос пользователя по контексту задачи и просьбу изменить требование, чтобы не перепутать ответ QA Agent с предложением ChangeTracker Agent?",
+      "expected_answer": "QA Agent отвечает на вопросы по контексту и не меняет требование; ChangeTracker Agent оформляет предложение изменения, когда пользователь просит изменить постановку.",
+      "expected_relevant": [
+        {
+          "task_external_id": "rag-chat-proposals",
+          "source_type": "attachment_text",
+          "text_contains": "QA Agent отвечает на вопросы пользователя по контексту задачи и RAG-сниппетам, не изменяя требование напрямую."
+        },
+        {
+          "task_external_id": "rag-chat-proposals",
+          "source_type": "attachment_text",
+          "text_contains": "ChangeTracker Agent оформляет предложение изменения, когда пользователь просит изменить постановку, добавить критерий или исправить требование."
+        }
+      ]
+    },
+    {
+      "external_id": "no-answer-saml-provider",
+      "task_external_id": "rag-auth-session",
+      "question": "Какой SAML identity provider должен использоваться для enterprise single sign-on и какие атрибуты SAML assertion нужно маппить в профиль пользователя?",
+      "expected_answer": "В данном RAG Eval наборе нет информации о SAML identity provider и маппинге SAML assertion; корректный ответ должен явно сказать, что контекста недостаточно.",
+      "expected_relevant": []
+    },
+    {
+      "external_id": "no-answer-sms-sla",
+      "task_external_id": "rag-task-workflow",
+      "question": "Какой SLA доставки SMS-уведомлений должен быть установлен для задач в статусе ready_for_testing и какой внешний SMS-провайдер выбран для production?",
+      "expected_answer": "В данном RAG Eval наборе нет информации о SLA SMS-уведомлений или выбранном SMS-провайдере; корректный ответ должен не выдумывать эти данные.",
+      "expected_relevant": []
+    }
+  ]
+}

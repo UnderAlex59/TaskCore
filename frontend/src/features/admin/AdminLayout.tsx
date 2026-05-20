@@ -8,6 +8,7 @@ const adminNavItems = [
   { href: "/admin/rag-eval", label: "RAG Eval" },
   { href: "/admin/adaptation-eval", label: "Adaptation Eval" },
   { href: "/admin/validation-eval", label: "Validation Eval" },
+  { href: "/admin/qure-eval", label: "QuRE Eval" },
   { href: "/admin/llm-requests", label: "LLM-запросы" },
   { href: "/admin/validation-questions", label: "Вопросы валидации" },
   { href: "/admin/task-tags", label: "Теги задач" },

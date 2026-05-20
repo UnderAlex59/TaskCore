@@ -30,6 +30,10 @@ describe("AdminLayout", () => {
     expect(
       screen.getByRole("link", { name: "Adaptation Eval" }),
     ).toHaveAttribute("href", "/admin/adaptation-eval");
+    expect(screen.getByRole("link", { name: "QuRE Eval" })).toHaveAttribute(
+      "href",
+      "/admin/qure-eval",
+    );
     expect(screen.getByText("Qdrant diagnostics page")).toBeInTheDocument();
   });
 });

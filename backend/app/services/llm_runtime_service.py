@@ -6,7 +6,7 @@ import hashlib
 import ssl
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -326,6 +326,7 @@ class LLMRuntimeService:
         prompt_key: str | None = None,
         provider_config_id: str | None = None,
         system_prompt_override: str | None = None,
+        temperature_override: float | None = None,
     ) -> LLMInvocationResult:
         try:
             resolved = await cls.resolve_provider(
@@ -357,6 +358,7 @@ class LLMRuntimeService:
             request_kind="chat",
             system_prompt=effective_system_prompt,
             user_prompt=user_prompt,
+            temperature_override=temperature_override,
         )
 
     @classmethod
@@ -463,6 +465,7 @@ class LLMRuntimeService:
         request_kind: str,
         system_prompt: str,
         user_prompt: str,
+        temperature_override: float | None = None,
     ) -> LLMInvocationResult:
         return await cls._execute_messages(
             db,
@@ -474,6 +477,7 @@ class LLMRuntimeService:
             agent_key=agent_key,
             request_kind=request_kind,
             messages=[SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+            temperature_override=temperature_override,
         )
 
     @staticmethod
@@ -556,6 +560,7 @@ class LLMRuntimeService:
         agent_key: str | None,
         request_kind: str,
         messages: list[Any],
+        temperature_override: float | None = None,
     ) -> LLMInvocationResult:
         started = perf_counter()
         prompt_log_mode = await cls._get_prompt_log_mode(db)
@@ -566,7 +571,12 @@ class LLMRuntimeService:
             else None
         )
         try:
-            model = build_chat_model(profile)
+            effective_profile = (
+                replace(profile, temperature=temperature_override)
+                if temperature_override is not None
+                else profile
+            )
+            model = build_chat_model(effective_profile)
             response = await model.ainvoke(normalized_messages)
             latency_ms = int((perf_counter() - started) * 1000)
             prompt_tokens, completion_tokens, total_tokens = cls._extract_usage(response)

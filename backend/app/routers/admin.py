@@ -82,6 +82,12 @@ from app.schemas.admin_qdrant import (
     QdrantScenarioProbeRead,
     QdrantTaskResyncRead,
 )
+from app.schemas.admin_qure_eval import (
+    QureEvalRunCreateRead,
+    QureEvalRunPageRead,
+    QureEvalRunRead,
+    QureEvalRunStatus,
+)
 from app.schemas.admin_rag_eval import (
     RagEvalDatasetDetailRead,
     RagEvalDatasetRead,
@@ -114,6 +120,7 @@ from app.services.admin_adaptation_eval_service import AdminAdaptationEvalServic
 from app.services.admin_llm_service import AdminLLMService
 from app.services.admin_orchestrator_eval_service import AdminOrchestratorEvalService
 from app.services.admin_qdrant_service import AdminQdrantService
+from app.services.admin_qure_eval_service import AdminQureEvalService
 from app.services.admin_rag_eval_service import AdminRagEvalService
 from app.services.admin_validation_eval_service import AdminValidationEvalService
 from app.services.llm_prompt_service import LLMPromptService
@@ -906,6 +913,85 @@ async def delete_validation_eval_dataset(
     db: DBSession,
 ) -> Response:
     await AdminValidationEvalService.delete_dataset(dataset_id, current_user, db)
+    return Response(status_code=204)
+
+
+@router.post(
+    "/qure-eval/runs",
+    response_model=QureEvalRunCreateRead,
+    status_code=201,
+)
+async def create_qure_eval_run(
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser,
+    db: DBSession,
+    file: UploadFile = File(...),
+    project_id: str = Form(...),
+    row_limit: int = Form(..., ge=1),
+) -> QureEvalRunCreateRead:
+    run = await AdminQureEvalService.create_run(
+        filename=file.filename or "QuRE.csv",
+        content=await file.read(),
+        project_id=project_id,
+        row_limit=row_limit,
+        actor=current_user,
+        db=db,
+    )
+    background_tasks.add_task(AdminQureEvalService.process_run, run.id)
+    return run
+
+
+@router.get("/qure-eval/runs", response_model=QureEvalRunPageRead)
+async def list_qure_eval_runs(
+    _: AdminUser,
+    db: DBSession,
+    run_status: QureEvalRunStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+) -> QureEvalRunPageRead:
+    return await AdminQureEvalService.list_runs(
+        db,
+        run_status=run_status,
+        page=page,
+        page_size=size,
+    )
+
+
+@router.get("/qure-eval/runs/{run_id}", response_model=QureEvalRunRead)
+async def get_qure_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+) -> QureEvalRunRead:
+    return await AdminQureEvalService.get_run(run_id, db)
+
+
+@router.get("/qure-eval/runs/{run_id}/export")
+async def export_qure_eval_run(
+    run_id: str,
+    _: AdminUser,
+    db: DBSession,
+    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
+) -> Response:
+    filename, media_type, content = await AdminQureEvalService.export_run(
+        run_id,
+        export_format,
+        db,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/qure-eval/runs/{run_id}", status_code=204)
+async def delete_qure_eval_run(
+    run_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminQureEvalService.delete_run(run_id, current_user, db)
     return Response(status_code=204)
 
 

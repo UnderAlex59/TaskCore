@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from app.agents.adaptation_eval_match_judge_graph import (
+    ADAPTATION_EVAL_MATCH_JUDGE_AGENT_ALIASES,
+    ADAPTATION_EVAL_MATCH_JUDGE_AGENT_DESCRIPTION,
+    ADAPTATION_EVAL_MATCH_JUDGE_AGENT_KEY,
+    ADAPTATION_EVAL_MATCH_JUDGE_AGENT_NAME,
+)
 from app.agents.attachment_vision_graph import (
     VISION_AGENT_ALIASES,
     VISION_AGENT_DESCRIPTION,
@@ -30,6 +36,12 @@ from app.agents.qa_agent_graph import (
     QA_VERIFIER_AGENT_DESCRIPTION,
     QA_VERIFIER_AGENT_KEY,
     QA_VERIFIER_AGENT_NAME,
+)
+from app.agents.qure_eval_weak_word_judge_graph import (
+    QURE_EVAL_WEAK_WORD_JUDGE_AGENT_ALIASES,
+    QURE_EVAL_WEAK_WORD_JUDGE_AGENT_DESCRIPTION,
+    QURE_EVAL_WEAK_WORD_JUDGE_AGENT_KEY,
+    QURE_EVAL_WEAK_WORD_JUDGE_AGENT_NAME,
 )
 from app.agents.rag_eval_judge_graph import (
     RAG_EVAL_JUDGE_AGENT_ALIASES,
@@ -100,6 +112,20 @@ def list_llm_agents() -> tuple[ChatAgentMetadata, ...]:
             description=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_DESCRIPTION,
             aliases=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_ALIASES,
             priority=45,
+        ),
+        ChatAgentMetadata(
+            key=ADAPTATION_EVAL_MATCH_JUDGE_AGENT_KEY,
+            name=ADAPTATION_EVAL_MATCH_JUDGE_AGENT_NAME,
+            description=ADAPTATION_EVAL_MATCH_JUDGE_AGENT_DESCRIPTION,
+            aliases=ADAPTATION_EVAL_MATCH_JUDGE_AGENT_ALIASES,
+            priority=47,
+        ),
+        ChatAgentMetadata(
+            key=QURE_EVAL_WEAK_WORD_JUDGE_AGENT_KEY,
+            name=QURE_EVAL_WEAK_WORD_JUDGE_AGENT_NAME,
+            description=QURE_EVAL_WEAK_WORD_JUDGE_AGENT_DESCRIPTION,
+            aliases=QURE_EVAL_WEAK_WORD_JUDGE_AGENT_ALIASES,
+            priority=48,
         ),
         ChatAgentMetadata(
             key=CHANGE_TRACKER_AGENT_KEY,

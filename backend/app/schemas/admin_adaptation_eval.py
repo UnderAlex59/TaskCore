@@ -91,6 +91,8 @@ class AdaptationEvalQualityGates(BaseModel):
 class AdaptationEvalRunConfig(BaseModel):
     retrieval_limit: int = Field(default=5, ge=1, le=10)
     cleanup_synthetic_tasks: bool = True
+    run_match_judge: bool = True
+    judge_match_confidence_min: float = Field(default=0.75, ge=0, le=1)
     quality_gates: AdaptationEvalQualityGates = Field(
         default_factory=AdaptationEvalQualityGates
     )

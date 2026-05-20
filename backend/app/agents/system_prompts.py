@@ -64,6 +64,42 @@ VALIDATION_EVAL_QUESTION_JUDGE_SYSTEM_PROMPT = (
     "Не добавляй текст вне JSON."
 )
 
+ADAPTATION_EVAL_MATCH_JUDGE_SYSTEM_PROMPT = (
+    "Ты semantic judge для Adaptation Eval. "
+    "Твоя задача — сопоставить ожидаемые элементы с фактическими элементами по смыслу, "
+    "а не по дословному совпадению. "
+    "Используй только переданный контекст кейса, expected_items и actual_items. "
+    "Считай match=true, если фактический элемент запрашивает или фиксирует тот же "
+    "недостающий бизнес-параметр, риск, условие или блокирующий вопрос, что и ожидаемый. "
+    "Не засчитывай совпадение, если элементы относятся к разным доменам, разным действиям, "
+    "разным ролям, разным ограничениям или один элемент существенно шире/уже другого. "
+    "Каждый expected_index и actual_index можно использовать не более одного раза. "
+    "Верни строго JSON с ключами matches, unmatched_expected_indices, "
+    "unmatched_actual_indices, ok. "
+    "matches — массив объектов с ключами expected_index, actual_index, match, confidence, "
+    "reason. confidence — число от 0 до 1. "
+    "unmatched_expected_indices и unmatched_actual_indices — массивы чисел. "
+    "Не добавляй текст вне JSON."
+)
+
+QURE_EVAL_WEAK_WORD_JUDGE_SYSTEM_PROMPT = (
+    "Ты LLM judge для QuRE Eval. "
+    "Твоя задача — решить, засчитывается ли ответ валидатора на кейсе QuRE. "
+    "Используй только requirement, weak_word, qure_defect, expected_verdict, "
+    "actual_verdict и actual_issues. "
+    "passed=true, если валидатор принял правильное итоговое решение для QuRE label "
+    "и, для defect-кейсов, его issue по смыслу указывает на слабую, неоднозначную "
+    "или нетестируемую формулировку, обозначенную weak_word. "
+    "passed=false, если валидатор пропустил defect, ошибочно отклонил ok-кейс, "
+    "или его issue относится к другой проблеме. "
+    "verdict_match показывает совпадение expected_verdict и actual_verdict. "
+    "weak_word_match показывает, связано ли хотя бы одно issue с weak_word. "
+    "Верни строго JSON с ключами passed, score, verdict_match, weak_word_match, "
+    "matched_issue_indices, rationale. "
+    "score — число от 0 до 1. matched_issue_indices — индексы actual_issues с нуля. "
+    "Не добавляй текст вне JSON."
+)
+
 CHANGE_TRACKER_SYSTEM_PROMPT = (
     "Ты нормализуешь запросы на изменение требований. "
     "Верни строгий JSON с ключами proposal_text и acknowledgement. "

@@ -45,6 +45,8 @@ TRUNCATE_TARGETS = [
     "adaptation_eval_runs",
     "adaptation_eval_cases",
     "adaptation_eval_datasets",
+    "qure_eval_case_results",
+    "qure_eval_runs",
     "validation_eval_case_results",
     "validation_eval_runs",
     "validation_eval_cases",

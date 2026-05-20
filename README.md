@@ -4,6 +4,52 @@
 
 ИИ-взаимодействие в проекте идет через LangGraph. Агентные сценарии оформлены как графы и subgraphs: валидация требований, маршрутизация чата, ответы на вопросы, обработка предложений изменений, RAG-индексация, проверка провайдеров и Vision-сценарии.
 
+## Публичный быстрый запуск
+
+Склонируйте репозиторий и подготовьте backend-конфиг:
+
+```bash
+git clone <repository-url>
+cd mvp
+cp backend/.env.example backend/.env
+```
+
+В `backend/.env` задайте:
+
+- `JWT_SECRET_KEY` - длинный случайный секрет для JWT;
+- `LLM_SETTINGS_ENCRYPTION_KEY` - отдельный секрет для шифрования LLM-настроек;
+- `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` или `OLLAMA_EMBEDDING_MODEL` - настройки embeddings;
+- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `QDRANT_API_KEY` и другие provider-ключи, если они нужны выбранному сценарию.
+
+Для локальной frontend-разработки дополнительно создайте `frontend/.env`:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+Для Docker Compose production-like запуска `frontend/.env` не требуется: frontend собирается с `VITE_API_URL=/api`.
+
+Запустите контур:
+
+```bash
+docker compose up --build -d
+```
+
+Если используется legacy Compose, эквивалентная команда:
+
+```bash
+docker-compose up --build -d
+```
+
+После запуска:
+
+- UI: `http://localhost:8080`
+- frontend health: `http://localhost:8080/healthz`
+- backend health через proxy: `http://localhost:8080/api/healthz`
+- backend readiness через proxy: `http://localhost:8080/api/readyz`
+
+Подробные инструкции доступны в [SETUP_GUIDE.md](SETUP_GUIDE.md) и [WINDOWS_SETUP.md](WINDOWS_SETUP.md).
+
 ## Что реализовано
 
 - Регистрация, вход, refresh-токены в `httpOnly` cookie, список активных сессий и выход из системы.
@@ -49,6 +95,7 @@
 |-- SETUP_GUIDE.md       # общий запуск и сопровождение
 |-- WINDOWS_SETUP.md     # запуск в Windows/PowerShell
 |-- architecture-spec.md # актуальная техническая спецификация Markdown
+|-- LICENSE              # лицензия MIT
 `-- README.md
 ```
 
@@ -62,10 +109,11 @@
 - [WINDOWS_SETUP.md](WINDOWS_SETUP.md)
 - [architecture-spec.md](architecture-spec.md)
 - [docs/report-update-plan.md](docs/report-update-plan.md)
+- [LICENSE](LICENSE)
 
 ## Быстрый запуск через Docker Compose
 
-Подготовьте `backend/.env`. За основу используйте `backend/.env.example`.
+Подготовьте `backend/.env`. За основу используйте `backend/.env.example`, как описано в разделе публичного быстрого запуска.
 
 ```bash
 docker compose up --build -d
@@ -202,3 +250,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new()
 ```
 
 `architecture-spec.pdf` считается сгенерированным артефактом и в рамках обычного обновления документации не регенерируется.
+
+## Лицензия
+
+Проект распространяется по лицензии MIT. См. [LICENSE](LICENSE).

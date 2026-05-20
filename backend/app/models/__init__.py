@@ -31,6 +31,7 @@ from app.models.orchestrator_eval import (
 )
 from app.models.project import Project, ProjectMember
 from app.models.project_task_tag import ProjectTaskTag
+from app.models.qure_eval import QureEvalCaseResult, QureEvalRun
 from app.models.rag_eval import (
     RagEvalCase,
     RagEvalCaseResult,
@@ -78,6 +79,8 @@ __all__ = [
     "Project",
     "ProjectMember",
     "ProjectTaskTag",
+    "QureEvalCaseResult",
+    "QureEvalRun",
     "RagEvalCase",
     "RagEvalCaseResult",
     "RagEvalDataset",

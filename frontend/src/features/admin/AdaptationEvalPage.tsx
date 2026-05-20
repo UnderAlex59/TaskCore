@@ -28,6 +28,7 @@ const TABS: Array<{ key: AdaptationEvalTab; label: string }> = [
 
 const DEFAULT_CONFIG: AdaptationEvalRunConfig = {
   cleanup_synthetic_tasks: true,
+  judge_match_confidence_min: 0.75,
   quality_gates: {
     capture_recall_min: 0.95,
     context_issue_f1_min: 0.7,
@@ -36,6 +37,7 @@ const DEFAULT_CONFIG: AdaptationEvalRunConfig = {
     retrieval_recall_at_k_min: 0.8,
   },
   retrieval_limit: 5,
+  run_match_judge: true,
 };
 
 const JSON_TEMPLATE = `{
@@ -146,6 +148,26 @@ function metricValue(value: unknown) {
 function shortText(value: unknown, maxLength = 180) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
+}
+
+function formatMatchSources(diffs: Record<string, unknown>) {
+  const keys = [
+    "capture_match_source",
+    "retrieval_match_source",
+    "context_question_match_source",
+    "context_issue_match_source",
+  ];
+  let deterministic = 0;
+  let judge = 0;
+  for (const key of keys) {
+    const row = asRecord(diffs[key]);
+    deterministic += Number(row.deterministic ?? 0);
+    judge += Number(row.judge ?? 0);
+  }
+  if (!deterministic && !judge) {
+    return "н/д";
+  }
+  return `det ${deterministic} / judge ${judge}`;
 }
 
 function statusLabel(status: string | null | undefined) {
@@ -599,6 +621,38 @@ export default function AdaptationEvalPage() {
                 value={config.retrieval_limit}
               />
             </label>
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[#44546f]">
+                Judge confidence
+              </span>
+              <input
+                className="ui-field"
+                max={1}
+                min={0}
+                onChange={(event) =>
+                  setConfig((current) => ({
+                    ...current,
+                    judge_match_confidence_min: Number(event.target.value),
+                  }))
+                }
+                step={0.05}
+                type="number"
+                value={config.judge_match_confidence_min}
+              />
+            </label>
+            <label className="flex items-center gap-3 text-sm font-semibold text-[#44546f]">
+              <input
+                checked={config.run_match_judge}
+                onChange={(event) =>
+                  setConfig((current) => ({
+                    ...current,
+                    run_match_judge: event.target.checked,
+                  }))
+                }
+                type="checkbox"
+              />
+              LLM judge matching
+            </label>
             <label className="flex items-center gap-3 pt-8 text-sm font-semibold text-[#44546f]">
               <input
                 checked={config.cleanup_synthetic_tasks}
@@ -800,6 +854,7 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 
 function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
   const actual = asRecord(item.actual_result);
+  const diffs = asRecord(item.diffs);
   const metrics = asRecord(item.metrics);
   const contextValidation = asRecord(
     actual.context_validation ?? actual.full_validation,
@@ -838,10 +893,18 @@ function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
       </div>
 
       <div className="border-t border-[rgba(9,30,66,0.08)] p-5">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-4">
           <MetricMini
             label="Context issue F1"
             value={metricValue(metrics.context_issue_f1)}
+          />
+          <MetricMini
+            label="Context text F1"
+            value={metricValue(metrics.context_question_text_f1)}
+          />
+          <MetricMini
+            label="Match source"
+            value={formatMatchSources(diffs)}
           />
           <MetricMini
             label="Duplicate rate"
