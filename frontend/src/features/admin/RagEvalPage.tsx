@@ -68,6 +68,7 @@ const DEFAULT_CONFIG: RagEvalRunConfig = {
   include_current_task_content: false,
   run_answer_agent: true,
   run_llm_judge: true,
+  run_bm25_baseline: true,
   min_score_override: null,
 };
 
@@ -77,7 +78,8 @@ type RagEvalBooleanConfigKey =
   | "include_cross_task"
   | "include_current_task_content"
   | "run_answer_agent"
-  | "run_llm_judge";
+  | "run_llm_judge"
+  | "run_bm25_baseline";
 
 const BOOLEAN_CONFIG_OPTIONS: Array<{
   key: RagEvalBooleanConfigKey;
@@ -89,6 +91,7 @@ const BOOLEAN_CONFIG_OPTIONS: Array<{
   { key: "include_current_task_content", label: "Текст текущей задачи" },
   { key: "run_answer_agent", label: "QA answer agent" },
   { key: "run_llm_judge", label: "LLM judge" },
+  { key: "run_bm25_baseline", label: "BM25 baseline" },
 ];
 
 const JSON_TEMPLATE = `{
@@ -221,6 +224,7 @@ function formatConfigSnapshot(config: RagEvalRunConfig) {
     `limit: ${config.retrieval_limit}`,
     config.use_query_rewriter ? "rewriter on" : "rewriter off",
     config.use_hybrid_rerank ? "rerank on" : "rerank off",
+    config.run_bm25_baseline ? "BM25 on" : "BM25 off",
     config.run_answer_agent ? "QA on" : "QA off",
     config.run_llm_judge ? "judge on" : "judge off",
   ].join(" · ");
@@ -1006,6 +1010,13 @@ export default function RagEvalPage() {
                       latency: {formatMs(run.latency_ms)}
                       {" · "}R@5: {metricValue(metrics.recall_at_5)}
                       {" · "}MRR: {metricValue(metrics.mrr)}
+                      {metrics.bm25_mrr !== undefined ? (
+                        <>
+                          {" · "}BM25 R@5:{" "}
+                          {metricValue(metrics.bm25_recall_at_5)}
+                          {" · "}BM25 MRR: {metricValue(metrics.bm25_mrr)}
+                        </>
+                      ) : null}
                     </p>
                     <p className="mt-1 text-sm text-[#44546f]">
                       {correctnessSummary(metrics)}
@@ -1261,6 +1272,16 @@ export default function RagEvalPage() {
     const unsupportedClaims = Array.isArray(judgePayload.unsupported_claims)
       ? judgePayload.unsupported_claims
       : [];
+    const bm25RetrievedChunks = Array.isArray(
+      item.metrics.bm25_retrieved_chunks,
+    )
+      ? (item.metrics.bm25_retrieved_chunks as Array<Record<string, unknown>>)
+      : [];
+    const bm25MatchedExpected = Array.isArray(
+      item.metrics.bm25_matched_expected,
+    )
+      ? (item.metrics.bm25_matched_expected as Array<Record<string, unknown>>)
+      : [];
 
     return (
       <details className="mt-3">
@@ -1356,6 +1377,100 @@ export default function RagEvalPage() {
               </div>
             )}
           </div>
+
+          {bm25RetrievedChunks.length || item.metrics.bm25_mrr !== undefined ? (
+            <div>
+              <h4 className="text-sm font-semibold text-[#172b4d]">
+                BM25 retrieved chunks
+              </h4>
+              <div className="mt-2 grid gap-3 md:grid-cols-4">
+                {[
+                  ["BM25 R@5", metricValue(item.metrics.bm25_recall_at_5)],
+                  [
+                    "BM25 Precision@k",
+                    metricValue(item.metrics.bm25_precision_at_k),
+                  ],
+                  ["BM25 MRR", metricValue(item.metrics.bm25_mrr)],
+                  [
+                    "BM25 first rank",
+                    metricValue(item.metrics.bm25_first_relevant_rank),
+                  ],
+                ].map(([label, value]) => (
+                  <div
+                    className="rounded-[12px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] px-3 py-2"
+                    key={label}
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#6b778c]">
+                      {label}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[#172b4d]">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {bm25RetrievedChunks.length === 0 ? (
+                <p className="mt-2 rounded-[12px] border border-dashed border-[rgba(9,30,66,0.16)] bg-[#fafbfc] p-3 text-sm text-[#44546f]">
+                  BM25 baseline не вернул контекст.
+                </p>
+              ) : (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-sm">
+                    <thead className="text-xs uppercase tracking-[0.12em] text-[#6b778c]">
+                      <tr>
+                        <th className="py-2">Rank</th>
+                        <th className="py-2">Score</th>
+                        <th className="py-2">Source</th>
+                        <th className="py-2">Task</th>
+                        <th className="py-2">Chunk</th>
+                        <th className="py-2">Preview</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[rgba(9,30,66,0.08)]">
+                      {bm25RetrievedChunks.map((chunk, index) => {
+                        const chunkId = String(chunk.chunk_id ?? "");
+                        const rank = index + 1;
+                        const matched = bm25MatchedExpected.some(
+                          (match) =>
+                            String(match.chunk_id ?? "") === chunkId ||
+                            asNumber(match.rank) === rank,
+                        );
+                        return (
+                          <tr key={`${chunkId || "bm25-chunk"}-${rank}`}>
+                            <td className="py-3 font-semibold text-[#172b4d]">
+                              #{rank}
+                            </td>
+                            <td className="py-3 text-[#44546f]">
+                              {metricValue(chunk.score)}
+                            </td>
+                            <td className="py-3 text-[#44546f]">
+                              {asString(chunk.source_type)}
+                            </td>
+                            <td className="py-3 text-[#44546f]">
+                              {asString(
+                                chunk.task_external_id ?? chunk.task_id,
+                              )}
+                            </td>
+                            <td className="py-3 text-[#44546f]">
+                              {asString(chunk.chunk_index)}
+                              {matched ? (
+                                <span className="ml-2 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                  matched
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="max-w-[360px] py-3 text-[#44546f]">
+                              {shortText(chunk.content)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-[12px] border border-[rgba(9,30,66,0.08)] bg-[#fafbfc] p-3">
@@ -1493,6 +1608,9 @@ export default function RagEvalPage() {
               ["Recall@3", metrics.recall_at_3],
               ["Recall@5", metrics.recall_at_5],
               ["MRR", metrics.mrr],
+              ["BM25 Recall@5", metrics.bm25_recall_at_5],
+              ["BM25 MRR", metrics.bm25_mrr],
+              ["MRR delta", metrics.rag_vs_bm25_mrr_delta],
               ["No-context", metrics.no_context_rate],
               ["p95 retrieval", metrics.p95_retrieval_latency_ms],
               ["p95 indexing", metrics.p95_index_latency_ms],
@@ -1578,6 +1696,13 @@ export default function RagEvalPage() {
                   <p className="text-sm text-[#44546f]">
                     R@5: {metricValue(item.metrics.recall_at_5)}
                     {" · "}MRR: {metricValue(item.metrics.mrr)}
+                    {item.metrics.bm25_mrr !== undefined ? (
+                      <>
+                        {" · "}BM25 R@5:{" "}
+                        {metricValue(item.metrics.bm25_recall_at_5)}
+                        {" · "}BM25 MRR: {metricValue(item.metrics.bm25_mrr)}
+                      </>
+                    ) : null}
                     {" · "}judge: {metricValue(item.metrics.correctness)}
                   </p>
                 </div>

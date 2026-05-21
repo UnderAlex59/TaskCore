@@ -88,6 +88,7 @@ class RagEvalRunConfig(BaseModel):
     include_current_task_content: bool = False
     run_answer_agent: bool = True
     run_llm_judge: bool = True
+    run_bm25_baseline: bool = True
     min_score_override: float | None = Field(default=None, ge=0, le=1)
 
     model_config = ConfigDict(extra="forbid")

@@ -618,8 +618,7 @@ export interface AdaptationEvalCaseRead extends AdaptationEvalCasePayload {
   updated_at: string;
 }
 
-export interface AdaptationEvalDatasetDetailRead
-  extends AdaptationEvalDatasetRead {
+export interface AdaptationEvalDatasetDetailRead extends AdaptationEvalDatasetRead {
   cases: AdaptationEvalCaseRead[];
 }
 
@@ -694,6 +693,7 @@ export interface RagEvalRunConfig {
   include_current_task_content: boolean;
   run_answer_agent: boolean;
   run_llm_judge: boolean;
+  run_bm25_baseline: boolean;
   min_score_override: number | null;
 }
 
@@ -1607,9 +1607,7 @@ export const adminApi = {
         { params: projectId ? { project_id: projectId } : undefined },
       )
     ).data,
-  importAdaptationEvalDataset: async (
-    payload: AdaptationEvalImportPayload,
-  ) =>
+  importAdaptationEvalDataset: async (payload: AdaptationEvalImportPayload) =>
     (
       await apiClient.post<AdaptationEvalImportResultRead>(
         "/admin/adaptation-eval/datasets/import",

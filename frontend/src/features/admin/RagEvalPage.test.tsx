@@ -125,6 +125,7 @@ describe("RagEvalPage", () => {
         include_current_task_content: false,
         run_answer_agent: true,
         run_llm_judge: true,
+        run_bm25_baseline: true,
         min_score_override: null,
       },
       created_at: now,
@@ -149,11 +150,15 @@ describe("RagEvalPage", () => {
             include_current_task_content: false,
             run_answer_agent: true,
             run_llm_judge: true,
+            run_bm25_baseline: true,
             min_score_override: null,
           },
           summary_metrics: {
             recall_at_5: 1,
             mrr: 1,
+            bm25_recall_at_5: 1,
+            bm25_mrr: 1,
+            rag_vs_bm25_mrr_delta: 0,
             correctness: { correct: 1 },
           },
           started_at: now,
@@ -179,11 +184,15 @@ describe("RagEvalPage", () => {
         include_current_task_content: false,
         run_answer_agent: true,
         run_llm_judge: true,
+        run_bm25_baseline: true,
         min_score_override: null,
       },
       summary_metrics: {
         recall_at_5: 1,
         mrr: 1,
+        bm25_recall_at_5: 1,
+        bm25_mrr: 1,
+        rag_vs_bm25_mrr_delta: 0,
         total_tokens: 42,
         correctness: { correct: 1 },
       },
@@ -235,6 +244,29 @@ describe("RagEvalPage", () => {
             correctness: "correct",
             groundedness: "grounded",
             first_relevant_rank: 1,
+            bm25_recall_at_5: true,
+            bm25_precision_at_k: 0.2,
+            bm25_mrr: 1,
+            bm25_first_relevant_rank: 1,
+            rag_vs_bm25_mrr_delta: 0,
+            bm25_retrieved_chunks: [
+              {
+                chunk_id: "chunk-1",
+                task_id: "task-1",
+                task_external_id: "task-auth-1",
+                source_type: "task_content",
+                chunk_index: 0,
+                score: 1.2,
+                content: "Описание задачи с корректной русской кодировкой.",
+              },
+            ],
+            bm25_matched_expected: [
+              {
+                chunk_id: "chunk-1",
+                rank: 1,
+                text_contains: "русской кодировкой",
+              },
+            ],
             no_context: false,
           },
           latency_ms: 100,
@@ -273,7 +305,10 @@ describe("RagEvalPage", () => {
     await waitFor(() => {
       expect(adminApiMock.createRagEvalRun).toHaveBeenCalledWith(
         "dataset-1",
-        expect.objectContaining({ use_query_rewriter: true }),
+        expect.objectContaining({
+          run_bm25_baseline: true,
+          use_query_rewriter: true,
+        }),
       );
     });
 
@@ -297,11 +332,13 @@ describe("RagEvalPage", () => {
     fireEvent.click(await screen.findByText("Retrieval details"));
 
     expect(screen.getByText("Retrieved chunks")).toBeInTheDocument();
+    expect(screen.getByText("BM25 retrieved chunks")).toBeInTheDocument();
     expect(screen.getByText("Matched expected")).toBeInTheDocument();
     expect(screen.getByText("Judge result")).toBeInTheDocument();
     expect(
-      screen.getByText("Описание задачи с корректной русской кодировкой."),
-    ).toBeInTheDocument();
+      screen.getAllByText("Описание задачи с корректной русской кодировкой.")
+        .length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText(/"retrieved_chunks"/)).not.toBeInTheDocument();
   });
 

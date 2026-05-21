@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.qa_agent_graph import run_qa_agent_graph
 from app.agents.rag_eval_judge_graph import run_rag_eval_judge_graph
+from app.agents.rag_pipeline import run_rag_pipeline
 from app.agents.rag_retrieval_graph import run_rag_retrieval_graph
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -53,11 +54,21 @@ from app.schemas.admin_rag_eval import (
     RagEvalStructuredImport,
     RagEvalTaskImport,
 )
+from app.services.attachment_content_service import AttachmentContentService
 from app.services.audit_service import AuditService
+from app.services.bm25_retrieval_service import BM25Document, BM25Index
 from app.services.project_service import ProjectService
 from app.services.rag_service import RagService
 from app.services.task_service import TaskService
 from app.services.task_tag_service import TaskTagService
+
+_BM25_ATTACHMENT_SOURCE_TYPES = {"attachment_text", "attachment_image_alt_text"}
+_BM25_CURRENT_TASK_CONTENT_SOURCE_TYPES = {"task_content"}
+_BM25_CROSS_TASK_CONTEXT_SOURCE_TYPES = {
+    "task_content",
+    "attachment_text",
+    "attachment_image_alt_text",
+}
 
 
 class AdminRagEvalService:
@@ -660,6 +671,134 @@ class AdminRagEvalService:
         )
 
     @staticmethod
+    def _precision_at_k(
+        *,
+        expected_relevant: list[dict[str, Any]],
+        retrieved_chunks: list[dict[str, Any]],
+        task_id_by_external_id: dict[str, str],
+        k: int,
+    ) -> float:
+        if k <= 0:
+            return 0
+        relevant_retrieved = 0
+        for chunk in retrieved_chunks[:k]:
+            if any(
+                AdminRagEvalService._expected_matches_chunk(
+                    expected,
+                    chunk,
+                    task_id_by_external_id,
+                )
+                for expected in expected_relevant
+            ):
+                relevant_retrieved += 1
+        return round(relevant_retrieved / k, 4)
+
+    @staticmethod
+    def _bm25_metrics(
+        *,
+        expected_relevant: list[dict[str, Any]],
+        retrieved_chunks: list[dict[str, Any]],
+        task_id_by_external_id: dict[str, str],
+        k: int,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        metrics, matched_expected = AdminRagEvalService._case_metrics(
+            expected_relevant=expected_relevant,
+            retrieved_chunks=retrieved_chunks,
+            task_id_by_external_id=task_id_by_external_id,
+        )
+        return (
+            {
+                "bm25_matched": metrics["matched"],
+                "bm25_first_relevant_rank": metrics["first_relevant_rank"],
+                "bm25_recall_at_1": metrics["recall_at_1"],
+                "bm25_recall_at_3": metrics["recall_at_3"],
+                "bm25_recall_at_5": metrics["recall_at_5"],
+                "bm25_precision_at_k": AdminRagEvalService._precision_at_k(
+                    expected_relevant=expected_relevant,
+                    retrieved_chunks=retrieved_chunks,
+                    task_id_by_external_id=task_id_by_external_id,
+                    k=k,
+                ),
+                "bm25_mrr": metrics["mrr"],
+                "bm25_no_context": metrics["no_context"],
+                "bm25_retrieved_chunks": retrieved_chunks,
+            },
+            matched_expected,
+        )
+
+    @staticmethod
+    async def _build_bm25_index(
+        *,
+        dataset_tasks: list[tuple[RagEvalDatasetTask, Task]],
+        actor_user_id: str,
+        db: AsyncSession,
+    ) -> BM25Index:
+        documents: list[BM25Document] = []
+        for mapping, task in dataset_tasks:
+            attachments = await TaskService._get_attachments(task.id, db)
+            attachment_payloads = await AttachmentContentService.build_attachment_payloads(
+                db,
+                task,
+                attachments,
+                actor_user_id=actor_user_id,
+                allow_vision=False,
+            )
+            rag_index = await run_rag_pipeline(
+                db=db,
+                actor_user_id=actor_user_id,
+                task_id=task.id,
+                project_id=task.project_id,
+                title=task.title,
+                content=task.content,
+                tags=task.tags,
+                attachments=attachment_payloads,
+                validation_result=task.validation_result,
+            )
+            for chunk in list(rag_index.get("chunks", [])):
+                content = str(chunk.get("content") or "").strip()
+                if not content:
+                    continue
+                documents.append(
+                    BM25Document(
+                        content=content,
+                        metadata={
+                            "chunk_id": str(chunk.get("chunk_id") or ""),
+                            "id": str(chunk.get("chunk_id") or ""),
+                            "scope": "bm25",
+                            "task_id": task.id,
+                            "task_external_id": mapping.external_id,
+                            "task_title": task.title,
+                            "source_type": str(chunk.get("source_type") or "") or None,
+                            "chunk_kind": str(chunk.get("chunk_kind") or "") or None,
+                            "chunk_index": chunk.get("chunk_index"),
+                            "filename": chunk.get("filename"),
+                        },
+                    )
+                )
+        return BM25Index(documents)
+
+    @staticmethod
+    def _bm25_include_document(
+        *,
+        document: BM25Document,
+        task_id: str,
+        config: RagEvalRunConfig,
+    ) -> bool:
+        metadata = document.metadata
+        source_type = str(metadata.get("source_type") or "")
+        chunk_kind = str(metadata.get("chunk_kind") or "")
+        document_task_id = str(metadata.get("task_id") or "")
+        source_types = {source_type, chunk_kind}
+        if document_task_id == task_id:
+            current_task_source_types = set(_BM25_ATTACHMENT_SOURCE_TYPES)
+            if config.include_current_task_content:
+                current_task_source_types.update(_BM25_CURRENT_TASK_CONTENT_SOURCE_TYPES)
+            return bool(source_types & current_task_source_types)
+        return bool(
+            config.include_cross_task and source_types & _BM25_CROSS_TASK_CONTEXT_SOURCE_TYPES
+        )
+
+    @staticmethod
     def _percentile(values: list[int], percentile: float) -> int | None:
         if not values:
             return None
@@ -712,6 +851,15 @@ class AdminRagEvalService:
             ).all()
         )
         task_id_by_external_id = {mapping.external_id: task.id for mapping, task in dataset_tasks}
+        bm25_index = (
+            await AdminRagEvalService._build_bm25_index(
+                dataset_tasks=dataset_tasks,
+                actor_user_id=run.created_by,
+                db=db,
+            )
+            if config.run_bm25_baseline
+            else None
+        )
 
         if config.indexing_mode != "none":
             for mapping, task in dataset_tasks:
@@ -780,6 +928,7 @@ class AdminRagEvalService:
                 case=case,
                 config=config,
                 task_id_by_external_id=task_id_by_external_id,
+                bm25_index=bm25_index,
                 db=db,
             )
 
@@ -790,6 +939,7 @@ class AdminRagEvalService:
         case: RagEvalCase,
         config: RagEvalRunConfig,
         task_id_by_external_id: dict[str, str],
+        bm25_index: BM25Index | None,
         db: AsyncSession,
     ) -> None:
         task = await db.get(Task, case.task_id)
@@ -883,6 +1033,28 @@ class AdminRagEvalService:
                 retrieved_chunks=retrieved_chunks,
                 task_id_by_external_id=task_id_by_external_id,
             )
+            if bm25_index is not None:
+                bm25_retrieved_chunks = bm25_index.search(
+                    case.question,
+                    limit=config.retrieval_limit,
+                    include_document=lambda document: AdminRagEvalService._bm25_include_document(
+                        document=document,
+                        task_id=task.id,
+                        config=config,
+                    ),
+                )
+                bm25_metrics, bm25_matched_expected = AdminRagEvalService._bm25_metrics(
+                    expected_relevant=list(case.expected_relevant or []),
+                    retrieved_chunks=bm25_retrieved_chunks,
+                    task_id_by_external_id=task_id_by_external_id,
+                    k=config.retrieval_limit,
+                )
+                metrics.update(bm25_metrics)
+                metrics["bm25_matched_expected"] = bm25_matched_expected
+                metrics["rag_vs_bm25_mrr_delta"] = round(
+                    float(metrics.get("mrr") or 0) - float(bm25_metrics.get("bm25_mrr") or 0),
+                    4,
+                )
             if answer_source_ref is not None:
                 metrics["answer_confidence"] = answer_source_ref.get("answer_confidence")
             if judge_payload is not None:
@@ -936,6 +1108,12 @@ class AdminRagEvalService:
         successful = [item for item in case_results if item.status == "success"]
         with_expected = [item for item in successful if item.metrics.get("has_expected")]
         denominator = max(len(with_expected), 1)
+        bm25_with_expected = [
+            item
+            for item in with_expected
+            if "bm25_mrr" in item.metrics or "bm25_recall_at_5" in item.metrics
+        ]
+        bm25_denominator = max(len(bm25_with_expected), 1)
         first_ranks = [
             int(item.metrics["first_relevant_rank"])
             for item in with_expected
@@ -993,6 +1171,40 @@ class AdminRagEvalService:
             "mrr": round(
                 sum(float(item.metrics.get("mrr") or 0) for item in with_expected) / denominator, 4
             ),
+            "bm25_recall_at_5": round(
+                sum(bool(item.metrics.get("bm25_recall_at_5")) for item in bm25_with_expected)
+                / bm25_denominator,
+                4,
+            )
+            if bm25_with_expected
+            else None,
+            "bm25_precision_at_k": round(
+                sum(
+                    float(item.metrics.get("bm25_precision_at_k") or 0)
+                    for item in bm25_with_expected
+                )
+                / bm25_denominator,
+                4,
+            )
+            if bm25_with_expected
+            else None,
+            "bm25_mrr": round(
+                sum(float(item.metrics.get("bm25_mrr") or 0) for item in bm25_with_expected)
+                / bm25_denominator,
+                4,
+            )
+            if bm25_with_expected
+            else None,
+            "rag_vs_bm25_mrr_delta": round(
+                (
+                    sum(float(item.metrics.get("mrr") or 0) for item in bm25_with_expected)
+                    - sum(float(item.metrics.get("bm25_mrr") or 0) for item in bm25_with_expected)
+                )
+                / bm25_denominator,
+                4,
+            )
+            if bm25_with_expected
+            else None,
             "no_context_rate": round(
                 sum(bool(item.metrics.get("no_context")) for item in successful)
                 / max(len(successful), 1),
@@ -1179,6 +1391,11 @@ class AdminRagEvalService:
                 "recall_at_3",
                 "recall_at_5",
                 "mrr",
+                "bm25_recall_at_5",
+                "bm25_precision_at_k",
+                "bm25_mrr",
+                "bm25_first_relevant_rank",
+                "rag_vs_bm25_mrr_delta",
                 "groundedness",
                 "correctness",
                 "retrieval_latency_ms",
@@ -1198,6 +1415,11 @@ class AdminRagEvalService:
                     "recall_at_3": item.metrics.get("recall_at_3"),
                     "recall_at_5": item.metrics.get("recall_at_5"),
                     "mrr": item.metrics.get("mrr"),
+                    "bm25_recall_at_5": item.metrics.get("bm25_recall_at_5"),
+                    "bm25_precision_at_k": item.metrics.get("bm25_precision_at_k"),
+                    "bm25_mrr": item.metrics.get("bm25_mrr"),
+                    "bm25_first_relevant_rank": item.metrics.get("bm25_first_relevant_rank"),
+                    "rag_vs_bm25_mrr_delta": item.metrics.get("rag_vs_bm25_mrr_delta"),
                     "groundedness": item.metrics.get("groundedness"),
                     "correctness": item.metrics.get("correctness"),
                     "retrieval_latency_ms": item.retrieval_latency_ms,

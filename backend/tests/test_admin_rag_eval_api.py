@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from app.core.database import AsyncSessionLocal
 from app.models.rag_eval import RagEvalCaseResult, RagEvalIndexResult
 from app.services.admin_rag_eval_service import AdminRagEvalService
+from app.services.bm25_retrieval_service import BM25Document, BM25Index
 
 
 async def register_and_login(
@@ -155,6 +156,63 @@ def test_case_metrics_calculates_recall_and_mrr() -> None:
     assert matched[0]["rank"] == 2
 
 
+def test_bm25_index_ranks_matching_chunk_first() -> None:
+    index = BM25Index(
+        [
+            BM25Document(
+                content="Настройки cookie и refresh token для пользовательской сессии.",
+                metadata={"chunk_id": "auth", "task_id": "task-1", "source_type": "task_content"},
+            ),
+            BM25Document(
+                content="Общее упоминание cookie в workflow задачи.",
+                metadata={
+                    "chunk_id": "workflow",
+                    "task_id": "task-2",
+                    "source_type": "task_content",
+                },
+            ),
+        ]
+    )
+
+    results = index.search("как хранится refresh token cookie", limit=2)
+
+    assert results[0]["chunk_id"] == "auth"
+    assert results[0]["score"] > results[1]["score"]
+
+
+def test_bm25_metrics_calculates_precision_recall_and_mrr() -> None:
+    metrics, matched = AdminRagEvalService._bm25_metrics(
+        expected_relevant=[
+            {
+                "task_external_id": "task-1",
+                "source_type": "task_content",
+                "text_contains": "cookie",
+            }
+        ],
+        retrieved_chunks=[
+            {
+                "chunk_id": "other",
+                "task_id": "task-db-id",
+                "source_type": "task_content",
+                "content": "workflow задачи",
+            },
+            {
+                "chunk_id": "auth",
+                "task_id": "task-db-id",
+                "source_type": "task_content",
+                "content": "refresh token cookie",
+            },
+        ],
+        task_id_by_external_id={"task-1": "task-db-id"},
+        k=5,
+    )
+
+    assert metrics["bm25_recall_at_5"] is True
+    assert metrics["bm25_precision_at_k"] == 0.2
+    assert metrics["bm25_mrr"] == 0.5
+    assert matched[0]["rank"] == 2
+
+
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_admin_can_run_rag_eval_with_stubbed_agents(
@@ -249,6 +307,7 @@ async def test_admin_can_run_rag_eval_with_stubbed_agents(
             "include_current_task_content": False,
             "run_answer_agent": True,
             "run_llm_judge": True,
+            "run_bm25_baseline": True,
             "min_score_override": None,
         },
     )
@@ -270,8 +329,11 @@ async def test_admin_can_run_rag_eval_with_stubbed_agents(
     assert detail is not None
     assert detail["status"] == "success"
     assert detail["summary_metrics"]["recall_at_5"] == 1
+    assert detail["summary_metrics"]["bm25_recall_at_5"] == 1
+    assert detail["summary_metrics"]["bm25_mrr"] == 1
     assert detail["summary_metrics"]["groundedness"]["grounded"] == 1
     assert detail["case_results"][0]["metrics"]["correctness"] == "correct"
+    assert detail["case_results"][0]["metrics"]["bm25_retrieved_chunks"]
 
     export_response = await client.get(
         f"/admin/rag-eval/runs/{run_id}/export?format=csv",
@@ -279,6 +341,7 @@ async def test_admin_can_run_rag_eval_with_stubbed_agents(
     )
     assert export_response.status_code == 200
     assert "case_external_id" in export_response.text
+    assert "bm25_mrr" in export_response.text
 
     history_response = await client.get(
         f"/admin/rag-eval/datasets/{dataset_id}/runs",
