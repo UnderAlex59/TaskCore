@@ -162,7 +162,7 @@ async def test_image_attachment_generates_alt_text(
 
 
 @pytest.mark.asyncio
-async def test_run_rag_pipeline_includes_image_alt_text_source() -> None:
+async def test_run_rag_pipeline_indexes_supported_source_types_only() -> None:
     result = await run_rag_pipeline(
         task_id="task-1",
         title="Авторизация",
@@ -176,10 +176,23 @@ async def test_run_rag_pipeline_includes_image_alt_text_source() -> None:
                 "basename": "stored.png",
                 "alt_text": "Макет формы входа с кнопкой продолжить.",
                 "is_image": True,
+            },
+            {
+                "id": "attachment-2",
+                "filename": "requirements.txt",
+                "content_type": "text/plain",
+                "basename": "stored.txt",
+                "extracted_text": "Дополнительное требование из файла.",
+                "is_image": False,
             }
         ],
-        validation_result={"verdict": "approved", "issues": [], "questions": []},
     )
+
+    assert {chunk["source_type"] for chunk in result["chunks"]} == {
+        "task_content",
+        "attachment_image_alt_text",
+        "attachment_text",
+    }
 
     image_chunks = [
         chunk for chunk in result["chunks"] if chunk["source_type"] == "attachment_image_alt_text"
@@ -195,6 +208,7 @@ async def test_run_rag_pipeline_includes_image_alt_text_source() -> None:
     assert "Описание: Нужно реализовать вход пользователя." in task_chunks[0]["content"]
     assert not any(chunk["source_type"] == "task_title" for chunk in result["chunks"])
     assert not any(chunk["source_type"] == "task_tags" for chunk in result["chunks"])
+    assert not any(chunk["source_type"] == "validation_result" for chunk in result["chunks"])
 
 
 @pytest.mark.asyncio
@@ -213,44 +227,11 @@ async def test_run_rag_pipeline_skips_bare_attachment_metadata() -> None:
                 "is_image": False,
             }
         ],
-        validation_result=None,
     )
 
     assert not any(chunk["source_type"] == "attachment_metadata" for chunk in result["chunks"])
     assert not any("report.bin" in chunk["content"] for chunk in result["chunks"])
     assert not any("application/octet-stream" in chunk["content"] for chunk in result["chunks"])
-
-
-@pytest.mark.asyncio
-async def test_run_rag_pipeline_indexes_meaningful_validation_items_only() -> None:
-    result = await run_rag_pipeline(
-        task_id="task-1",
-        title="Согласование платежа",
-        content="Нужно согласовать платеж перед отправкой в банк.",
-        tags=[],
-        attachments=[],
-        validation_result={
-            "verdict": "needs_rework",
-            "issues": [
-                {
-                    "message": "Не указан критерий успешного согласования.",
-                    "severity": "high",
-                }
-            ],
-            "questions": ["Кто подтверждает платеж при отсутствии руководителя?"],
-        },
-    )
-
-    validation_chunks = [
-        chunk for chunk in result["chunks"] if chunk["source_type"] == "validation_result"
-    ]
-    assert len(validation_chunks) == 1
-    assert (
-        "Замечание валидации: Не указан критерий успешного согласования."
-        in validation_chunks[0]["content"]
-    )
-    assert "Вопрос валидации: Кто подтверждает платеж" in validation_chunks[0]["content"]
-    assert "needs_rework" not in validation_chunks[0]["content"]
 
 
 @pytest.mark.asyncio

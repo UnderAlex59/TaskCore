@@ -16,10 +16,8 @@ class RagPipelineState(RagIndexState, total=False):
     content: str
     tags: list[str]
     attachments: list[dict[str, Any]]
-    validation_result: dict | None
     task_sources: list[dict[str, Any]]
     attachment_sources: list[dict[str, Any]]
-    validation_sources: list[dict[str, Any]]
 
 
 def _normalize_text(value: str) -> str:
@@ -346,84 +344,11 @@ def _collect_attachment_sources(state: RagPipelineState) -> RagPipelineState:
     return {"attachment_sources": sources}
 
 
-def _validation_text_items(items: object, *, prefix: str) -> list[str]:
-    if not isinstance(items, list):
-        return []
-
-    text_items: list[str] = []
-    for item in items:
-        if isinstance(item, dict):
-            message = str(item.get("message", "")).strip()
-            if not message:
-                continue
-            severity = str(item.get("severity", "")).strip()
-            if severity:
-                text_items.append(f"{prefix}: {message} ({severity})")
-            else:
-                text_items.append(f"{prefix}: {message}")
-            continue
-
-        text = str(item).strip()
-        if text:
-            text_items.append(f"{prefix}: {text}")
-
-    return text_items
-
-
-def _validation_appeal_text_items(validation_result: dict) -> list[str]:
-    appeal = validation_result.get("appeal")
-    if not isinstance(appeal, dict):
-        return []
-    items = appeal.get("items")
-    if not isinstance(items, list):
-        return []
-
-    text_items: list[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        message = str(item.get("message", "")).strip()
-        reason = str(item.get("reason", "")).strip()
-        if not message:
-            continue
-        if reason:
-            text_items.append(f"Пропущенное замечание валидации: {message}. Причина: {reason}")
-        else:
-            text_items.append(f"Пропущенное замечание валидации: {message}")
-    return text_items
-
-
-def _collect_validation_sources(state: RagPipelineState) -> RagPipelineState:
-    validation_result = state.get("validation_result")
-    if not validation_result:
-        return {"validation_sources": []}
-
-    validation_lines = [
-        *_validation_text_items(validation_result.get("issues"), prefix="Замечание валидации"),
-        *_validation_text_items(validation_result.get("questions"), prefix="Вопрос валидации"),
-        *_validation_appeal_text_items(validation_result),
-    ]
-    if not validation_lines:
-        return {"validation_sources": []}
-
-    return {
-        "validation_sources": [
-            _source(
-                chunk_kind="validation_result",
-                content="\n".join(validation_lines),
-                source_id=str(state["task_id"]),
-                source_type="validation_result",
-            )
-        ]
-    }
-
-
 def _finalize_rag_index(state: RagPipelineState) -> RagPipelineState:
     settings = get_settings()
     sources = [
         *list(state.get("task_sources", [])),
         *list(state.get("attachment_sources", [])),
-        *list(state.get("validation_sources", [])),
     ]
 
     chunks: list[dict[str, Any]] = []
@@ -463,12 +388,10 @@ def get_rag_pipeline_graph():
     graph = StateGraph(RagPipelineState)
     graph.add_node("collect_task_sources", traced_node("collect_task_sources", _collect_task_sources))
     graph.add_node("collect_attachment_sources", traced_node("collect_attachment_sources", _collect_attachment_sources))
-    graph.add_node("collect_validation_sources", traced_node("collect_validation_sources", _collect_validation_sources))
     graph.add_node("finalize_rag_index", traced_node("finalize_rag_index", _finalize_rag_index))
     graph.add_edge(START, "collect_task_sources")
     graph.add_edge("collect_task_sources", "collect_attachment_sources")
-    graph.add_edge("collect_attachment_sources", "collect_validation_sources")
-    graph.add_edge("collect_validation_sources", "finalize_rag_index")
+    graph.add_edge("collect_attachment_sources", "finalize_rag_index")
     graph.add_edge("finalize_rag_index", END)
     return graph.compile()
 
@@ -483,7 +406,6 @@ async def run_rag_pipeline(
     content: str,
     tags: list[str],
     attachments: list[dict[str, Any]],
-    validation_result: dict | None,
 ) -> RagIndexState:
     state = await run_traced_graph(
         graph_key="rag_pipeline",
@@ -499,7 +421,6 @@ async def run_rag_pipeline(
             "content": content,
             "tags": tags,
             "attachments": attachments,
-            "validation_result": validation_result,
         }
     )
     return {

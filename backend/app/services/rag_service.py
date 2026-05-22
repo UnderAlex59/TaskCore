@@ -50,7 +50,6 @@ class RagService:
         actor_user_id: str | None = None,
         attachment_payloads: list[dict[str, Any]] | None = None,
         allow_vision: bool = True,
-        validation_result: dict | None = None,
     ) -> list[str]:
         result = await RagService.index_task_context_with_metrics(
             db,
@@ -59,7 +58,6 @@ class RagService:
             actor_user_id=actor_user_id,
             attachment_payloads=attachment_payloads,
             allow_vision=allow_vision,
-            validation_result=validation_result,
         )
         return list(result["chunk_ids"])
 
@@ -72,7 +70,6 @@ class RagService:
         actor_user_id: str | None = None,
         attachment_payloads: list[dict[str, Any]] | None = None,
         allow_vision: bool = True,
-        validation_result: dict | None = None,
     ) -> dict[str, Any]:
         total_started = perf_counter()
         attachment_payload_ms: int | None = None
@@ -97,7 +94,6 @@ class RagService:
             content=task.content,
             tags=task.tags,
             attachments=attachment_payloads,
-            validation_result=validation_result,
         )
         chunking_ms = int((perf_counter() - chunking_started) * 1000)
         write_started = perf_counter()

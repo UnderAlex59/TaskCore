@@ -56,7 +56,7 @@
     {
       "external_id": "rag-rag-indexing",
       "title": "RAG-индексация задач и retrieval quality",
-      "content": "RAG-контур должен готовить индексируемые фрагменты задач, вложений, результатов валидации и описаний изображений. Qdrant хранит проектную память, а eval-запуски измеряют, насколько retrieval возвращает ожидаемые релевантные chunks и насколько ответы агента grounded в найденном контексте.",
+      "content": "RAG-контур должен готовить индексируемые фрагменты задач, вложений и описаний изображений. Qdrant хранит проектную память, а eval-запуски измеряют, насколько retrieval возвращает ожидаемые релевантные chunks и насколько ответы агента grounded в найденном контексте.",
       "tags": [
         "rag",
         "qdrant",
@@ -66,7 +66,7 @@
         {
           "filename": "rag-indexing-scope.md",
           "content_type": "text/plain",
-          "content": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks.\n\nПри стандартном запуске retrieval для текущей задачи ищет attachment_text и attachment_image_alt_text; task_content текущей задачи добавляется только если include_current_task_content=true.\n\nCross-task context при include_cross_task=true ищет task_content и вложения других задач проекта, исключая текущую anchor task.\n\nКачество retrieval доказывают recall_at_1, recall_at_3, recall_at_5, mrr, first_relevant_rank и matched_expected."
+          "content": "task_knowledge хранит task_content, attachment_text и attachment_image_alt_text chunks.\n\nПри стандартном запуске retrieval для текущей задачи ищет attachment_text и attachment_image_alt_text; task_content текущей задачи добавляется только если include_current_task_content=true.\n\nCross-task context при include_cross_task=true ищет task_content и вложения других задач проекта, исключая текущую anchor task.\n\nКачество retrieval доказывают recall_at_1, recall_at_3, recall_at_5, mrr, first_relevant_rank и matched_expected."
         }
       ]
     },
@@ -291,13 +291,13 @@
     {
       "external_id": "rag-indexed-source-types",
       "task_external_id": "rag-rag-indexing",
-      "question": "Какие типы источников должен хранить RAG-контур в коллекции task_knowledge, чтобы eval-набор мог проверять не только описание задачи, но и вложения, alt_text изображений и результат валидации?",
-      "expected_answer": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks.",
+      "question": "Какие типы источников должен хранить RAG-контур в коллекции task_knowledge, чтобы eval-набор мог проверять описание задачи, вложения и alt_text изображений?",
+      "expected_answer": "task_knowledge хранит task_content, attachment_text и attachment_image_alt_text chunks.",
       "expected_relevant": [
         {
           "task_external_id": "rag-rag-indexing",
           "source_type": "attachment_text",
-          "text_contains": "task_knowledge хранит task_content, attachment_text, attachment_image_alt_text и validation_result chunks."
+          "text_contains": "task_knowledge хранит task_content, attachment_text и attachment_image_alt_text chunks."
         }
       ]
     },

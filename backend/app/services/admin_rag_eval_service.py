@@ -752,7 +752,6 @@ class AdminRagEvalService:
                 content=task.content,
                 tags=task.tags,
                 attachments=attachment_payloads,
-                validation_result=task.validation_result,
             )
             for chunk in list(rag_index.get("chunks", [])):
                 content = str(chunk.get("content") or "").strip()
@@ -876,7 +875,6 @@ class AdminRagEvalService:
                         attachments,
                         actor_user_id=run.created_by,
                         allow_vision=False,
-                        validation_result=task.validation_result,
                     )
                     db.add(
                         RagEvalIndexResult(

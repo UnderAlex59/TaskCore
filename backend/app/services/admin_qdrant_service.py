@@ -951,7 +951,6 @@ class AdminQdrantService:
             actor_user_id=current_user.id,
             attachment_payloads=attachment_payloads,
             allow_vision=False,
-            validation_result=task.validation_result,
         )
         await ValidationQuestionService.sync_project_questions_index(task, db)
         if not chunk_ids:

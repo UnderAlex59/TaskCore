@@ -905,7 +905,7 @@ async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed
 
 
 @pytest.mark.asyncio
-async def test_question_agent_excludes_cross_task_validation_questions_from_qa_context(
+async def test_question_agent_does_not_request_cross_task_validation_results_for_qa_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_answer_prompt = ""
@@ -942,21 +942,6 @@ async def test_question_agent_excludes_cross_task_validation_questions_from_qa_c
             "task_content",
         ]
         return [
-            {
-                "document": Document(
-                    page_content=(
-                        "Вопрос валидации: Какие технологии использовать для проверки email?"
-                    ),
-                    metadata={
-                        "chunk_id": "task-2:validation_result:task-2:0",
-                        "source_type": "validation_result",
-                        "task_id": "task-2",
-                        "task_status": "awaiting_approval",
-                        "task_title": "Создание и редактирование контактов",
-                    },
-                ),
-                "score": 0.95,
-            },
             {
                 "document": Document(
                     page_content="Описание: поля контакта: имя, фамилия, email, телефон.",
@@ -999,8 +984,6 @@ async def test_question_agent_excludes_cross_task_validation_questions_from_qa_c
 
     assert "Описание: поля контакта: имя, фамилия, email, телефон." in captured_answer_prompt
     assert "Описание: поля контакта: имя, фамилия, email, телефон." in captured_verify_prompt
-    assert "Вопрос валидации" not in captured_answer_prompt
-    assert "Вопрос валидации" not in captured_verify_prompt
     assert result.source_ref["cross_task_chunk_ids"] == ["task-2:task_content:task-2:0"]
     assert result.source_ref["cross_task_sources"] == [
         {

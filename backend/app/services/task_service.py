@@ -457,7 +457,6 @@ class TaskService:
                 task,
                 attachments,
                 actor_user_id=current_user.id,
-                validation_result=None,
             )
             audit_metadata["embeddings_reindexed"] = task.indexed_at is not None
         else:
@@ -510,7 +509,6 @@ class TaskService:
             task,
             attachments,
             actor_user_id=current_user.id,
-            validation_result=task.validation_result,
         )
         TaskService._ensure_index_is_synced(
             task,
@@ -736,7 +734,6 @@ class TaskService:
                 task,
                 attachments,
                 actor_user_id=current_user.id,
-                validation_result=task.validation_result,
             )
 
         await NotificationService.notify_task_assigned(
@@ -1048,7 +1045,6 @@ class TaskService:
             task,
             attachments,
             actor_user_id=current_user.id,
-            validation_result=task.validation_result,
         )
         AuditService.record(
             db,
@@ -1105,7 +1101,6 @@ class TaskService:
             task,
             attachments,
             actor_user_id=current_user.id,
-            validation_result=task.validation_result,
         )
         AuditService.record(
             db,
@@ -1208,7 +1203,6 @@ class TaskService:
             task,
             attachments,
             actor_user_id=current_user.id,
-            validation_result=task.validation_result,
         )
         db.add(
             Message(
@@ -1394,7 +1388,6 @@ class TaskService:
             task,
             attachments,
             actor_user_id=current_user.id,
-            validation_result=task.validation_result,
         )
         db.add(
             Message(

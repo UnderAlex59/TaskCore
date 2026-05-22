@@ -102,7 +102,7 @@ Fallback-subgraph. Используется, когда forced agent не най
 - агрегированный verdict `approved` или `needs_rework`;
 - issues и уточняющие questions.
 
-Результат сохраняется в `tasks.validation_result`, влияет на статус задачи и добавляется в контекст для RAG.
+Результат сохраняется в `tasks.validation_result`, влияет на статус задачи и передается QA Agent напрямую без индексации в RAG.
 
 ### RAG Pipeline
 
@@ -145,7 +145,7 @@ Fallback-subgraph. Используется, когда forced agent не най
 
 ## Qdrant-коллекции
 
-- `task_knowledge` - индекс задач, результатов валидации, вложений и контекстных фрагментов; QA Agent использует его и для cross-task RAG внутри текущего проекта.
+- `task_knowledge` - индекс задач, вложений и контекстных фрагментов; QA Agent использует его и для cross-task RAG внутри текущего проекта.
 - `project_questions` - вопросы, используемые как расширяемый чек-лист валидации.
 - `task_proposals` - предложения изменений и база для поиска дублей.
 
