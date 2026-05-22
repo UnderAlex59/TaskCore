@@ -16,6 +16,10 @@ CHAT_ROUTING_AGENT_ALIASES: tuple[str, ...] = ()
 
 _MESSAGE_TYPES = {"general", "question", "change_proposal"}
 _NULL_TARGET_VALUES = {"", "none", "null", "no", "нет", "skip", "false"}
+_MESSAGE_TYPE_TARGET_KEYS = {
+    "question": "qa",
+    "change_proposal": "change-tracker",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +91,42 @@ def _default_message_type_for_target(target_agent_key: str | None) -> str:
     return "general"
 
 
+def _normalize_agent_reference(candidate: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(candidate or "").strip().casefold())
+
+
+def _build_agent_key_lookup(
+    *,
+    available_agent_keys: set[str],
+    available_agents: list[dict[str, object]] | None,
+) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for key in available_agent_keys:
+        normalized_key = str(key).strip().casefold()
+        if not normalized_key:
+            continue
+        lookup[normalized_key] = normalized_key
+        lookup[_normalize_agent_reference(normalized_key)] = normalized_key
+
+    for item in available_agents or []:
+        key = str(item.get("key") or "").strip().casefold()
+        if not key:
+            continue
+        references: list[object] = [key, item.get("name")]
+        aliases = item.get("aliases")
+        if isinstance(aliases, (list, tuple)):
+            references.extend(aliases)
+        for reference in references:
+            text = str(reference or "").strip().casefold()
+            if not text:
+                continue
+            lookup[text] = key
+            normalized_reference = _normalize_agent_reference(text)
+            if normalized_reference:
+                lookup[normalized_reference] = key
+    return lookup
+
+
 def _normalize_message_type(candidate: object, *, fallback: str) -> str:
     normalized = str(candidate or "").strip().casefold()
     if normalized in _MESSAGE_TYPES:
@@ -97,29 +137,53 @@ def _normalize_message_type(candidate: object, *, fallback: str) -> str:
 def _normalize_target_agent_key(
     candidate: object,
     *,
-    available_agent_keys: set[str],
+    agent_key_lookup: dict[str, str],
 ) -> str | None:
     normalized = str(candidate or "").strip().casefold()
     if normalized in _NULL_TARGET_VALUES:
         return None
-    if normalized in available_agent_keys:
-        return normalized
+    target_agent_key = agent_key_lookup.get(normalized)
+    if target_agent_key:
+        return target_agent_key
+    normalized_reference = _normalize_agent_reference(normalized)
+    target_agent_key = agent_key_lookup.get(normalized_reference)
+    if target_agent_key:
+        return target_agent_key
     return "__invalid__"
+
+
+def _fallback_target_from_message_type(
+    message_type: str,
+    *,
+    available_agent_keys: set[str],
+) -> str | None:
+    target_agent_key = _MESSAGE_TYPE_TARGET_KEYS.get(message_type)
+    if target_agent_key in available_agent_keys:
+        return target_agent_key
+    return None
 
 
 def normalize_chat_routing_decision(
     payload: dict[str, object],
     *,
     available_agent_keys: set[str],
+    available_agents: list[dict[str, object]] | None = None,
 ) -> tuple[ChatRoutingOutcome | None, str | None]:
     ai_response_required = _normalize_bool(payload.get("ai_response_required"))
     if ai_response_required is None:
         return None, "missing_or_invalid_ai_response_required"
 
     reason = str(payload.get("reason") or "").strip()
+    normalized_available_agent_keys = {
+        str(key).strip().casefold() for key in available_agent_keys if str(key).strip()
+    }
+    agent_key_lookup = _build_agent_key_lookup(
+        available_agent_keys=normalized_available_agent_keys,
+        available_agents=available_agents,
+    )
     target_agent_key = _normalize_target_agent_key(
         payload.get("target_agent_key"),
-        available_agent_keys=available_agent_keys,
+        agent_key_lookup=agent_key_lookup,
     )
 
     if not ai_response_required:
@@ -137,15 +201,23 @@ def normalize_chat_routing_decision(
             None,
         )
 
+    message_type = _normalize_message_type(
+        payload.get("message_type"),
+        fallback=_default_message_type_for_target(target_agent_key),
+    )
+    if target_agent_key == "__invalid__":
+        fallback_target_agent_key = _fallback_target_from_message_type(
+            message_type,
+            available_agent_keys=normalized_available_agent_keys,
+        )
+        if fallback_target_agent_key is not None:
+            target_agent_key = fallback_target_agent_key
+
     if target_agent_key is None:
         return None, "missing_target_agent_key"
     if target_agent_key == "__invalid__":
         return None, "invalid_target_agent_key"
 
-    message_type = _normalize_message_type(
-        payload.get("message_type"),
-        fallback=_default_message_type_for_target(target_agent_key),
-    )
     return (
         ChatRoutingOutcome(
             ai_response_required=True,
@@ -262,6 +334,7 @@ async def analyze_chat_routing(
     outcome, validation_error = normalize_chat_routing_decision(
         payload,
         available_agent_keys=available_agent_keys,
+        available_agents=available_agents,
     )
     if outcome is None:
         return ChatRoutingOutcome(
