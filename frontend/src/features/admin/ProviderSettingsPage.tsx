@@ -58,7 +58,7 @@ const DEFAULT_MODELS: Record<ProviderKind, string> = {
 
 const DEFAULT_BASE_URLS: Partial<Record<ProviderKind, string>> = {
   openai: "https://api.openai.com/v1",
-  ollama: "http://localhost:11434",
+  ollama: "http://host.docker.internal:11434",
   openrouter: "https://openrouter.ai/api/v1",
   gigachat: "https://gigachat.devices.sberbank.ru/api/v1",
 };

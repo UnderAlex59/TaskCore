@@ -36,7 +36,7 @@ from app.services.graph_run_tracing import (
 
 DEFAULT_BASE_URLS: dict[str, str] = {
     "openai": "https://api.openai.com/v1",
-    "ollama": "http://localhost:11434",
+    "ollama": "http://host.docker.internal:11434",
     "openrouter": "https://openrouter.ai/api/v1",
     "gigachat": "https://gigachat.devices.sberbank.ru/api/v1",
 }

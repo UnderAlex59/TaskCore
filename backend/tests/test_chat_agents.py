@@ -73,7 +73,7 @@ def test_build_chat_model_supports_local_provider() -> None:
         ChatAgentLLMProfile(
             provider="ollama",
             model="llama3.1",
-            base_url="http://localhost:11434",
+            base_url="http://host.docker.internal:11434",
             temperature=0.1,
         )
     )
