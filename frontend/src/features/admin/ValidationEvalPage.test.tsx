@@ -60,6 +60,7 @@ describe("ValidationEvalPage", () => {
 
     const now = "2026-05-16T10:00:00.000Z";
     const defaultConfig = {
+      judge_provider_config_ids: [],
       run_question_judge: true,
       variants: [
         {
@@ -552,6 +553,7 @@ describe("ValidationEvalPage", () => {
       expect(adminApiMock.createValidationEvalRun).toHaveBeenCalledWith(
         "dataset-1",
         expect.objectContaining({
+          judge_provider_config_ids: [],
           run_question_judge: true,
           variants: expect.arrayContaining([
             expect.objectContaining({ key: "core_only" }),

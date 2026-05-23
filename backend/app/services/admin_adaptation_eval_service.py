@@ -24,6 +24,7 @@ from app.models.adaptation_eval import (
     AdaptationEvalDataset,
     AdaptationEvalRun,
 )
+from app.models.llm_provider_config import LLMProviderConfig
 from app.models.message import Message
 from app.models.project import Project
 from app.models.task import Task
@@ -593,6 +594,8 @@ class AdminAdaptationEvalService:
                 matches
             ),
         }
+        if judge_payload.get("judge_agreement") is not None:
+            diffs[f"{prefix}_judge_agreement"] = judge_payload.get("judge_agreement")
         return metrics, diffs
 
     @staticmethod
@@ -625,20 +628,182 @@ class AdminAdaptationEvalService:
             )
             if not unmatched_expected or not unmatched_actual:
                 continue
-            judge_state = await run_adaptation_eval_match_judge_graph(
+            judge_state = await AdminAdaptationEvalService._run_match_judges(
                 db=db,
-                actor_user_id=actor.id,
+                actor=actor,
                 project_id=project_id,
-                case_external_id=case.external_id,
-                scenario_type=case.scenario_type,
+                case=case,
+                config=config,
                 group_key=prefix,
                 task_title=str(probe_task.get("title") or ""),
                 task_content=str(probe_task.get("content") or ""),
                 expected_items=unmatched_expected,
                 actual_items=unmatched_actual,
             )
-            judge_payloads[prefix] = dict(judge_state)
+            judge_payloads[prefix] = judge_state
         return judge_payloads
+
+    @staticmethod
+    async def _validate_judge_provider_config_ids(
+        provider_config_ids: list[str],
+        db: AsyncSession,
+    ) -> None:
+        for provider_config_id in provider_config_ids:
+            provider = await db.get(LLMProviderConfig, provider_config_id)
+            if provider is None or not provider.enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Judge provider {provider_config_id} не найден или отключён.",
+                )
+
+    @staticmethod
+    def _judge_provider_ids(config: AdaptationEvalRunConfig) -> list[str | None]:
+        return list(getattr(config, "judge_provider_config_ids", []) or []) or [None]
+
+    @staticmethod
+    def _judge_run_record(
+        *,
+        index: int,
+        configured_provider_config_id: str | None,
+        judge_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(judge_state.get("judge_payload") or {})
+        return {
+            "index": index,
+            "provider_config_id": payload.get("provider_config_id")
+            or judge_state.get("judge_provider_config_id")
+            or configured_provider_config_id,
+            "provider_kind": payload.get("provider_kind")
+            or judge_state.get("judge_provider_kind"),
+            "model": payload.get("model") or judge_state.get("judge_model"),
+            "ok": bool(payload.get("ok") if "ok" in payload else judge_state.get("judge_ok")),
+            "judge_graph_run_id": judge_state.get("judge_graph_run_id"),
+            "payload": payload,
+        }
+
+    @staticmethod
+    def _match_pairs(payload: dict[str, Any]) -> set[tuple[int, int]]:
+        pairs: set[tuple[int, int]] = set()
+        for item in list(payload.get("matches") or []):
+            if not isinstance(item, dict) or not item.get("match"):
+                continue
+            try:
+                pairs.add((int(item["expected_index"]), int(item["actual_index"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return pairs
+
+    @staticmethod
+    def _adaptation_judge_agreement(judge_runs: list[dict[str, Any]]) -> dict[str, Any]:
+        if not judge_runs:
+            return {"judge_summaries": [], "primary_comparisons": []}
+        primary_pairs = AdminAdaptationEvalService._match_pairs(
+            dict(judge_runs[0].get("payload") or {})
+        )
+        summaries: list[dict[str, Any]] = []
+        comparisons: list[dict[str, Any]] = []
+        for judge_run in judge_runs:
+            payload = dict(judge_run.get("payload") or {})
+            pairs = AdminAdaptationEvalService._match_pairs(payload)
+            summaries.append(
+                {
+                    "index": judge_run.get("index"),
+                    "match_count": len(pairs),
+                    "invalid_json_count": int(payload.get("invalid_json_count") or 0),
+                    "retry_count": int(payload.get("retry_count") or 0),
+                    "ok": bool(judge_run.get("ok")),
+                }
+            )
+            if judge_run is judge_runs[0]:
+                continue
+            union = primary_pairs | pairs
+            intersection = primary_pairs & pairs
+            comparisons.append(
+                {
+                    "index": judge_run.get("index"),
+                    "overlap": len(intersection),
+                    "jaccard": round(len(intersection) / len(union), 4) if union else 1.0,
+                }
+            )
+        return {"judge_summaries": summaries, "primary_comparisons": comparisons}
+
+    @staticmethod
+    async def _run_match_judges(
+        *,
+        db: AsyncSession,
+        actor: User,
+        project_id: str,
+        case: AdaptationEvalCase,
+        config: AdaptationEvalRunConfig,
+        group_key: str,
+        task_title: str,
+        task_content: str,
+        expected_items: list[dict[str, Any]],
+        actual_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        judge_runs: list[dict[str, Any]] = []
+        provider_ids = AdminAdaptationEvalService._judge_provider_ids(config)
+        for index, provider_config_id in enumerate(provider_ids, start=1):
+            try:
+                judge_state = await run_adaptation_eval_match_judge_graph(
+                    db=db,
+                    actor_user_id=actor.id,
+                    project_id=project_id,
+                    case_external_id=case.external_id,
+                    scenario_type=case.scenario_type,
+                    group_key=group_key,
+                    task_title=task_title,
+                    task_content=task_content,
+                    expected_items=expected_items,
+                    actual_items=actual_items,
+                    provider_config_id=provider_config_id,
+                )
+                judge_runs.append(
+                    AdminAdaptationEvalService._judge_run_record(
+                        index=index,
+                        configured_provider_config_id=provider_config_id,
+                        judge_state=dict(judge_state),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                if len(provider_ids) == 1 or index == 1:
+                    raise
+                judge_runs.append(
+                    {
+                        "index": index,
+                        "provider_config_id": provider_config_id,
+                        "provider_kind": None,
+                        "model": None,
+                        "ok": False,
+                        "judge_graph_run_id": None,
+                        "payload": {
+                            "ok": False,
+                            "provider_config_id": provider_config_id,
+                            "provider_kind": None,
+                            "model": None,
+                            "matches": [],
+                            "error_message": str(exc)[:1000],
+                        },
+                    }
+                )
+        primary_state = dict(judge_runs[0]) if judge_runs else {}
+        primary_payload = dict(primary_state.get("payload") or {})
+        if list(getattr(config, "judge_provider_config_ids", []) or []):
+            primary_payload["judge_runs"] = judge_runs
+        if len(judge_runs) > 1:
+            primary_payload["judge_agreement"] = (
+                AdminAdaptationEvalService._adaptation_judge_agreement(judge_runs)
+            )
+        return {
+            "judge_payload": primary_payload,
+            "judge_ok": bool(primary_state.get("ok")),
+            "judge_error_message": primary_payload.get("error_message"),
+            "judge_provider_kind": primary_state.get("provider_kind"),
+            "judge_model": primary_state.get("model"),
+            "judge_provider_config_id": primary_state.get("provider_config_id"),
+            "judge_graph_run_id": primary_state.get("judge_graph_run_id"),
+            "judge_runs": judge_runs,
+        }
 
     @staticmethod
     def _case_metrics(
@@ -984,6 +1149,10 @@ class AdminAdaptationEvalService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Adaptation eval-набор не найден.",
             )
+        await AdminAdaptationEvalService._validate_judge_provider_config_ids(
+            config.judge_provider_config_ids,
+            db,
+        )
         run = AdaptationEvalRun(
             dataset_id=dataset.id,
             project_id=dataset.project_id,
@@ -1789,6 +1958,8 @@ class AdminAdaptationEvalService:
                     "judge_match_rate",
                     "judge_invalid_json_total",
                     "judge_fallback_total",
+                    "judge_agreement_json",
+                    "judge_runs_json",
                     "latency_ms",
                     "error_message",
                 ],
@@ -1826,6 +1997,30 @@ class AdminAdaptationEvalService:
                             "judge_invalid_json_total"
                         ),
                         "judge_fallback_total": item.metrics.get("judge_fallback_total"),
+                        "judge_agreement_json": json.dumps(
+                            {
+                                key: item.metrics.get(f"{key}_judge_agreement")
+                                for key in (
+                                    "capture",
+                                    "retrieval",
+                                    "context_question",
+                                    "context_issue",
+                                )
+                                if item.metrics.get(f"{key}_judge_agreement") is not None
+                            },
+                            ensure_ascii=False,
+                        ),
+                        "judge_runs_json": json.dumps(
+                            {
+                                key.removesuffix("_judge_payload"): (
+                                    dict(value).get("judge_runs") or []
+                                )
+                                for key, value in dict(item.diffs or {}).items()
+                                if key.endswith("_judge_payload")
+                                and isinstance(value, dict)
+                            },
+                            ensure_ascii=False,
+                        ),
                         "latency_ms": item.latency_ms,
                         "error_message": item.error_message or "",
                     }

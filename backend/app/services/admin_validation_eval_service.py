@@ -582,6 +582,10 @@ class AdminValidationEvalService:
 
     @staticmethod
     async def _validate_run_config(config: ValidationEvalRunConfig, db: AsyncSession) -> None:
+        await AdminValidationEvalService._validate_judge_provider_config_ids(
+            config.judge_provider_config_ids,
+            db,
+        )
         for variant in config.variants:
             if variant.provider_config_id:
                 provider = await db.get(LLMProviderConfig, variant.provider_config_id)
@@ -602,6 +606,19 @@ class AdminValidationEvalService:
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail=f"Версия промпта {version_id} для {prompt_key} не найдена.",
                     )
+
+    @staticmethod
+    async def _validate_judge_provider_config_ids(
+        provider_config_ids: list[str],
+        db: AsyncSession,
+    ) -> None:
+        for provider_config_id in provider_config_ids:
+            provider = await db.get(LLMProviderConfig, provider_config_id)
+            if provider is None or not provider.enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Judge provider {provider_config_id} не найден или отключён.",
+                )
 
     @staticmethod
     async def create_run(
@@ -793,33 +810,38 @@ class AdminValidationEvalService:
                 ):
                     if not expected_questions and not actual_questions:
                         continue
-                    judge_state = await run_validation_eval_question_judge_graph(
-                        db=db,
-                        actor_user_id=run.created_by,
-                        project_id=run.project_id,
-                        task_title=case.title,
-                        task_content=case.content,
-                        expected_questions=expected_questions,
-                        actual_questions=actual_questions,
+                    group_payload, group_judge_runs = await (
+                        AdminValidationEvalService._run_question_judges(
+                            db=db,
+                            run=run,
+                            case=case,
+                            config=config,
+                            expected_questions=expected_questions,
+                            actual_questions=actual_questions,
+                        )
                     )
-                    group_payload = dict(judge_state.get("judge_payload", {}))
-                    group_graph_run_id = (
-                        str(judge_state.get("judge_graph_run_id"))
-                        if judge_state.get("judge_graph_run_id")
-                        else None
-                    )
+                    group_graph_run_ids = [
+                        str(item.get("judge_graph_run_id"))
+                        for item in group_judge_runs
+                        if item.get("judge_graph_run_id")
+                    ]
+                    group_graph_run_id = group_graph_run_ids[0] if group_graph_run_ids else None
                     if group_graph_run_id:
                         group_payload["judge_graph_run_id"] = group_graph_run_id
-                        judge_graph_run_ids.append(group_graph_run_id)
                         judge_graph_run_id = judge_graph_run_id or group_graph_run_id
+                    judge_graph_run_ids.extend(group_graph_run_ids)
                     judge_payload[group_key] = group_payload
                     AdminValidationEvalService._merge_judge_metrics(
                         metrics,
                         group_payload,
                         prefix=metric_prefix,
                     )
+                    if group_payload.get("judge_agreement") is not None:
+                        metrics[f"{metric_prefix}_judge_agreement"] = group_payload[
+                            "judge_agreement"
+                        ]
                 if judge_graph_run_ids:
-                    metrics["judge_graph_run_ids"] = judge_graph_run_ids
+                    metrics["judge_graph_run_ids"] = list(dict.fromkeys(judge_graph_run_ids))
                 if not judge_payload:
                     judge_payload = None
             result_status = "passed" if metrics.get("passed") else "failed"
@@ -1191,6 +1213,109 @@ class AdminValidationEvalService:
         metrics[f"{prefix}_judge_ok"] = bool(judge_payload.get("ok"))
 
     @staticmethod
+    def _judge_provider_ids(config: ValidationEvalRunConfig) -> list[str | None]:
+        return list(getattr(config, "judge_provider_config_ids", []) or []) or [None]
+
+    @staticmethod
+    def _judge_run_record(
+        *,
+        index: int,
+        configured_provider_config_id: str | None,
+        judge_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(judge_state.get("judge_payload") or {})
+        return {
+            "index": index,
+            "provider_config_id": payload.get("provider_config_id")
+            or judge_state.get("judge_provider_config_id")
+            or configured_provider_config_id,
+            "provider_kind": payload.get("provider_kind")
+            or judge_state.get("judge_provider_kind"),
+            "model": payload.get("model") or judge_state.get("judge_model"),
+            "ok": bool(payload.get("ok") if "ok" in payload else judge_state.get("judge_ok")),
+            "judge_graph_run_id": judge_state.get("judge_graph_run_id"),
+            "payload": payload,
+        }
+
+    @staticmethod
+    def _question_judge_agreement(judge_runs: list[dict[str, Any]]) -> dict[str, Any]:
+        score_ranges: dict[str, float | None] = {}
+        scores: dict[str, list[float]] = {}
+        for key in ("relevance", "specificity", "actionability", "novelty"):
+            values: list[float] = []
+            for judge_run in judge_runs:
+                value = dict(judge_run.get("payload") or {}).get(key)
+                if isinstance(value, int | float):
+                    values.append(float(value))
+            scores[key] = values
+            score_ranges[key] = round(max(values) - min(values), 4) if values else None
+        return {
+            "score_ranges": score_ranges,
+            "scores": scores,
+            "ok_count": sum(bool(item.get("ok")) for item in judge_runs),
+        }
+
+    @staticmethod
+    async def _run_question_judges(
+        *,
+        db: AsyncSession,
+        run: ValidationEvalRun,
+        case: ValidationEvalCase,
+        config: ValidationEvalRunConfig,
+        expected_questions: list[str],
+        actual_questions: list[str],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        judge_runs: list[dict[str, Any]] = []
+        provider_ids = AdminValidationEvalService._judge_provider_ids(config)
+        for index, provider_config_id in enumerate(provider_ids, start=1):
+            try:
+                judge_state = await run_validation_eval_question_judge_graph(
+                    db=db,
+                    actor_user_id=run.created_by,
+                    project_id=run.project_id,
+                    task_title=case.title,
+                    task_content=case.content,
+                    expected_questions=expected_questions,
+                    actual_questions=actual_questions,
+                    provider_config_id=provider_config_id,
+                )
+                judge_runs.append(
+                    AdminValidationEvalService._judge_run_record(
+                        index=index,
+                        configured_provider_config_id=provider_config_id,
+                        judge_state=dict(judge_state),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                if len(provider_ids) == 1 or index == 1:
+                    raise
+                judge_runs.append(
+                    {
+                        "index": index,
+                        "provider_config_id": provider_config_id,
+                        "provider_kind": None,
+                        "model": None,
+                        "ok": False,
+                        "judge_graph_run_id": None,
+                        "payload": {
+                            "ok": False,
+                            "provider_config_id": provider_config_id,
+                            "provider_kind": None,
+                            "model": None,
+                            "rationale": str(exc)[:1000],
+                        },
+                    }
+                )
+        primary_payload = dict(judge_runs[0].get("payload") or {}) if judge_runs else {}
+        if list(getattr(config, "judge_provider_config_ids", []) or []):
+            primary_payload["judge_runs"] = judge_runs
+        if len(judge_runs) > 1:
+            primary_payload["judge_agreement"] = (
+                AdminValidationEvalService._question_judge_agreement(judge_runs)
+            )
+        return primary_payload, judge_runs
+
+    @staticmethod
     def _percentile(values: list[int], percentile: float) -> int | None:
         if not values:
             return None
@@ -1342,12 +1467,27 @@ class AdminValidationEvalService:
             prefix: {key: [] for key in ("relevance", "specificity", "actionability", "novelty")}
             for prefix in ("question", "context_question")
         }
+        judge_range_scores: dict[str, dict[str, list[float]]] = {
+            prefix: {key: [] for key in ("relevance", "specificity", "actionability", "novelty")}
+            for prefix in ("question", "context_question")
+        }
         for item in results:
             for prefix, prefix_scores in judge_scores.items():
                 for key in prefix_scores:
                     value = item.metrics.get(f"{prefix}_{key}")
                     if isinstance(value, int | float):
                         prefix_scores[key].append(float(value))
+            judge_payload = dict(item.judge_payload or {})
+            for group_key, prefix in (
+                ("final_questions", "question"),
+                ("context_questions", "context_question"),
+            ):
+                group_payload = dict(judge_payload.get(group_key) or {})
+                agreement = dict(group_payload.get("judge_agreement") or {})
+                score_ranges = dict(agreement.get("score_ranges") or {})
+                for key, value in score_ranges.items():
+                    if key in judge_range_scores[prefix] and isinstance(value, int | float):
+                        judge_range_scores[prefix][key].append(float(value))
 
         issue_scores = AdminValidationEvalService._prf(issue_tp, issue_fp, issue_fn)
         question_scores = AdminValidationEvalService._prf(
@@ -1388,6 +1528,13 @@ class AdminValidationEvalService:
                 *judge_scores["context_question"][key],
             ]
             overall_judge[key] = round(sum(values) / len(values), 4) if values else None
+        judge_comparison = {
+            prefix: {
+                key: round(sum(values) / len(values), 4) if values else None
+                for key, values in prefix_scores.items()
+            }
+            for prefix, prefix_scores in judge_range_scores.items()
+        }
         return {
             "cases_total": total,
             "passed": passed,
@@ -1461,6 +1608,7 @@ class AdminValidationEvalService:
             "question_judge": final_judge,
             "context_question_judge": context_judge,
             "overall_question_judge": overall_judge,
+            "judge_comparison": judge_comparison,
             "llm_errors": sum(int(item.metrics.get("llm_errors") or 0) for item in results),
             "json_errors": sum(int(item.metrics.get("json_errors") or 0) for item in results),
             "fallback_total": sum(
@@ -1754,6 +1902,8 @@ class AdminValidationEvalService:
                     "latency_ms",
                     "graph_run_id",
                     "judge_graph_run_id",
+                    "judge_agreement_json",
+                    "judge_runs_json",
                     "error_message",
                 ],
             )
@@ -1786,6 +1936,22 @@ class AdminValidationEvalService:
                         "latency_ms": item.latency_ms,
                         "graph_run_id": item.graph_run_id,
                         "judge_graph_run_id": item.judge_graph_run_id,
+                        "judge_agreement_json": json.dumps(
+                            {
+                                key: dict(value).get("judge_agreement")
+                                for key, value in dict(item.judge_payload or {}).items()
+                                if isinstance(value, dict)
+                            },
+                            ensure_ascii=False,
+                        ),
+                        "judge_runs_json": json.dumps(
+                            {
+                                key: dict(value).get("judge_runs") or []
+                                for key, value in dict(item.judge_payload or {}).items()
+                                if isinstance(value, dict)
+                            },
+                            ensure_ascii=False,
+                        ),
                         "error_message": item.error_message or "",
                     }
                 )

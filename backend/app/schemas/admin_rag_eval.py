@@ -88,10 +88,23 @@ class RagEvalRunConfig(BaseModel):
     include_current_task_content: bool = False
     run_answer_agent: bool = True
     run_llm_judge: bool = True
+    judge_provider_config_ids: list[str] = Field(default_factory=list)
     run_bm25_baseline: bool = True
     min_score_override: float | None = Field(default=None, ge=0, le=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("judge_provider_config_ids")
+    @classmethod
+    def validate_judge_provider_config_ids(cls, value: list[str]) -> list[str]:
+        ids = [item.strip() for item in value if item.strip()]
+        if not ids:
+            return []
+        if len(ids) > 3:
+            raise ValueError("Judge provider list must be empty or contain 1 to 3 ids.")
+        if len(set(ids)) != len(ids):
+            raise ValueError("Judge provider ids must be unique.")
+        return ids
 
 
 class RagEvalDatasetTaskRead(BaseModel):

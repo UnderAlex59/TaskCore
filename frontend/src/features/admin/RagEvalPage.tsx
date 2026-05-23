@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   adminApi,
+  type ProviderConfigRead,
   type RagEvalDatasetDetailRead,
   type RagEvalDatasetRead,
   type RagEvalImportFormat,
@@ -16,7 +17,7 @@ import { projectsApi, type ProjectRead } from "@/api/projectsApi";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
-import { formatDateTimeFull } from "@/shared/lib/locale";
+import { formatDateTimeFull, getProviderKindLabel } from "@/shared/lib/locale";
 
 type RagEvalTab = "import" | "datasets" | "run" | "results";
 type RunStatusFilter = RagEvalRunStatus | "all";
@@ -68,6 +69,7 @@ const DEFAULT_CONFIG: RagEvalRunConfig = {
   include_current_task_content: false,
   run_answer_agent: true,
   run_llm_judge: true,
+  judge_provider_config_ids: [],
   run_bm25_baseline: true,
   min_score_override: null,
 };
@@ -227,7 +229,17 @@ function formatConfigSnapshot(config: RagEvalRunConfig) {
     config.run_bm25_baseline ? "BM25 on" : "BM25 off",
     config.run_answer_agent ? "QA on" : "QA off",
     config.run_llm_judge ? "judge on" : "judge off",
+    config.judge_provider_config_ids.length
+      ? `judges: ${config.judge_provider_config_ids.length}`
+      : "judge default",
   ].join(" · ");
+}
+
+function judgeRunsFromPayload(value: unknown): Array<Record<string, unknown>> {
+  const payload = asRecord(value);
+  return Array.isArray(payload.judge_runs)
+    ? payload.judge_runs.map(asRecord)
+    : [];
 }
 
 function correctnessSummary(metrics: Record<string, unknown> | null) {
@@ -333,17 +345,20 @@ export default function RagEvalPage() {
   const [importName, setImportName] = useState("RAG eval set");
   const [importContent, setImportContent] = useState(JSON_TEMPLATE);
   const [config, setConfig] = useState<RagEvalRunConfig>(DEFAULT_CONFIG);
+  const [providers, setProviders] = useState<ProviderConfigRead[]>([]);
 
   async function loadBootstrap() {
     try {
       setLoading(true);
       setError(null);
-      const [projectList, datasetList] = await Promise.all([
+      const [projectList, datasetList, providerList] = await Promise.all([
         projectsApi.list(),
         adminApi.listRagEvalDatasets(),
+        adminApi.listProviders(),
       ]);
       setProjects(projectList);
       setDatasets(datasetList);
+      setProviders(providerList.filter((provider) => provider.enabled));
       setSelectedProjectId((current) => current || projectList[0]?.id || "");
       setSelectedDatasetId((current) => current || datasetList[0]?.id || "");
     } catch (caught) {
@@ -519,6 +534,12 @@ export default function RagEvalPage() {
     recallFilter,
   ]);
 
+  const judgeProviderSelectionError =
+    config.run_llm_judge &&
+    config.judge_provider_config_ids.length > 3
+      ? "Выберите не больше 3 LLM-профилей или снимите все для runtime default."
+      : null;
+
   async function handleImport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -553,6 +574,10 @@ export default function RagEvalPage() {
     event.preventDefault();
     if (!selectedDatasetId) {
       setError("Сначала выберите RAG Eval набор.");
+      return;
+    }
+    if (judgeProviderSelectionError) {
+      setError(judgeProviderSelectionError);
       return;
     }
     try {
@@ -869,6 +894,9 @@ export default function RagEvalPage() {
                     setConfig((current) => ({
                       ...current,
                       [key]: event.target.checked,
+                      ...(key === "run_llm_judge" && !event.target.checked
+                        ? { judge_provider_config_ids: [] }
+                        : {}),
                     }))
                   }
                   type="checkbox"
@@ -876,6 +904,60 @@ export default function RagEvalPage() {
               </label>
             ))}
           </div>
+
+          {config.run_llm_judge ? (
+            <div className="mt-5 rounded-[14px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] p-4">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-semibold text-[#172b4d]">
+                  Judge providers
+                </p>
+                <p className="text-sm text-[#626f86]">
+                  0 профилей — runtime default. Для явного сравнения выберите от 1 до 3.
+                </p>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {providers.map((provider) => {
+                  const checked = config.judge_provider_config_ids.includes(
+                    provider.id,
+                  );
+                  const disabled =
+                    !checked && config.judge_provider_config_ids.length >= 3;
+                  return (
+                    <label
+                      className="flex items-center gap-3 rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-white px-3 py-2 text-sm text-[#172b4d]"
+                      key={provider.id}
+                    >
+                      <input
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          setConfig((current) => ({
+                            ...current,
+                            judge_provider_config_ids: event.target.checked
+                              ? [...current.judge_provider_config_ids, provider.id]
+                              : current.judge_provider_config_ids.filter(
+                                  (id) => id !== provider.id,
+                                ),
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>
+                        {provider.name} /{" "}
+                        {getProviderKindLabel(provider.provider_kind)} /{" "}
+                        {provider.model}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {judgeProviderSelectionError ? (
+                <p className="mt-3 text-sm font-semibold text-[#ae2e24]">
+                  {judgeProviderSelectionError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {datasetDetail ? (
             <p className="mt-5 text-sm text-[#44546f]">
@@ -890,7 +972,7 @@ export default function RagEvalPage() {
 
           <button
             className="mt-5 ui-button-primary"
-            disabled={busy || !selectedDatasetId}
+            disabled={busy || !selectedDatasetId || Boolean(judgeProviderSelectionError)}
             type="submit"
           >
             {busy ? "Запуск..." : "Запустить RAG Eval"}
@@ -1269,6 +1351,7 @@ export default function RagEvalPage() {
         .filter(Boolean),
     );
     const judgePayload = asRecord(item.judge_payload);
+    const judgeRuns = judgeRunsFromPayload(judgePayload);
     const unsupportedClaims = Array.isArray(judgePayload.unsupported_claims)
       ? judgePayload.unsupported_claims
       : [];
@@ -1535,6 +1618,45 @@ export default function RagEvalPage() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  ) : null}
+                  {judgeRuns.length ? (
+                    <div className="overflow-x-auto rounded-[10px] bg-white px-3 py-2">
+                      <p className="font-semibold text-[#172b4d]">
+                        Judge comparison
+                      </p>
+                      <table className="mt-2 w-full min-w-[560px] text-left text-xs">
+                        <thead className="text-[#6b778c]">
+                          <tr>
+                            <th className="py-1">Provider</th>
+                            <th className="py-1">Groundedness</th>
+                            <th className="py-1">Correctness</th>
+                            <th className="py-1">Rationale</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {judgeRuns.map((run) => {
+                            const payload = asRecord(run.payload);
+                            return (
+                              <tr key={String(run.index)}>
+                                <td className="py-1 pr-3 text-[#44546f]">
+                                  {asString(run.provider_kind)} /{" "}
+                                  {asString(run.model)}
+                                </td>
+                                <td className="py-1 pr-3">
+                                  {asString(payload.groundedness)}
+                                </td>
+                                <td className="py-1 pr-3">
+                                  {asString(payload.correctness)}
+                                </td>
+                                <td className="py-1">
+                                  {shortText(payload.rationale, 120)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   ) : null}
                 </div>

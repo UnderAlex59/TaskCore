@@ -127,6 +127,7 @@ const DEFAULT_VARIANTS: ValidationEvalVariantConfig[] = [
 ];
 
 const DEFAULT_CONFIG: ValidationEvalRunConfig = {
+  judge_provider_config_ids: [],
   run_question_judge: true,
   variants: DEFAULT_VARIANTS,
 };
@@ -253,6 +254,11 @@ function compactJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function judgeRunsFromGroup(value: unknown): Array<Record<string, unknown>> {
+  const group = asRecord(value);
+  return Array.isArray(group.judge_runs) ? group.judge_runs.map(asRecord) : [];
+}
+
 function normalizedText(value: unknown) {
   return String(value ?? "").toLocaleLowerCase("ru-RU");
 }
@@ -377,6 +383,7 @@ function makePromptVersionLabel(version: AgentPromptVersionRead) {
 
 function cloneDefaultConfig(): ValidationEvalRunConfig {
   return {
+    judge_provider_config_ids: [...DEFAULT_CONFIG.judge_provider_config_ids],
     run_question_judge: DEFAULT_CONFIG.run_question_judge,
     variants: DEFAULT_CONFIG.variants.map((variant) => ({
       ...variant,
@@ -486,6 +493,12 @@ export default function ValidationEvalPage() {
     caseVariantFilter,
   ]);
 
+  const judgeProviderSelectionError =
+    config.run_question_judge &&
+    config.judge_provider_config_ids.length > 3
+      ? "Выберите не больше 3 LLM-профилей или снимите все для runtime default."
+      : null;
+
   async function loadBootstrap() {
     try {
       setLoading(true);
@@ -499,7 +512,7 @@ export default function ValidationEvalPage() {
         ]);
       setProjects(loadedProjects);
       setDatasets(loadedDatasets);
-      setProviders(loadedProviders);
+      setProviders(loadedProviders.filter((provider) => provider.enabled));
       setPromptConfigs(loadedPrompts);
 
       const validationPrompts = loadedPrompts.filter(isValidationPrompt);
@@ -682,6 +695,10 @@ export default function ValidationEvalPage() {
     event.preventDefault();
     if (!selectedDatasetId) {
       setError("Выберите набор перед запуском Validation Eval.");
+      return;
+    }
+    if (judgeProviderSelectionError) {
+      setError(judgeProviderSelectionError);
       return;
     }
     try {
@@ -1304,12 +1321,67 @@ export default function ValidationEvalPage() {
                 setConfig((current) => ({
                   ...current,
                   run_question_judge: event.target.checked,
+                  judge_provider_config_ids: event.target.checked
+                    ? current.judge_provider_config_ids
+                    : [],
                 }))
               }
               type="checkbox"
             />
             Запускать LangGraph judge для качества вопросов
           </label>
+
+          {config.run_question_judge ? (
+            <div className="rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] p-4">
+              <p className="text-sm font-semibold text-[#172b4d]">
+                Judge providers
+              </p>
+              <p className="mt-1 text-sm text-[#626f86]">
+                0 профилей — runtime default. Для явного сравнения выберите от 1 до 3.
+              </p>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {providers.map((provider) => {
+                  const checked = config.judge_provider_config_ids.includes(
+                    provider.id,
+                  );
+                  const disabled =
+                    !checked && config.judge_provider_config_ids.length >= 3;
+                  return (
+                    <label
+                      className="flex items-center gap-3 rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-white px-3 py-2 text-sm text-[#172b4d]"
+                      key={provider.id}
+                    >
+                      <input
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          setConfig((current) => ({
+                            ...current,
+                            judge_provider_config_ids: event.target.checked
+                              ? [...current.judge_provider_config_ids, provider.id]
+                              : current.judge_provider_config_ids.filter(
+                                  (id) => id !== provider.id,
+                                ),
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>
+                        {provider.name} /{" "}
+                        {getProviderKindLabel(provider.provider_kind)} /{" "}
+                        {provider.model}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {judgeProviderSelectionError ? (
+                <p className="mt-3 text-sm font-semibold text-[#ae2e24]">
+                  {judgeProviderSelectionError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="space-y-4">
             {config.variants.map((variant, index) => (
@@ -1464,7 +1536,9 @@ export default function ValidationEvalPage() {
 
           <button
             className="ui-button-primary"
-            disabled={busy || !selectedDatasetId}
+            disabled={
+              busy || !selectedDatasetId || Boolean(judgeProviderSelectionError)
+            }
             type="submit"
           >
             {busy ? "Запускаем..." : "Запустить Validation Eval"}
@@ -2062,6 +2136,14 @@ function CaseResultCard({ item }: { item: ValidationEvalCaseResultRead }) {
   const diffs = item.diffs;
   const judge = asRecord(item.judge_payload);
   const judgeScores = asRecord(item.metrics.question_judge);
+  const finalQuestionJudgeRuns = judgeRunsFromGroup(judge.final_questions);
+  const contextQuestionJudgeRuns = judgeRunsFromGroup(judge.context_questions);
+  const judgeComparisonGroups: Array<
+    [string, Array<Record<string, unknown>>]
+  > = [
+    ["final", finalQuestionJudgeRuns],
+    ["context", contextQuestionJudgeRuns],
+  ];
 
   return (
     <article className="page-panel p-5">
@@ -2195,6 +2277,60 @@ function CaseResultCard({ item }: { item: ValidationEvalCaseResultRead }) {
           values={asArray(diffs.missing_context_questions)}
         />
       </div>
+
+      {finalQuestionJudgeRuns.length || contextQuestionJudgeRuns.length ? (
+        <div className="mt-5 overflow-x-auto rounded-[12px] border border-[rgba(9,30,66,0.1)] bg-[#fafbfc] p-4">
+          <h4 className="text-sm font-semibold text-[#172b4d]">
+            Judge comparison
+          </h4>
+          <table className="mt-3 w-full min-w-[760px] text-left text-xs">
+            <thead className="text-[#626f86]">
+              <tr>
+                <th className="py-2">Group</th>
+                <th className="py-2">Provider</th>
+                <th className="py-2">Rel</th>
+                <th className="py-2">Spec</th>
+                <th className="py-2">Action</th>
+                <th className="py-2">Novelty</th>
+                <th className="py-2">Rationale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {judgeComparisonGroups.flatMap(([group, runs]) =>
+                runs.map((run) => {
+                  const payload = asRecord(run.payload);
+                  return (
+                    <tr key={`${group}-${String(run.index)}`}>
+                      <td className="py-2 pr-3 font-semibold text-[#172b4d]">
+                        {group}
+                      </td>
+                      <td className="py-2 pr-3 text-[#44546f]">
+                        {metricValue(run.provider_kind)} /{" "}
+                        {metricValue(run.model)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {metricValue(payload.relevance)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {metricValue(payload.specificity)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {metricValue(payload.actionability)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {metricValue(payload.novelty)}
+                      </td>
+                      <td className="py-2">
+                        {shortText(payload.rationale, 140)}
+                      </td>
+                    </tr>
+                  );
+                }),
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <JsonDetails label="Expected result" value={item.expected_result} />

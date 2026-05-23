@@ -36,6 +36,7 @@ class RagEvalJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    judge_provider_config_id: str | None
 
 
 def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
@@ -85,6 +86,7 @@ async def _invoke_judge(state: RagEvalJudgeState) -> RagEvalJudgeState:
             "judge_error_message": None,
             "judge_provider_kind": None,
             "judge_model": None,
+            "judge_provider_config_id": state.get("provider_config_id"),
             "judge_payload": None,
         }
 
@@ -97,12 +99,14 @@ async def _invoke_judge(state: RagEvalJudgeState) -> RagEvalJudgeState:
         system_prompt=str(state.get("judge_system_prompt", "")),
         user_prompt=str(state.get("judge_user_prompt", "")),
         prompt_key=RAG_EVAL_JUDGE_AGENT_KEY,
+        provider_config_id=state.get("provider_config_id"),
     )
     return {
         "judge_ok": bool(result.ok),
         "judge_error_message": result.error_message,
         "judge_provider_kind": result.provider_kind,
         "judge_model": result.model,
+        "judge_provider_config_id": result.provider_config_id,
         "judge_payload": _extract_json_payload(result.text or "")
         if result.ok and result.text
         else None,
@@ -134,6 +138,7 @@ def _finalize_judge(state: RagEvalJudgeState) -> RagEvalJudgeState:
             if isinstance(claims, list)
             else [],
             "rationale": str(payload.get("rationale") or ""),
+            "provider_config_id": state.get("judge_provider_config_id"),
             "provider_kind": state.get("judge_provider_kind"),
             "model": state.get("judge_model"),
             "ok": bool(state.get("judge_ok")),
@@ -166,6 +171,7 @@ async def run_rag_eval_judge_graph(
     expected_answer: str | None,
     answer_text: str,
     retrieved_chunks: list[dict[str, object]],
+    provider_config_id: str | None = None,
 ) -> RagEvalJudgeState:
     state = await run_traced_graph(
         graph_key="rag_eval_judge_graph",
@@ -180,6 +186,7 @@ async def run_rag_eval_judge_graph(
             "expected_answer": expected_answer,
             "answer_text": answer_text,
             "retrieved_chunks": retrieved_chunks,
+            "provider_config_id": provider_config_id,
         },
     )
     return {
@@ -188,4 +195,5 @@ async def run_rag_eval_judge_graph(
         "judge_error_message": state.get("judge_error_message"),
         "judge_provider_kind": state.get("judge_provider_kind"),
         "judge_model": state.get("judge_model"),
+        "judge_provider_config_id": state.get("judge_provider_config_id"),
     }

@@ -172,6 +172,180 @@ async def test_admin_can_create_test_and_override_provider(
 
 
 @pytest.mark.asyncio
+async def test_admin_can_delete_provider_profile(client: AsyncClient) -> None:
+    access_token = await register_and_login(
+        client,
+        email="admin-delete-provider@example.com",
+        full_name="Admin User",
+    )
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    create_response = await client.post(
+        "/admin/llm/providers",
+        headers=headers,
+        json={
+            "name": "Disposable provider",
+            "provider_kind": "openai",
+            "base_url": "",
+            "model": "gpt-4o-mini",
+            "temperature": 0.2,
+            "enabled": True,
+            "secret": "openai-secret",
+        },
+    )
+    assert create_response.status_code == 201
+    provider_id = create_response.json()["id"]
+
+    default_response = await client.post(
+        "/admin/llm/runtime/default-provider",
+        headers=headers,
+        json={"provider_config_id": provider_id},
+    )
+    assert default_response.status_code == 200
+
+    override_response = await client.put(
+        "/admin/llm/overrides/task-validation",
+        headers=headers,
+        json={"provider_config_id": provider_id, "enabled": True},
+    )
+    assert override_response.status_code == 200
+
+    log_id = str(uuid.uuid4())
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO llm_request_logs (
+                    id,
+                    request_kind,
+                    actor_user_id,
+                    task_id,
+                    project_id,
+                    agent_key,
+                    provider_config_id,
+                    provider_kind,
+                    model,
+                    status,
+                    latency_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    error_message,
+                    created_at
+                ) VALUES (
+                    :id,
+                    :request_kind,
+                    NULL,
+                    NULL,
+                    NULL,
+                    :agent_key,
+                    :provider_config_id,
+                    :provider_kind,
+                    :model,
+                    :status,
+                    :latency_ms,
+                    :prompt_tokens,
+                    :completion_tokens,
+                    :total_tokens,
+                    :estimated_cost_usd,
+                    NULL,
+                    :created_at
+                )
+                """
+            ),
+            {
+                "id": log_id,
+                "request_kind": "chat",
+                "agent_key": "task-validation",
+                "provider_config_id": provider_id,
+                "provider_kind": "openai",
+                "model": "gpt-4o-mini",
+                "status": "success",
+                "latency_ms": 42,
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+                "estimated_cost_usd": 0.001,
+                "created_at": datetime.now(UTC),
+            },
+        )
+
+    delete_response = await client.delete(
+        f"/admin/llm/providers/{provider_id}",
+        headers=headers,
+    )
+    assert delete_response.status_code == 204
+
+    list_response = await client.get("/admin/llm/providers", headers=headers)
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+
+    async with engine.begin() as connection:
+        runtime_default = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT default_provider_config_id
+                    FROM llm_runtime_settings
+                    WHERE id = 1
+                    """
+                )
+            )
+        ).scalar_one()
+        override_count = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM llm_agent_overrides
+                    WHERE provider_config_id = :provider_id
+                    """
+                ),
+                {"provider_id": provider_id},
+            )
+        ).scalar_one()
+        log_provider_id = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT provider_config_id
+                    FROM llm_request_logs
+                    WHERE id = :log_id
+                    """
+                ),
+                {"log_id": log_id},
+            )
+        ).scalar_one()
+        audit_row = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT entity_id, metadata
+                    FROM audit_events
+                    WHERE event_type = 'admin.llm_provider.deleted'
+                    """
+                )
+            )
+        ).first()
+
+    assert runtime_default is None
+    assert override_count == 0
+    assert log_provider_id is None
+    assert audit_row is not None
+    audit_payload = audit_row._mapping
+    assert audit_payload["entity_id"] == provider_id
+    assert audit_payload["metadata"]["was_default"] is True
+    assert audit_payload["metadata"]["affected_agent_keys"] == ["task-validation"]
+
+    missing_response = await client.delete(
+        f"/admin/llm/providers/{provider_id}",
+        headers=headers,
+    )
+    assert missing_response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_admin_can_list_all_llm_consumers(client: AsyncClient) -> None:
     access_token = await register_and_login(
         client,

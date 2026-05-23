@@ -36,6 +36,7 @@ class ValidationEvalQuestionJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    judge_provider_config_id: str | None
     judge_graph_run_id: str | None
 
 
@@ -85,6 +86,7 @@ async def _invoke_question_judge(
             "judge_error_message": "LLM runtime skipped: no database session.",
             "judge_provider_kind": None,
             "judge_model": None,
+            "judge_provider_config_id": state.get("provider_config_id"),
             "judge_payload": {},
         }
 
@@ -97,12 +99,14 @@ async def _invoke_question_judge(
         system_prompt=str(state.get("judge_system_prompt", "")),
         user_prompt=str(state.get("judge_user_prompt", "")),
         prompt_key=VALIDATION_EVAL_QUESTION_JUDGE_AGENT_KEY,
+        provider_config_id=state.get("provider_config_id"),
     )
     return {
         "judge_ok": bool(result.ok),
         "judge_error_message": result.error_message,
         "judge_provider_kind": result.provider_kind,
         "judge_model": result.model,
+        "judge_provider_config_id": result.provider_config_id,
         "judge_payload": _extract_json_payload(result.text or "")
         if result.ok and result.text
         else {},
@@ -134,6 +138,7 @@ def _finalize_question_judge(
                 or state.get("judge_error_message")
                 or "Judge did not return valid JSON."
             ),
+            "provider_config_id": state.get("judge_provider_config_id"),
             "provider_kind": state.get("judge_provider_kind"),
             "model": state.get("judge_model"),
             "ok": bool(state.get("judge_ok")),
@@ -173,6 +178,7 @@ async def run_validation_eval_question_judge_graph(
     task_content: str,
     expected_questions: list[str],
     actual_questions: list[str],
+    provider_config_id: str | None = None,
 ) -> ValidationEvalQuestionJudgeState:
     state = await run_traced_graph(
         graph_key="validation_eval_question_judge_graph",
@@ -187,6 +193,7 @@ async def run_validation_eval_question_judge_graph(
             "task_content": task_content,
             "expected_questions": expected_questions,
             "actual_questions": actual_questions,
+            "provider_config_id": provider_config_id,
         },
     )
     return {
@@ -195,5 +202,6 @@ async def run_validation_eval_question_judge_graph(
         "judge_error_message": state.get("judge_error_message"),
         "judge_provider_kind": state.get("judge_provider_kind"),
         "judge_model": state.get("judge_model"),
+        "judge_provider_config_id": state.get("judge_provider_config_id"),
         "judge_graph_run_id": state.get("judge_graph_run_id"),
     }

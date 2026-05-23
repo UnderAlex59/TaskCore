@@ -57,6 +57,7 @@ const AGENT_KEY_LABELS: Record<string, string> = {
 const EVENT_TYPE_LABELS: Record<string, string> = {
   "admin.llm_override.updated": "Обновлено правило маршрутизации агента",
   "admin.llm_provider.created": "Создан профиль провайдера",
+  "admin.llm_provider.deleted": "Удален профиль провайдера",
   "admin.llm_provider.default_set": "Изменен провайдер по умолчанию",
   "admin.llm_provider.tested": "Проверено подключение к провайдеру",
   "admin.llm_provider.updated": "Обновлен профиль провайдера",

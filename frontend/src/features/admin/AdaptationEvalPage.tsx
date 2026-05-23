@@ -10,11 +10,12 @@ import {
   type AdaptationEvalRunConfig,
   type AdaptationEvalRunPageRead,
   type AdaptationEvalRunRead,
+  type ProviderConfigRead,
 } from "@/api/adminApi";
 import { projectsApi, type ProjectRead } from "@/api/projectsApi";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
-import { formatDateTimeFull } from "@/shared/lib/locale";
+import { formatDateTimeFull, getProviderKindLabel } from "@/shared/lib/locale";
 
 type AdaptationEvalTab = "import" | "datasets" | "run" | "results";
 type ExportFormat = "json" | "csv";
@@ -36,6 +37,7 @@ const DEFAULT_CONFIG: AdaptationEvalRunConfig = {
     duplicate_rate_max: 0.1,
     retrieval_recall_at_k_min: 0.8,
   },
+  judge_provider_config_ids: [],
   retrieval_limit: 5,
   run_match_judge: true,
 };
@@ -170,6 +172,24 @@ function formatMatchSources(diffs: Record<string, unknown>) {
   return `det ${deterministic} / judge ${judge}`;
 }
 
+function judgeRunsFromPayload(value: unknown): Array<Record<string, unknown>> {
+  const payload = asRecord(value);
+  return Array.isArray(payload.judge_runs)
+    ? payload.judge_runs.map(asRecord)
+    : [];
+}
+
+function averageMatchConfidence(payload: Record<string, unknown>) {
+  const values = asArray(payload.matches)
+    .map(asRecord)
+    .map((row) => row.confidence)
+    .filter((value): value is number => typeof value === "number");
+  if (!values.length) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 function statusLabel(status: string | null | undefined) {
   switch (status) {
     case "queued":
@@ -202,6 +222,7 @@ function downloadText(filename: string, content: string) {
 export default function AdaptationEvalPage() {
   const [activeTab, setActiveTab] = useState<AdaptationEvalTab>("import");
   const [projects, setProjects] = useState<ProjectRead[]>([]);
+  const [providers, setProviders] = useState<ProviderConfigRead[]>([]);
   const [datasets, setDatasets] = useState<AdaptationEvalDatasetRead[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
@@ -227,15 +248,23 @@ export default function AdaptationEvalPage() {
     [datasets, selectedDatasetId],
   );
 
+  const judgeProviderSelectionError =
+    config.run_match_judge &&
+    config.judge_provider_config_ids.length > 3
+      ? "Выберите не больше 3 LLM-профилей или снимите все для runtime default."
+      : null;
+
   useEffect(() => {
     async function loadInitial() {
       try {
         setLoading(true);
-        const [loadedProjects, loadedDatasets] = await Promise.all([
+        const [loadedProjects, loadedDatasets, loadedProviders] = await Promise.all([
           projectsApi.list(),
           adminApi.listAdaptationEvalDatasets(),
+          adminApi.listProviders(),
         ]);
         setProjects(loadedProjects);
+        setProviders(loadedProviders.filter((provider) => provider.enabled));
         setDatasets(loadedDatasets);
         const projectId = loadedProjects[0]?.id ?? "";
         const datasetId = loadedDatasets[0]?.id ?? "";
@@ -307,6 +336,10 @@ export default function AdaptationEvalPage() {
   async function handleRun() {
     if (!selectedDatasetId) {
       setError("Выберите набор перед запуском.");
+      return;
+    }
+    if (judgeProviderSelectionError) {
+      setError(judgeProviderSelectionError);
       return;
     }
     try {
@@ -647,6 +680,9 @@ export default function AdaptationEvalPage() {
                   setConfig((current) => ({
                     ...current,
                     run_match_judge: event.target.checked,
+                    judge_provider_config_ids: event.target.checked
+                      ? current.judge_provider_config_ids
+                      : [],
                   }))
                 }
                 type="checkbox"
@@ -667,9 +703,62 @@ export default function AdaptationEvalPage() {
               Удалять synthetic tasks после run
             </label>
           </div>
+          {config.run_match_judge ? (
+            <div className="mt-5 rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] p-4">
+              <p className="text-sm font-semibold text-[#172b4d]">
+                Judge providers
+              </p>
+              <p className="mt-1 text-sm text-[#626f86]">
+                0 профилей — runtime default. Для явного сравнения выберите от 1 до 3.
+              </p>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {providers.map((provider) => {
+                  const checked = config.judge_provider_config_ids.includes(
+                    provider.id,
+                  );
+                  const disabled =
+                    !checked && config.judge_provider_config_ids.length >= 3;
+                  return (
+                    <label
+                      className="flex items-center gap-3 rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-white px-3 py-2 text-sm text-[#172b4d]"
+                      key={provider.id}
+                    >
+                      <input
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          setConfig((current) => ({
+                            ...current,
+                            judge_provider_config_ids: event.target.checked
+                              ? [...current.judge_provider_config_ids, provider.id]
+                              : current.judge_provider_config_ids.filter(
+                                  (id) => id !== provider.id,
+                                ),
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>
+                        {provider.name} /{" "}
+                        {getProviderKindLabel(provider.provider_kind)} /{" "}
+                        {provider.model}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {judgeProviderSelectionError ? (
+                <p className="mt-3 text-sm font-semibold text-[#ae2e24]">
+                  {judgeProviderSelectionError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <button
             className="ui-button-primary mt-5"
-            disabled={busy || !selectedDatasetId}
+            disabled={
+              busy || !selectedDatasetId || Boolean(judgeProviderSelectionError)
+            }
             onClick={() => void handleRun()}
             type="button"
           >
@@ -860,6 +949,37 @@ function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
     actual.context_validation ?? actual.full_validation,
   );
   const retrieval = asArray(actual.retrieval_results).map(asRecord);
+  const judgeComparisonRows = [
+    "capture",
+    "retrieval",
+    "context_question",
+    "context_issue",
+  ].flatMap((prefix) => {
+    const groupPayload = asRecord(diffs[`${prefix}_judge_payload`]);
+    const comparisons = asArray(
+      asRecord(groupPayload.judge_agreement).primary_comparisons,
+    ).map(asRecord);
+    return judgeRunsFromPayload(groupPayload).map((run) => {
+      const payload = asRecord(run.payload);
+      const comparison = comparisons.find(
+        (row) => Number(row.index) === Number(run.index),
+      );
+      return {
+        prefix,
+        run,
+        payload,
+        confidence: averageMatchConfidence(payload),
+        overlap:
+          Number(run.index) === 1
+            ? "primary"
+            : comparison
+              ? `${metricValue(comparison.overlap)} / ${metricValue(
+                  comparison.jaccard,
+                )}`
+              : "н/д",
+      };
+    });
+  });
   return (
     <article className="page-panel overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-[rgba(9,30,66,0.1)] p-5 sm:flex-row sm:items-start sm:justify-between">
@@ -915,6 +1035,53 @@ function CaseResultCard({ item }: { item: AdaptationEvalCaseResultRead }) {
           <p className="mt-4 rounded-[8px] bg-[#fff2f0] p-3 text-sm text-[#ae2e24]">
             {item.error_message}
           </p>
+        ) : null}
+        {judgeComparisonRows.length ? (
+          <div className="mt-4 overflow-x-auto rounded-[8px] border border-[rgba(9,30,66,0.1)] bg-white p-3">
+            <p className="text-sm font-semibold text-[#172b4d]">
+              Judge comparison
+            </p>
+            <table className="mt-2 w-full min-w-[860px] text-left text-xs">
+              <thead className="text-[#626f86]">
+                <tr>
+                  <th className="py-2">Group</th>
+                  <th className="py-2">Provider</th>
+                  <th className="py-2">Matches</th>
+                  <th className="py-2">Invalid JSON</th>
+                  <th className="py-2">Retries</th>
+                  <th className="py-2">Fallback</th>
+                  <th className="py-2">Confidence</th>
+                  <th className="py-2">Overlap/Jaccard</th>
+                </tr>
+              </thead>
+              <tbody>
+                {judgeComparisonRows.map(
+                  ({ prefix, run, payload, confidence, overlap }) => (
+                  <tr key={`${prefix}-${String(run.index)}`}>
+                    <td className="py-2 pr-3 font-semibold text-[#172b4d]">
+                      {prefix}
+                    </td>
+                    <td className="py-2 pr-3 text-[#44546f]">
+                      {metricValue(run.provider_kind)} / {metricValue(run.model)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {asArray(payload.matches).length}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {metricValue(payload.invalid_json_count)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {metricValue(payload.retry_count)}
+                    </td>
+                    <td className="py-2 pr-3">{run.ok ? "no" : "yes"}</td>
+                    <td className="py-2 pr-3">{metricValue(confidence)}</td>
+                    <td className="py-2">{overlap}</td>
+                  </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
         ) : null}
       </div>
     </article>

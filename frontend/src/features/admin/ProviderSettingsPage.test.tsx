@@ -5,6 +5,7 @@ import ProviderSettingsPage from "@/features/admin/ProviderSettingsPage";
 
 const adminApiMock = vi.hoisted(() => ({
   createProvider: vi.fn(),
+  deleteProvider: vi.fn(),
   getAudit: vi.fn(),
   listAvailableAgents: vi.fn(),
   getMonitoringActivity: vi.fn(),
@@ -81,6 +82,7 @@ describe("ProviderSettingsPage", () => {
       message: "Connectivity OK",
     });
     adminApiMock.updateOverride.mockResolvedValue({});
+    adminApiMock.deleteProvider.mockResolvedValue(undefined);
   });
 
   it("renders provider profiles and agent overrides", async () => {
@@ -144,6 +146,29 @@ describe("ProviderSettingsPage", () => {
     });
     expect(makeDefaultButton).toBeDisabled();
   });
+
+  it("deletes a provider profile after confirmation", async () => {
+    render(<ProviderSettingsPage />);
+
+    const deleteButton = await screen.findByRole("button", {
+      name: "Удалить",
+    });
+    fireEvent.click(deleteButton);
+
+    expect(
+      screen.getByRole("dialog", { name: "Удалить модельный профиль?" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить профиль" }));
+
+    await waitFor(() => {
+      expect(adminApiMock.deleteProvider).toHaveBeenCalledWith("provider-1");
+    });
+    await waitFor(() => {
+      expect(adminApiMock.listProviders).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("shows empty state when no providers are configured", async () => {
     adminApiMock.listProviders.mockResolvedValueOnce([]);
     adminApiMock.listOverrides.mockResolvedValueOnce([]);

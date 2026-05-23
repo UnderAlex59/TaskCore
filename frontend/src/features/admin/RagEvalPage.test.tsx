@@ -10,6 +10,7 @@ const adminApiMock = vi.hoisted(() => ({
   getRagEvalDataset: vi.fn(),
   getRagEvalRun: vi.fn(),
   importRagEvalDataset: vi.fn(),
+  listProviders: vi.fn(),
   listRagEvalDatasets: vi.fn(),
   listRagEvalRuns: vi.fn(),
 }));
@@ -57,6 +58,29 @@ describe("RagEvalPage", () => {
         last_run_status: "success",
         created_at: now,
         updated_at: now,
+      },
+    ]);
+    adminApiMock.listProviders.mockResolvedValue([
+      {
+        base_url: "https://api.openai.com/v1",
+        created_at: now,
+        enabled: true,
+        id: "provider-1",
+        input_cost_per_1k_tokens: "0.001",
+        is_default: true,
+        masked_secret: "***",
+        model: "gpt-4o-mini",
+        name: "OpenAI mini",
+        output_cost_per_1k_tokens: "0.002",
+        provider_kind: "openai",
+        secret_configured: true,
+        temperature: 0.2,
+        updated_at: now,
+        used_by_agents: [],
+        vision_detail: "default",
+        vision_enabled: true,
+        vision_message_order: "text_first",
+        vision_system_prompt_mode: "system_role",
       },
     ]);
     adminApiMock.getRagEvalDataset.mockResolvedValue({
@@ -125,6 +149,7 @@ describe("RagEvalPage", () => {
         include_current_task_content: false,
         run_answer_agent: true,
         run_llm_judge: true,
+        judge_provider_config_ids: [],
         run_bm25_baseline: true,
         min_score_override: null,
       },
@@ -150,6 +175,7 @@ describe("RagEvalPage", () => {
             include_current_task_content: false,
             run_answer_agent: true,
             run_llm_judge: true,
+            judge_provider_config_ids: [],
             run_bm25_baseline: true,
             min_score_override: null,
           },
@@ -184,6 +210,7 @@ describe("RagEvalPage", () => {
         include_current_task_content: false,
         run_answer_agent: true,
         run_llm_judge: true,
+        judge_provider_config_ids: [],
         run_bm25_baseline: true,
         min_score_override: null,
       },
@@ -307,6 +334,7 @@ describe("RagEvalPage", () => {
         "dataset-1",
         expect.objectContaining({
           run_bm25_baseline: true,
+          judge_provider_config_ids: [],
           use_query_rewriter: true,
         }),
       );

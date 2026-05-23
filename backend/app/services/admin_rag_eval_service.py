@@ -20,6 +20,7 @@ from app.agents.rag_pipeline import run_rag_pipeline
 from app.agents.rag_retrieval_graph import run_rag_retrieval_graph
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
+from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_request_log import LLMRequestLog
 from app.models.project import Project
 from app.models.project_task_tag import ProjectTaskTag
@@ -576,6 +577,10 @@ class AdminRagEvalService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="RAG eval-набор не найден."
             )
+        await AdminRagEvalService._validate_judge_provider_config_ids(
+            config.judge_provider_config_ids,
+            db,
+        )
         run = RagEvalRun(
             dataset_id=dataset.id,
             project_id=dataset.project_id,
@@ -806,6 +811,123 @@ class AdminRagEvalService:
         return ordered[index]
 
     @staticmethod
+    async def _validate_judge_provider_config_ids(
+        provider_config_ids: list[str],
+        db: AsyncSession,
+    ) -> None:
+        for provider_config_id in provider_config_ids:
+            provider = await db.get(LLMProviderConfig, provider_config_id)
+            if provider is None or not provider.enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Judge provider {provider_config_id} не найден или отключён.",
+                )
+
+    @staticmethod
+    def _judge_provider_ids(config: RagEvalRunConfig) -> list[str | None]:
+        return list(getattr(config, "judge_provider_config_ids", []) or []) or [None]
+
+    @staticmethod
+    def _judge_run_record(
+        *,
+        index: int,
+        configured_provider_config_id: str | None,
+        judge_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(judge_state.get("judge_payload") or {})
+        return {
+            "index": index,
+            "provider_config_id": payload.get("provider_config_id")
+            or judge_state.get("judge_provider_config_id")
+            or configured_provider_config_id,
+            "provider_kind": payload.get("provider_kind")
+            or judge_state.get("judge_provider_kind"),
+            "model": payload.get("model") or judge_state.get("judge_model"),
+            "ok": bool(payload.get("ok") if "ok" in payload else judge_state.get("judge_ok")),
+            "payload": payload,
+        }
+
+    @staticmethod
+    def _rag_judge_agreement(judge_runs: list[dict[str, Any]]) -> dict[str, Any]:
+        def payload_value(run: dict[str, Any], key: str) -> str | None:
+            value = dict(run.get("payload") or {}).get(key)
+            return str(value) if value not in (None, "") else None
+
+        groundedness = [payload_value(run, "groundedness") for run in judge_runs]
+        correctness = [payload_value(run, "correctness") for run in judge_runs]
+        return {
+            "groundedness_values": groundedness,
+            "correctness_values": correctness,
+            "groundedness_all_equal": len(set(groundedness)) == 1
+            if groundedness
+            else None,
+            "correctness_all_equal": len(set(correctness)) == 1 if correctness else None,
+        }
+
+    @staticmethod
+    async def _run_rag_judges(
+        *,
+        run: RagEvalRun,
+        task: Task,
+        case: RagEvalCase,
+        config: RagEvalRunConfig,
+        answer_text: str,
+        retrieved_chunks: list[dict[str, Any]],
+        db: AsyncSession,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        judge_runs: list[dict[str, Any]] = []
+        provider_ids = AdminRagEvalService._judge_provider_ids(config)
+        for index, provider_config_id in enumerate(provider_ids, start=1):
+            try:
+                judge_state = await run_rag_eval_judge_graph(
+                    db=db,
+                    actor_user_id=run.created_by,
+                    task_id=task.id,
+                    project_id=run.project_id,
+                    question=case.question,
+                    expected_answer=case.expected_answer,
+                    answer_text=answer_text,
+                    retrieved_chunks=retrieved_chunks,
+                    provider_config_id=provider_config_id,
+                )
+                judge_runs.append(
+                    AdminRagEvalService._judge_run_record(
+                        index=index,
+                        configured_provider_config_id=provider_config_id,
+                        judge_state=dict(judge_state),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                if len(provider_ids) == 1 or index == 1:
+                    raise
+                judge_runs.append(
+                    {
+                        "index": index,
+                        "provider_config_id": provider_config_id,
+                        "provider_kind": None,
+                        "model": None,
+                        "ok": False,
+                        "payload": {
+                            "ok": False,
+                            "provider_config_id": provider_config_id,
+                            "provider_kind": None,
+                            "model": None,
+                            "error_message": str(exc)[:1000],
+                        },
+                    }
+                )
+        if not judge_runs:
+            return None, []
+        primary_payload = dict(judge_runs[0].get("payload") or {})
+        if list(getattr(config, "judge_provider_config_ids", []) or []):
+            primary_payload["judge_runs"] = judge_runs
+        if len(judge_runs) > 1:
+            primary_payload["judge_agreement"] = AdminRagEvalService._rag_judge_agreement(
+                judge_runs
+            )
+        return primary_payload, judge_runs
+
+    @staticmethod
     async def process_run(run_id: str) -> None:
         async with AsyncSessionLocal() as db:
             run = await db.get(RagEvalRun, run_id)
@@ -960,6 +1082,7 @@ class AdminRagEvalService:
         answer_text: str | None = None
         answer_source_ref: dict[str, Any] | None = None
         judge_payload: dict[str, Any] | None = None
+        judge_runs: list[dict[str, Any]] = []
         error_message: str | None = None
         answer_latency_ms: int | None = None
         judge_latency_ms: int | None = None
@@ -1013,18 +1136,16 @@ class AdminRagEvalService:
 
             if config.run_llm_judge and answer_text:
                 judge_started = perf_counter()
-                judge_state = await run_rag_eval_judge_graph(
-                    db=db,
-                    actor_user_id=run.created_by,
-                    task_id=task.id,
-                    project_id=run.project_id,
-                    question=case.question,
-                    expected_answer=case.expected_answer,
+                judge_payload, judge_runs = await AdminRagEvalService._run_rag_judges(
+                    run=run,
+                    task=task,
+                    case=case,
+                    config=config,
                     answer_text=answer_text,
                     retrieved_chunks=retrieved_chunks,
+                    db=db,
                 )
                 judge_latency_ms = int((perf_counter() - judge_started) * 1000)
-                judge_payload = dict(judge_state.get("judge_payload", {}))
 
             metrics, matched_expected = AdminRagEvalService._case_metrics(
                 expected_relevant=list(case.expected_relevant or []),
@@ -1058,6 +1179,8 @@ class AdminRagEvalService:
             if judge_payload is not None:
                 metrics["groundedness"] = judge_payload.get("groundedness")
                 metrics["correctness"] = judge_payload.get("correctness")
+                if judge_payload.get("judge_agreement") is not None:
+                    metrics["judge_agreement"] = judge_payload.get("judge_agreement")
             result_status = "success"
         except Exception as exc:  # noqa: BLE001
             retrieval_latency_ms = None
@@ -1119,6 +1242,10 @@ class AdminRagEvalService:
         ]
         groundedness: dict[str, int] = {}
         correctness: dict[str, int] = {}
+        judge_distributions: dict[str, dict[str, dict[str, int]]] = {
+            "groundedness": {},
+            "correctness": {},
+        }
         for item in successful:
             if item.metrics.get("groundedness"):
                 key = str(item.metrics["groundedness"])
@@ -1126,6 +1253,18 @@ class AdminRagEvalService:
             if item.metrics.get("correctness"):
                 key = str(item.metrics["correctness"])
                 correctness[key] = correctness.get(key, 0) + 1
+            for judge_run in list((item.judge_payload or {}).get("judge_runs") or []):
+                if not isinstance(judge_run, dict):
+                    continue
+                payload = dict(judge_run.get("payload") or {})
+                judge_key = f"judge_{int(judge_run.get('index') or 0)}"
+                for metric_key in ("groundedness", "correctness"):
+                    value = payload.get(metric_key)
+                    if not value:
+                        continue
+                    bucket = judge_distributions[metric_key].setdefault(judge_key, {})
+                    string_value = str(value)
+                    bucket[string_value] = bucket.get(string_value, 0) + 1
 
         token_stmt = select(
             func.sum(LLMRequestLog.prompt_tokens),
@@ -1213,6 +1352,7 @@ class AdminRagEvalService:
             ),
             "groundedness": groundedness,
             "correctness": correctness,
+            "judge_distributions": judge_distributions,
             "p50_retrieval_latency_ms": AdminRagEvalService._percentile(retrieval_latencies, 0.5),
             "p95_retrieval_latency_ms": AdminRagEvalService._percentile(retrieval_latencies, 0.95),
             "p50_index_latency_ms": AdminRagEvalService._percentile(index_latencies, 0.5),
@@ -1396,6 +1536,8 @@ class AdminRagEvalService:
                 "rag_vs_bm25_mrr_delta",
                 "groundedness",
                 "correctness",
+                "judge_agreement_json",
+                "judge_runs_json",
                 "retrieval_latency_ms",
                 "answer_latency_ms",
                 "judge_latency_ms",
@@ -1420,6 +1562,14 @@ class AdminRagEvalService:
                     "rag_vs_bm25_mrr_delta": item.metrics.get("rag_vs_bm25_mrr_delta"),
                     "groundedness": item.metrics.get("groundedness"),
                     "correctness": item.metrics.get("correctness"),
+                    "judge_agreement_json": json.dumps(
+                        item.metrics.get("judge_agreement") or {},
+                        ensure_ascii=False,
+                    ),
+                    "judge_runs_json": json.dumps(
+                        (item.judge_payload or {}).get("judge_runs") or [],
+                        ensure_ascii=False,
+                    ),
                     "retrieval_latency_ms": item.retrieval_latency_ms,
                     "answer_latency_ms": item.answer_latency_ms,
                     "judge_latency_ms": item.judge_latency_ms,

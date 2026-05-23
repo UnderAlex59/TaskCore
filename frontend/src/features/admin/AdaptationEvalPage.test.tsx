@@ -13,6 +13,7 @@ const adminApiMock = vi.hoisted(() => ({
   importAdaptationEvalDataset: vi.fn(),
   listAdaptationEvalDatasets: vi.fn(),
   listAdaptationEvalRuns: vi.fn(),
+  listProviders: vi.fn(),
 }));
 
 const projectsApiMock = vi.hoisted(() => ({
@@ -96,6 +97,7 @@ describe("AdaptationEvalPage", () => {
     const config = {
       cleanup_synthetic_tasks: true,
       judge_match_confidence_min: 0.75,
+      judge_provider_config_ids: [],
       quality_gates: {
         capture_recall_min: 0.95,
         context_issue_f1_min: 0.7,
@@ -211,6 +213,29 @@ describe("AdaptationEvalPage", () => {
       },
     ]);
     adminApiMock.listAdaptationEvalDatasets.mockResolvedValue([dataset]);
+    adminApiMock.listProviders.mockResolvedValue([
+      {
+        base_url: "https://api.openai.com/v1",
+        created_at: now,
+        enabled: true,
+        id: "provider-1",
+        input_cost_per_1k_tokens: "0.001",
+        is_default: true,
+        masked_secret: "***",
+        model: "gpt-4o-mini",
+        name: "OpenAI mini",
+        output_cost_per_1k_tokens: "0.002",
+        provider_kind: "openai",
+        secret_configured: true,
+        temperature: 0.2,
+        updated_at: now,
+        used_by_agents: [],
+        vision_detail: "default",
+        vision_enabled: true,
+        vision_message_order: "text_first",
+        vision_system_prompt_mode: "system_role",
+      },
+    ]);
     adminApiMock.getAdaptationEvalDataset.mockResolvedValue({
       ...dataset,
       cases: [caseItem],

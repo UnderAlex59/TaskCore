@@ -11,6 +11,7 @@ import {
   type VisionMessageOrder,
   type VisionSystemPromptMode,
 } from "@/api/adminApi";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { LoadingSpinner } from "@/shared/components/LoadingSpinner";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { getAgentKeyLabel, getProviderKindLabel } from "@/shared/lib/locale";
@@ -68,11 +69,13 @@ const VISION_SYSTEM_PROMPT_OPTIONS: Array<{
 }> = [
   {
     value: "system_role",
-    description: "Отправлять системную инструкцию отдельным system/developer сообщением",
+    description:
+      "Отправлять системную инструкцию отдельным system/developer сообщением",
   },
   {
     value: "inline_user",
-    description: "Встраивать системную инструкцию в первый текстовый фрагмент user-сообщения",
+    description:
+      "Встраивать системную инструкцию в первый текстовый фрагмент user-сообщения",
   },
 ];
 
@@ -90,11 +93,24 @@ const VISION_MESSAGE_ORDER_OPTIONS: Array<{
   },
 ];
 
-const VISION_DETAIL_OPTIONS: Array<{ description: string; value: VisionDetail }> = [
-  { value: "default", description: "Не передавать detail, оставить поведение провайдера по умолчанию" },
+const VISION_DETAIL_OPTIONS: Array<{
+  description: string;
+  value: VisionDetail;
+}> = [
+  {
+    value: "default",
+    description:
+      "Не передавать detail, оставить поведение провайдера по умолчанию",
+  },
   { value: "auto", description: "Провайдер сам выбирает уровень детализации" },
-  { value: "low", description: "Быстрый и дешёвый режим для простых изображений" },
-  { value: "high", description: "Максимально подробный режим для OCR и сложных схем" },
+  {
+    value: "low",
+    description: "Быстрый и дешёвый режим для простых изображений",
+  },
+  {
+    value: "high",
+    description: "Максимально подробный режим для OCR и сложных схем",
+  },
 ];
 
 const EMPTY_FORM: ProviderFormState = {
@@ -175,7 +191,8 @@ function buildOverrideDrafts(
       return [
         item.key,
         {
-          provider_config_id: override?.provider_config_id ?? fallbackProviderId,
+          provider_config_id:
+            override?.provider_config_id ?? fallbackProviderId,
           enabled: override?.enabled ?? false,
         },
       ];
@@ -201,6 +218,11 @@ export default function ProviderSettingsPage() {
     null,
   );
   const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
+  const [deletingProviderId, setDeletingProviderId] = useState<string | null>(
+    null,
+  );
+  const [providerPendingDeletion, setProviderPendingDeletion] =
+    useState<ProviderConfigRead | null>(null);
   const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(
     null,
   );
@@ -211,11 +233,12 @@ export default function ProviderSettingsPage() {
     try {
       setLoading(true);
       setError(null);
-      const [loadedProviders, loadedOverrides, loadedAgents] = await Promise.all([
-        adminApi.listProviders(),
-        adminApi.listOverrides(),
-        adminApi.listAvailableAgents(),
-      ]);
+      const [loadedProviders, loadedOverrides, loadedAgents] =
+        await Promise.all([
+          adminApi.listProviders(),
+          adminApi.listOverrides(),
+          adminApi.listAvailableAgents(),
+        ]);
       setProviders(loadedProviders);
       setAvailableAgents(loadedAgents);
       setOverrideDrafts(
@@ -290,6 +313,30 @@ export default function ProviderSettingsPage() {
       );
     } finally {
       setSettingDefaultId(null);
+    }
+  }
+
+  async function handleDeleteProvider() {
+    if (!providerPendingDeletion) {
+      return;
+    }
+
+    const providerId = providerPendingDeletion.id;
+    try {
+      setDeletingProviderId(providerId);
+      setError(null);
+      await adminApi.deleteProvider(providerId);
+      if (editingProviderId === providerId) {
+        resetForm();
+      }
+      setProviderPendingDeletion(null);
+      await loadData();
+    } catch (caught) {
+      setError(
+        getApiErrorMessage(caught, "Не удалось удалить модельный профиль."),
+      );
+    } finally {
+      setDeletingProviderId(null);
     }
   }
 
@@ -389,7 +436,10 @@ export default function ProviderSettingsPage() {
               <input
                 className="ui-field"
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, name: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
                 }
                 placeholder="Основной OpenRouter"
                 required
@@ -463,7 +513,10 @@ export default function ProviderSettingsPage() {
               <input
                 className="ui-field"
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, model: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    model: event.target.value,
+                  }))
                 }
                 placeholder={DEFAULT_MODELS[form.provider_kind]}
                 required
@@ -543,7 +596,10 @@ export default function ProviderSettingsPage() {
               autoComplete="new-password"
               className="ui-field"
               onChange={(event) =>
-                setForm((current) => ({ ...current, secret: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  secret: event.target.value,
+                }))
               }
               placeholder={
                 form.provider_kind === "gigachat"
@@ -624,8 +680,8 @@ export default function ProviderSettingsPage() {
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          vision_system_prompt_mode:
-                            event.target.value as VisionSystemPromptMode,
+                          vision_system_prompt_mode: event.target
+                            .value as VisionSystemPromptMode,
                         }))
                       }
                       value={form.vision_system_prompt_mode}
@@ -655,8 +711,8 @@ export default function ProviderSettingsPage() {
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
-                          vision_message_order:
-                            event.target.value as VisionMessageOrder,
+                          vision_message_order: event.target
+                            .value as VisionMessageOrder,
                         }))
                       }
                       value={form.vision_message_order}
@@ -670,7 +726,8 @@ export default function ProviderSettingsPage() {
                     <span className="mt-2 block text-xs leading-5 text-ink/55">
                       {
                         VISION_MESSAGE_ORDER_OPTIONS.find(
-                          (option) => option.value === form.vision_message_order,
+                          (option) =>
+                            option.value === form.vision_message_order,
                         )?.description
                       }
                     </span>
@@ -710,7 +767,11 @@ export default function ProviderSettingsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <button className="ui-button-primary" disabled={saving} type="submit">
+            <button
+              className="ui-button-primary"
+              disabled={saving}
+              type="submit"
+            >
               {saving
                 ? "Сохраняем..."
                 : editingProviderId
@@ -736,14 +797,16 @@ export default function ProviderSettingsPage() {
               Специальные правила для сценариев
             </h3>
             <p className="mt-3 text-sm leading-7 text-ink/70">
-              Направляйте отдельные LLM-сценарии на выделенный профиль, не
-              меняя глобальный профиль по умолчанию.
+              Направляйте отдельные LLM-сценарии на выделенный профиль, не меняя
+              глобальный профиль по умолчанию.
             </p>
           </div>
 
           {providers.length === 0 ? (
             <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-ink/70">
-              Сначала создайте хотя бы один профиль провайдера и назначьте его профилем по умолчанию. После этого здесь можно настраивать маршрутизацию отдельных агентов.
+              Сначала создайте хотя бы один профиль провайдера и назначьте его
+              профилем по умолчанию. После этого здесь можно настраивать
+              маршрутизацию отдельных агентов.
             </p>
           ) : null}
 
@@ -809,7 +872,8 @@ export default function ProviderSettingsPage() {
                   <button
                     className="ui-button-secondary"
                     disabled={
-                      savingOverrideKey === agent.key || !draft?.provider_config_id
+                      savingOverrideKey === agent.key ||
+                      !draft?.provider_config_id
                     }
                     onClick={() => void handleSaveOverride(agent.key)}
                     type="button"
@@ -834,7 +898,9 @@ export default function ProviderSettingsPage() {
       <div className="space-y-4">
         {providers.length === 0 ? (
           <p className="glass-panel rounded-[28px] border border-black/10 px-5 py-4 text-sm text-ink/70 shadow-panel">
-            В системе пока нет LLM-профилей. Агентные модели больше не подхватываются из `.env`: добавьте провайдер через админ-панель и назначьте его по умолчанию.
+            В системе пока нет LLM-профилей. Агентные модели больше не
+            подхватываются из `.env`: добавьте провайдер через админ-панель и
+            назначьте его по умолчанию.
           </p>
         ) : null}
         {providers.map((provider) => (
@@ -897,13 +963,13 @@ export default function ProviderSettingsPage() {
                   <p className="font-semibold text-ink">Vision-профиль</p>
                   {provider.provider_kind === "gigachat" ? (
                     <p className="mt-2">
-                      {provider.vision_enabled ? "Включен" : "Отключен"} / GigaChat
-                      files + attachments
+                      {provider.vision_enabled ? "Включен" : "Отключен"} /
+                      GigaChat files + attachments
                     </p>
                   ) : (
                     <p className="mt-2">
-                      {provider.vision_enabled ? "Включен" : "Отключен"} / system:{" "}
-                      {provider.vision_system_prompt_mode} / order:{" "}
+                      {provider.vision_enabled ? "Включен" : "Отключен"} /
+                      system: {provider.vision_system_prompt_mode} / order:{" "}
                       {provider.vision_message_order} / detail:{" "}
                       {provider.vision_detail}
                     </p>
@@ -936,7 +1002,9 @@ export default function ProviderSettingsPage() {
                 </button>
                 <button
                   className="ui-button-primary"
-                  disabled={settingDefaultId === provider.id || provider.is_default}
+                  disabled={
+                    settingDefaultId === provider.id || provider.is_default
+                  }
                   onClick={() => void handleSetDefault(provider.id)}
                   type="button"
                 >
@@ -946,11 +1014,44 @@ export default function ProviderSettingsPage() {
                       ? "Применяем..."
                       : "Сделать по умолчанию"}
                 </button>
+                <button
+                  className="ui-button-danger"
+                  disabled={deletingProviderId === provider.id}
+                  onClick={() => setProviderPendingDeletion(provider)}
+                  type="button"
+                >
+                  {deletingProviderId === provider.id
+                    ? "Удаляем..."
+                    : "Удалить"}
+                </button>
               </div>
             </div>
           </article>
         ))}
       </div>
+
+      <ConfirmDialog
+        busy={deletingProviderId === providerPendingDeletion?.id}
+        confirmLabel="Удалить профиль"
+        description={
+          providerPendingDeletion
+            ? `Удалить профиль «${providerPendingDeletion.name}»? Связанные правила маршрутизации будут удалены, а история LLM-запросов останется без ссылки на этот профиль.${
+                providerPendingDeletion.is_default
+                  ? " Профиль по умолчанию будет сброшен."
+                  : ""
+              }`
+            : ""
+        }
+        destructive
+        onClose={() => {
+          if (!deletingProviderId) {
+            setProviderPendingDeletion(null);
+          }
+        }}
+        onConfirm={() => void handleDeleteProvider()}
+        open={providerPendingDeletion !== null}
+        title="Удалить модельный профиль?"
+      />
     </section>
   );
 }

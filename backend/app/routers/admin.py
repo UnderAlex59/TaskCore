@@ -159,6 +159,16 @@ async def update_llm_provider(
     return await AdminLLMService.update_provider_config(provider_id, payload, current_user, db)
 
 
+@router.delete("/llm/providers/{provider_id}", status_code=204)
+async def delete_llm_provider(
+    provider_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Response:
+    await AdminLLMService.delete_provider_config(provider_id, current_user, db)
+    return Response(status_code=204)
+
+
 @router.post("/llm/providers/{provider_id}/test", response_model=ProviderTestResult)
 async def test_llm_provider(
     provider_id: str,

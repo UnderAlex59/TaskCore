@@ -155,8 +155,21 @@ class ValidationEvalRunConfig(BaseModel):
         min_length=1,
     )
     run_question_judge: bool = True
+    judge_provider_config_ids: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("judge_provider_config_ids")
+    @classmethod
+    def validate_judge_provider_config_ids(cls, value: list[str]) -> list[str]:
+        ids = [item.strip() for item in value if item.strip()]
+        if not ids:
+            return []
+        if len(ids) > 3:
+            raise ValueError("Judge provider list must be empty or contain 1 to 3 ids.")
+        if len(set(ids)) != len(ids):
+            raise ValueError("Judge provider ids must be unique.")
+        return ids
 
     @model_validator(mode="after")
     def validate_unique_variants(self) -> ValidationEvalRunConfig:

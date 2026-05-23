@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import cast
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.agents.vision_test_graph import run_vision_test_graph
 from app.core.config import get_settings
 from app.models.llm_agent_override import LLMAgentOverride
 from app.models.llm_provider_config import LLMProviderConfig
+from app.models.llm_request_log import LLMRequestLog
 from app.models.llm_runtime_settings import LLMRuntimeSettings
 from app.models.user import User
 from app.schemas.admin_llm import (
@@ -156,6 +157,56 @@ class AdminLLMService:
         return await AdminLLMService.get_provider_config(provider.id, db)
 
     @staticmethod
+    async def delete_provider_config(
+        provider_id: str,
+        actor: User,
+        db: AsyncSession,
+    ) -> None:
+        provider = await db.get(LLMProviderConfig, provider_id)
+        if provider is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Профиль провайдера не найден",
+            )
+
+        override_stmt = select(LLMAgentOverride.agent_key).where(
+            LLMAgentOverride.provider_config_id == provider.id
+        )
+        affected_agent_keys = sorted(
+            str(agent_key) for agent_key in (await db.execute(override_stmt)).scalars().all()
+        )
+        runtime = await db.get(LLMRuntimeSettings, 1)
+        was_default = runtime is not None and runtime.default_provider_config_id == provider.id
+        if was_default:
+            runtime.default_provider_config_id = None
+            runtime.updated_by = actor.id
+
+        await db.execute(
+            delete(LLMAgentOverride).where(LLMAgentOverride.provider_config_id == provider.id)
+        )
+        await db.execute(
+            update(LLMRequestLog)
+            .where(LLMRequestLog.provider_config_id == provider.id)
+            .values(provider_config_id=None)
+        )
+
+        AuditService.record(
+            db,
+            actor_user_id=actor.id,
+            event_type="admin.llm_provider.deleted",
+            entity_type="llm_provider",
+            entity_id=provider.id,
+            metadata={
+                "name": provider.name,
+                "provider_kind": provider.provider_kind,
+                "was_default": was_default,
+                "affected_agent_keys": affected_agent_keys,
+            },
+        )
+        await db.delete(provider)
+        await db.commit()
+
+    @staticmethod
     async def test_provider_config(
         provider_id: str,
         actor: User,
@@ -293,9 +344,10 @@ class AdminLLMService:
     async def get_runtime_settings(db: AsyncSession) -> RuntimeSettingsRead:
         await LLMRuntimeService.ensure_bootstrap()
         runtime = await db.get(LLMRuntimeSettings, 1)
-        graph_monitoring_enabled = bool(
-            runtime.graph_monitoring_enabled if runtime is not None else True
-        ) and get_settings().GRAPH_RUN_MONITORING_ENABLED
+        graph_monitoring_enabled = (
+            bool(runtime.graph_monitoring_enabled if runtime is not None else True)
+            and get_settings().GRAPH_RUN_MONITORING_ENABLED
+        )
         return RuntimeSettingsRead(
             prompt_log_mode=cast(
                 PromptLogMode,
@@ -446,10 +498,9 @@ class AdminLLMService:
         providers: list[LLMProviderConfig],
     ) -> list[ProviderConfigRead]:
         runtime = await db.get(LLMRuntimeSettings, 1)
-        override_stmt = (
-            select(LLMAgentOverride.agent_key, LLMAgentOverride.provider_config_id)
-            .where(LLMAgentOverride.enabled.is_(True))
-        )
+        override_stmt = select(
+            LLMAgentOverride.agent_key, LLMAgentOverride.provider_config_id
+        ).where(LLMAgentOverride.enabled.is_(True))
         override_rows = list((await db.execute(override_stmt)).all())
         used_by: dict[str, list[str]] = defaultdict(list)
         for agent_key, provider_id in override_rows:
@@ -473,8 +524,7 @@ class AdminLLMService:
                 secret_configured=provider.encrypted_secret is not None,
                 masked_secret=provider.masked_secret,
                 is_default=(
-                    runtime is not None
-                    and runtime.default_provider_config_id == provider.id
+                    runtime is not None and runtime.default_provider_config_id == provider.id
                 ),
                 used_by_agents=sorted(used_by.get(provider.id, [])),
                 created_at=provider.created_at,

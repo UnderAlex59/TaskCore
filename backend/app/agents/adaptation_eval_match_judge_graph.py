@@ -39,6 +39,7 @@ class AdaptationEvalMatchJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    judge_provider_config_id: str | None
     judge_graph_run_id: str | None
     invalid_json_count: int
     retry_count: int
@@ -100,6 +101,7 @@ async def _invoke_once(
             "error_message": "LLM runtime skipped: no database session.",
             "provider_kind": None,
             "model": None,
+            "provider_config_id": state.get("provider_config_id"),
             "raw_response": None,
         }
 
@@ -112,6 +114,7 @@ async def _invoke_once(
         system_prompt=str(state.get("judge_system_prompt", "")),
         user_prompt=user_prompt,
         prompt_key=ADAPTATION_EVAL_MATCH_JUDGE_AGENT_KEY,
+        provider_config_id=state.get("provider_config_id"),
         temperature_override=temperature_override,
     )
     payload = _extract_json_payload(result.text or "") if result.ok and result.text else None
@@ -120,6 +123,7 @@ async def _invoke_once(
         "error_message": result.error_message,
         "provider_kind": result.provider_kind,
         "model": result.model,
+        "provider_config_id": result.provider_config_id,
         "raw_response": result.text,
     }
 
@@ -159,6 +163,7 @@ async def _invoke_match_judge(
         "judge_error_message": metadata.get("error_message"),
         "judge_provider_kind": metadata.get("provider_kind"),
         "judge_model": metadata.get("model"),
+        "judge_provider_config_id": metadata.get("provider_config_id"),
         "judge_payload": payload or {},
         "invalid_json_count": invalid_json_count,
         "retry_count": retry_count,
@@ -237,6 +242,7 @@ def _finalize_match_judge(
         {
             "provider_kind": state.get("judge_provider_kind"),
             "model": state.get("judge_model"),
+            "provider_config_id": state.get("judge_provider_config_id"),
             "ok": bool(state.get("judge_ok")) and bool(normalized_payload.get("ok")),
             "error_message": state.get("judge_error_message"),
             "invalid_json_count": int(state.get("invalid_json_count") or 0),
@@ -283,6 +289,7 @@ async def run_adaptation_eval_match_judge_graph(
     task_content: str,
     expected_items: list[dict[str, Any]],
     actual_items: list[dict[str, Any]],
+    provider_config_id: str | None = None,
 ) -> AdaptationEvalMatchJudgeState:
     state = await run_traced_graph(
         graph_key="adaptation_eval_match_judge_graph",
@@ -300,6 +307,7 @@ async def run_adaptation_eval_match_judge_graph(
             "task_content": task_content,
             "expected_items": expected_items,
             "actual_items": actual_items,
+            "provider_config_id": provider_config_id,
         },
     )
     return {
@@ -308,5 +316,6 @@ async def run_adaptation_eval_match_judge_graph(
         "judge_error_message": state.get("judge_error_message"),
         "judge_provider_kind": state.get("judge_provider_kind"),
         "judge_model": state.get("judge_model"),
+        "judge_provider_config_id": state.get("judge_provider_config_id"),
         "judge_graph_run_id": state.get("judge_graph_run_id"),
     }

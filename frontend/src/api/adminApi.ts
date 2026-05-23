@@ -597,6 +597,7 @@ export interface AdaptationEvalRunConfig {
   retrieval_limit: number;
   cleanup_synthetic_tasks: boolean;
   run_match_judge: boolean;
+  judge_provider_config_ids: string[];
   judge_match_confidence_min: number;
   quality_gates: AdaptationEvalQualityGates;
 }
@@ -693,6 +694,7 @@ export interface RagEvalRunConfig {
   include_current_task_content: boolean;
   run_answer_agent: boolean;
   run_llm_judge: boolean;
+  judge_provider_config_ids: string[];
   run_bm25_baseline: boolean;
   min_score_override: number | null;
 }
@@ -1067,6 +1069,7 @@ export interface ValidationEvalVariantConfig {
 export interface ValidationEvalRunConfig {
   variants: ValidationEvalVariantConfig[];
   run_question_judge: boolean;
+  judge_provider_config_ids: string[];
 }
 
 export interface ValidationEvalDatasetRead {
@@ -1229,6 +1232,9 @@ export const adminApi = {
         payload,
       )
     ).data,
+  deleteProvider: async (providerId: string) => {
+    await apiClient.delete(`/admin/llm/providers/${providerId}`);
+  },
   testProvider: async (providerId: string) =>
     (
       await apiClient.post<ProviderTestResult>(

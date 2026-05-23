@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AdaptationEvalRunStatus = Literal["queued", "running", "success", "error"]
 AdaptationEvalCaseResultStatus = Literal["passed", "failed", "error"]
@@ -92,12 +92,25 @@ class AdaptationEvalRunConfig(BaseModel):
     retrieval_limit: int = Field(default=5, ge=1, le=10)
     cleanup_synthetic_tasks: bool = True
     run_match_judge: bool = True
+    judge_provider_config_ids: list[str] = Field(default_factory=list)
     judge_match_confidence_min: float = Field(default=0.75, ge=0, le=1)
     quality_gates: AdaptationEvalQualityGates = Field(
         default_factory=AdaptationEvalQualityGates
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("judge_provider_config_ids")
+    @classmethod
+    def validate_judge_provider_config_ids(cls, value: list[str]) -> list[str]:
+        ids = [item.strip() for item in value if item.strip()]
+        if not ids:
+            return []
+        if len(ids) > 3:
+            raise ValueError("Judge provider list must be empty or contain 1 to 3 ids.")
+        if len(set(ids)) != len(ids):
+            raise ValueError("Judge provider ids must be unique.")
+        return ids
 
 
 class AdaptationEvalDatasetRead(BaseModel):
