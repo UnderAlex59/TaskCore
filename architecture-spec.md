@@ -2,7 +2,7 @@
 
 ## Техническая спецификация текущей реализации
 
-Документ описывает фактическую архитектуру проекта `mvp` в поддерживаемом Markdown-формате. PDF-версия считается сгенерированным артефактом и отдельно не обновляется.
+Документ описывает фактическую архитектуру проекта `mvp` в поддерживаемом Markdown-формате.
 
 ## 1. Назначение системы
 
@@ -72,13 +72,12 @@ Task Platform MVP - веб-приложение для управления за
 |   |-- package.json
 |   `-- vite.config.ts
 |-- deploy/nginx/
-|-- docs/
 |-- langgraph_graphs/
+|-- .kiro/
 |-- docker-compose.yml
 |-- Makefile
 |-- README.md
-|-- SETUP_GUIDE.md
-`-- WINDOWS_SETUP.md
+`-- architecture-spec.md
 ```
 
 ## 5. Backend entrypoint
@@ -452,7 +451,6 @@ Markdown и русские UI-тексты должны храниться в UT
 
 ## 20. Границы текущей реализации
 
-- `architecture-spec.pdf` не является источником истины для текущей правки.
 - Source of truth для API - `backend/app/routers`.
 - Source of truth для env - `backend/app/core/config.py`, `.env.example` и `docker-compose.yml`.
 - Source of truth для frontend routes - `frontend/src/App.tsx`.

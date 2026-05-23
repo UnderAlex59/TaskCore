@@ -48,8 +48,6 @@ docker-compose up --build -d
 - backend health через proxy: `http://localhost:8080/api/healthz`
 - backend readiness через proxy: `http://localhost:8080/api/readyz`
 
-Подробные инструкции доступны в [SETUP_GUIDE.md](SETUP_GUIDE.md) и [WINDOWS_SETUP.md](WINDOWS_SETUP.md).
-
 ## Что реализовано
 
 - Регистрация, вход, refresh-токены в `httpOnly` cookie, список активных сессий и выход из системы.
@@ -80,6 +78,13 @@ docker-compose up --build -d
 | Infra | Docker Compose, nginx во frontend-контейнере, health/readiness endpoints |
 | Quality | pytest, pytest-asyncio, ruff, mypy, ESLint, Prettier, Vitest, Testing Library |
 
+## Требования
+
+- Python `3.12.x`. Backend package поддерживает `>=3.12,<3.15`, но проектные команды и CI ориентированы на Python 3.12.
+- Node.js `24.x` и npm `11.x`.
+- Docker и Docker Compose.
+- Для Windows-разработки: PowerShell 7 или Windows PowerShell с UTF-8 output encoding.
+
 ## Структура репозитория
 
 ```text
@@ -87,13 +92,10 @@ docker-compose up --build -d
 |-- backend/             # FastAPI API, модели, сервисы, LangGraph-графы, Alembic, тесты
 |-- frontend/            # React/Vite SPA, typed API clients, рабочие и админские экраны
 |-- deploy/nginx/        # примеры nginx-конфигураций для внешнего reverse proxy
-|-- docs/                # прикладные документы и планы актуализации отчета
-|-- langgraph_graphs/    # экспортированные PNG/HTML-схемы LangGraph
-|-- simulations/         # вспомогательные материалы для сценариев и демонстраций
+|-- .kiro/               # текущая SDD/agent-спецификация реализованной системы
+|-- langgraph_graphs/    # локальные экспортированные PNG/HTML-схемы LangGraph, ignored
 |-- docker-compose.yml   # локальный production-like контур
 |-- Makefile             # команды проверок, сборки и compose-запуска
-|-- SETUP_GUIDE.md       # общий запуск и сопровождение
-|-- WINDOWS_SETUP.md     # запуск в Windows/PowerShell
 |-- architecture-spec.md # актуальная техническая спецификация Markdown
 |-- LICENSE              # лицензия MIT
 `-- README.md
@@ -104,11 +106,9 @@ docker-compose up --build -d
 - [backend/README.md](backend/README.md)
 - [frontend/README.md](frontend/README.md)
 - [backend/app/agents/README.md](backend/app/agents/README.md)
-- [docs/langgraph-graphs.md](docs/langgraph-graphs.md)
-- [SETUP_GUIDE.md](SETUP_GUIDE.md)
-- [WINDOWS_SETUP.md](WINDOWS_SETUP.md)
 - [architecture-spec.md](architecture-spec.md)
-- [docs/report-update-plan.md](docs/report-update-plan.md)
+- [.kiro/specs/current-system/design.md](.kiro/specs/current-system/design.md)
+- [.kiro/specs/current-system/api-contract.md](.kiro/specs/current-system/api-contract.md)
 - [LICENSE](LICENSE)
 
 ## Быстрый запуск через Docker Compose
@@ -137,6 +137,16 @@ Compose поднимает:
 - backend readiness через proxy: `http://localhost:8080/api/readyz`
 
 Порт frontend меняется переменной `FRONTEND_PORT`, например `FRONTEND_PORT=80 docker compose up --build -d`.
+В PowerShell используйте `$env:FRONTEND_PORT = "80"; docker compose up --build -d`.
+
+Диагностика:
+
+```bash
+docker compose ps
+docker compose logs -f migrate
+docker compose logs -f backend
+docker compose logs -f frontend
+```
 
 ## Локальная разработка
 
@@ -146,12 +156,19 @@ Compose поднимает:
 docker compose up postgres qdrant -d
 ```
 
+Если нужны локальные embeddings через Ollama:
+
+```bash
+docker compose up ollama ollama-init -d
+```
+
 Backend:
 
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+# Windows: .venv\Scripts\activate
+# bash/zsh: source .venv/bin/activate
 pip install -e ".[dev]"
 alembic upgrade head
 uvicorn main:app --reload
@@ -242,14 +259,14 @@ Qdrant-коллекции:
 
 ## Документация и кодировка
 
+Корневой `README.md` содержит актуальные инструкции запуска и сопровождения. `architecture-spec.md` и `.kiro/specs/current-system` описывают текущую реализованную архитектуру и API-контракты.
+
 Markdown-файлы хранятся в UTF-8. Если PowerShell показывает русские символы как нечитаемые последовательности, проверьте кодировку консоли:
 
 ```powershell
 $OutputEncoding = [System.Text.UTF8Encoding]::new()
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ```
-
-`architecture-spec.pdf` считается сгенерированным артефактом и в рамках обычного обновления документации не регенерируется.
 
 ## Лицензия
 

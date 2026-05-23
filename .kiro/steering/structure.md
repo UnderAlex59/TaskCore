@@ -6,12 +6,12 @@
 | --- | --- |
 | `backend/` | FastAPI-приложение, database models, migrations, services, LangGraph agents и backend tests. |
 | `frontend/` | React/Vite SPA, feature pages, shared UI, API clients и frontend tests. |
-| `docs/` | Исследовательские, RAG, презентационные и диссертационные материалы. Это supporting documents, а не SDD source of truth. |
 | `.kiro/` | Spec-Driven Development documentation для текущей реализованной системы. |
 | `deploy/` | Deployment examples, включая nginx configs. |
 | `langgraph_graphs/` | Generated/exported LangGraph diagrams, которые раздает backend. |
 | `docker-compose.yml` | Production-like local composition из database, Qdrant, Ollama, backend и frontend. |
-| `README.md`, `SETUP_GUIDE.md`, `WINDOWS_SETUP.md` | Setup and operational entrypoints. |
+| `README.md` | Setup and operational entrypoint. |
+| `architecture-spec.md` | Markdown source of truth для обзорной архитектурной спецификации. |
 
 ## Структура бэкенда
 

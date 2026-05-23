@@ -4,10 +4,8 @@ Thumbs.db
 .idea/
 .vscode/
 test_task/
-docs/
 work_report/
 .playwright-mcp/
-
 
 # Python
 __pycache__/
@@ -17,18 +15,37 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+.venv/
+venv/
 backend/.venv/
+uploads/
+backend/uploads/
 
 # Node
 node_modules/
 frontend/node_modules/
+frontend/.vite/
 frontend/dist/
 frontend/coverage/
+*.tsbuildinfo
 
 # Environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+!*.env.example
 backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.*.example
 frontend/.env
+frontend/.env.*
+!frontend/.env.example
+!frontend/.env.*.example
 
 # Misc
 *.log
+*.sqlite
+*.db
 langgraph_graphs/
