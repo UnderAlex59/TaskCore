@@ -9,7 +9,7 @@ description = "FastAPI backend scaffold for the task platform MVP."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
-  "alembic>=1.15.2",
+  "alembic>=1.15.2,<2",
   "aiogram>=3.23.0,<4",
   "asyncpg>=0.30.0",
   "bcrypt<5",
@@ -28,7 +28,7 @@ dependencies = [
   "python-jose[cryptography]>=3.3.0",
   "python-multipart>=0.0.20",
   "qdrant-client>=1.14.0",
-  "sqlalchemy[asyncio]>=2.0.39",
+  "sqlalchemy[asyncio]>=2.0.39,<2.1",
   "uvicorn[standard]>=0.34.0",
 ]
 

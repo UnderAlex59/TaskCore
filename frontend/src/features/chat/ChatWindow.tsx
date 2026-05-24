@@ -17,6 +17,7 @@ interface Props {
   messages: MessageRead[];
   onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
   onSend?: (value: string) => Promise<void>;
+  projectId?: string;
   requestedAnalystMessageIds?: Set<string>;
   sending?: boolean;
   title?: string;
@@ -35,6 +36,7 @@ export default function ChatWindow({
   messages,
   onRequestAnalyst,
   onSend,
+  projectId,
   requestedAnalystMessageIds,
   sending = false,
   title = "Обсуждение",
@@ -74,6 +76,7 @@ export default function ChatWindow({
           currentUserId={currentUserId}
           messages={messages}
           onRequestAnalyst={onRequestAnalyst}
+          projectId={projectId}
           requestedAnalystMessageIds={requestedAnalystMessageIds}
         />
       </div>

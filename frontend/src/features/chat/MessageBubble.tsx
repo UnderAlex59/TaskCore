@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 import type { MessageRead } from "@/api/chatApi";
 import { Avatar } from "@/shared/components/Avatar";
 import { formatDateTime, getAgentKeyLabel } from "@/shared/lib/locale";
@@ -6,17 +8,57 @@ interface Props {
   currentUserId?: string;
   message: MessageRead;
   onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
+  projectId?: string;
   requestAnalystDisabled?: boolean;
+}
+
+interface UsedCrossTaskSource {
+  task_id: string;
+  task_title?: string;
 }
 
 function formatTimestamp(value: string) {
   return formatDateTime(value);
 }
 
+function getUsedCrossTaskSources(
+  sourceRef: Record<string, unknown> | null,
+  currentTaskId: string,
+) {
+  const rawSources = sourceRef?.used_cross_task_sources;
+  if (!Array.isArray(rawSources)) {
+    return [];
+  }
+
+  const sources: UsedCrossTaskSource[] = [];
+  const seenTaskIds = new Set<string>();
+  for (const rawSource of rawSources) {
+    if (rawSource === null || typeof rawSource !== "object") {
+      continue;
+    }
+    const source = rawSource as Record<string, unknown>;
+    const taskId =
+      typeof source.task_id === "string" ? source.task_id.trim() : "";
+    if (!taskId || taskId === currentTaskId || seenTaskIds.has(taskId)) {
+      continue;
+    }
+    seenTaskIds.add(taskId);
+    sources.push({
+      task_id: taskId,
+      task_title:
+        typeof source.task_title === "string"
+          ? source.task_title.trim()
+          : undefined,
+    });
+  }
+  return sources;
+}
+
 export default function MessageBubble({
   currentUserId,
   message,
   onRequestAnalyst,
+  projectId,
   requestAnalystDisabled = false,
 }: Props) {
   const isHumanMessage = message.author_id !== null;
@@ -40,6 +82,13 @@ export default function MessageBubble({
     message.message_type === "agent_answer" &&
     message.source_ref?.answer_confidence !== "low" &&
     Boolean(onRequestAnalyst);
+  const sourceTaskLinks =
+    isAgentMessage &&
+    (agentKey === "qa" || message.agent_name === "QAAgent") &&
+    message.message_type === "agent_answer" &&
+    projectId
+      ? getUsedCrossTaskSources(message.source_ref, message.task_id)
+      : [];
   const authorLabel = isHumanMessage
     ? (message.author_name ?? "Пользователь")
     : agentLabel;
@@ -100,18 +149,34 @@ export default function MessageBubble({
         >
           {message.content}
         </p>
-        {canRequestAnalyst ? (
-          <div className="mt-3 border-t border-[rgba(12,102,228,0.12)] pt-3">
-            <button
-              className="ui-button-secondary px-3 py-1.5 text-xs"
-              disabled={requestAnalystDisabled}
-              onClick={() => void onRequestAnalyst?.(message)}
-              type="button"
-            >
-              {requestAnalystDisabled
-                ? "Аналитик уведомлен"
-                : "Позвать аналитика"}
-            </button>
+        {agentDescription ? (
+          <p className="text-anywhere mt-2 text-xs leading-5 text-[#626f86]">
+            {agentDescription}
+          </p>
+        ) : null}
+        {sourceTaskLinks.length > 0 || canRequestAnalyst ? (
+          <div className="mt-3 flex min-w-0 flex-wrap gap-2 border-t border-[rgba(12,102,228,0.12)] pt-3">
+            {sourceTaskLinks.map((source) => (
+              <Link
+                className="ui-button-secondary px-3 py-1.5 text-xs"
+                key={source.task_id}
+                to={`/projects/${projectId}/tasks/${source.task_id}`}
+              >
+                Открыть задачу: {source.task_title || source.task_id}
+              </Link>
+            ))}
+            {canRequestAnalyst ? (
+              <button
+                className="ui-button-secondary px-3 py-1.5 text-xs"
+                disabled={requestAnalystDisabled}
+                onClick={() => void onRequestAnalyst?.(message)}
+                type="button"
+              >
+                {requestAnalystDisabled
+                  ? "Аналитик уведомлен"
+                  : "Позвать аналитика"}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

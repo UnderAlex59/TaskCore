@@ -12,6 +12,7 @@ from app.agents.chat_agents.llm import ChatAgentLLMProfile, build_chat_model
 from app.agents.chat_agents.question_agent import QuestionAgent
 from app.agents.chat_agents.registry import parse_requested_agent
 from app.agents.chat_graph import run_chat_graph
+from app.agents.qa_agent_graph import _extract_json_payload
 from app.agents.state import ChatState
 from app.agents.subgraph_registry import (
     AgentSubgraphSpec,
@@ -31,6 +32,20 @@ def test_builtin_agent_subgraphs_are_discoverable() -> None:
     agent_keys = {item.key for item in list_agent_subgraph_metadata()}
 
     assert {"qa", "change-tracker", "manager"} <= agent_keys
+
+
+def test_qa_payload_parser_accepts_python_literal_with_russian_answer_key() -> None:
+    payload = _extract_json_payload(
+        "{'ответ': 'Требования к опросам описаны.', "
+        "'использованная задача': 'Модуль корпоративных опросов', "
+        "'used_cross_task_chunk_ids': ['task-2:task_content:task-2:0']}"
+    )
+
+    assert payload == {
+        "answer": "Требования к опросам описаны.",
+        "использованная задача": "Модуль корпоративных опросов",
+        "used_cross_task_chunk_ids": ["task-2:task_content:task-2:0"],
+    }
 
 
 def _qa_verifier_result(final_answer: str = "Verified answer.") -> LLMInvocationResult:
@@ -902,6 +917,132 @@ async def test_question_agent_uses_cross_task_project_context_when_rag_is_needed
         }
     ]
     assert result.source_ref["rag_context_scope"] == "cross_task"
+
+
+@pytest.mark.asyncio
+async def test_question_agent_tracks_only_llm_used_cross_task_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        if kwargs["agent_key"] == "qa-query-rewriter":
+            return LLMInvocationResult(
+                ok=True,
+                text='{"queries":["event sync"],"keywords":["event"]}',
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=10,
+                prompt_tokens=4,
+                completion_tokens=4,
+                total_tokens=8,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-answer":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"answer":"Используйте событие status.changed.",'
+                    '"confidence":"high","canonical_question":null,'
+                    '"used_cross_task_chunk_ids":["task-2:task_content:task-2:0"]}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        if kwargs["agent_key"] == "qa-verifier":
+            return LLMInvocationResult(
+                ok=True,
+                text=(
+                    '{"final_answer":"Используйте событие status.changed.",'
+                    '"confidence":"high","grounded":true,"canonical_question":null,'
+                    '"used_cross_task_chunk_ids":["task-2:task_content:task-2:0"]}'
+                ),
+                provider_config_id="provider-1",
+                provider_kind="openai",
+                model="gpt-4o-mini",
+                latency_ms=20,
+                prompt_tokens=8,
+                completion_tokens=8,
+                total_tokens=16,
+                estimated_cost_usd=None,
+            )
+        raise AssertionError(f"Unexpected agent key: {kwargs['agent_key']}")
+
+    async def fake_probe_project_task_knowledge_chunks(**kwargs):  # type: ignore[no-untyped-def]
+        return [
+            {
+                "document": Document(
+                    page_content="Use status.changed after persistence.",
+                    metadata={
+                        "chunk_id": "task-2:task_content:task-2:0",
+                        "source_type": "task_content",
+                        "task_id": "task-2",
+                        "task_status": "done",
+                        "task_title": "Status events",
+                    },
+                ),
+                "score": 0.9,
+            },
+            {
+                "document": Document(
+                    page_content="Unrelated retry policy.",
+                    metadata={
+                        "chunk_id": "task-3:task_content:task-3:0",
+                        "source_type": "task_content",
+                        "task_id": "task-3",
+                        "task_status": "done",
+                        "task_title": "Retry policy",
+                    },
+                ),
+                "score": 0.88,
+            },
+        ]
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+    monkeypatch.setattr(
+        "app.services.qdrant_service.QdrantService.probe_project_task_knowledge_chunks",
+        fake_probe_project_task_knowledge_chunks,
+    )
+
+    result = await QuestionAgent().handle(
+        ChatAgentContext(
+            db=object(),  # type: ignore[arg-type]
+            actor_user_id="user-1",
+            task_id="task-1",
+            project_id="project-1",
+            task_title="API sync",
+            task_status="ready_for_dev",
+            task_content="Current task content is authoritative.",
+            message_type="question",
+            message_content="Какой event публиковать?",
+            validation_result=None,
+            related_tasks=[],
+        )
+    )
+
+    assert result.source_ref["cross_task_ids"] == ["task-2", "task-3"]
+    assert result.source_ref["used_cross_task_chunk_ids"] == [
+        "task-2:task_content:task-2:0"
+    ]
+    assert result.source_ref["used_cross_task_ids"] == ["task-2"]
+    assert result.source_ref["used_cross_task_sources"] == [
+        {
+            "task_id": "task-2",
+            "task_title": "Status events",
+            "task_status": "done",
+            "source_type": "task_content",
+            "chunk_id": "task-2:task_content:task-2:0",
+        }
+    ]
+    assert "Контекст взят из задачи «Status events»." in result.response
 
 
 @pytest.mark.asyncio

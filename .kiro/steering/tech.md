@@ -6,7 +6,7 @@
 | --- | --- |
 | Среда выполнения | Python `>=3.12,<3.15` |
 | Web API | FastAPI, асинхронные routers, Pydantic schemas |
-| База данных | PostgreSQL, SQLAlchemy AsyncIO, Alembic migrations |
+| База данных | PostgreSQL, SQLAlchemy AsyncIO `>=2.0,<2.1`, Alembic migrations `>=1.15,<2` |
 | Аутентификация | JWT access token, хэшированные refresh tokens в БД, HTTP-only refresh cookie |
 | AI-слой | LangGraph, LangChain, абстракция провайдеров через `LLMRuntimeService` |
 | Vector store | Qdrant collections для task knowledge, project questions и proposals |

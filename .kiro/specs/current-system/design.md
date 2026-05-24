@@ -147,7 +147,7 @@ sequenceDiagram
   API->>WS: broadcast messages
 ```
 
-Chat artifacts используют `source_ref` для прозрачности routing, provider/model details, RAG sources и error metadata, когда они доступны.
+Chat artifacts используют `source_ref` для прозрачности routing, provider/model details, RAG sources и error metadata, когда они доступны. Для QA-ответов `cross_task_sources` остается диагностикой retrieval, а `used_cross_task_sources` фиксирует только сторонние задачи, на которые LLM явно опиралась в итоговом ответе; фронтенд показывает кнопки перехода только по `used_cross_task_sources`. QA parser ожидает строгий JSON, но дополнительно нормализует Python-like dict responses с русскими алиасами ключей, чтобы не показывать пользователю raw structured payload при сбое формата LLM.
 
 ## RAG-пайплайн и извлечение контекста
 

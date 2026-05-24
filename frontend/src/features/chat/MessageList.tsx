@@ -8,6 +8,7 @@ interface Props {
   currentUserId?: string;
   messages: MessageRead[];
   onRequestAnalyst?: (message: MessageRead) => Promise<void> | void;
+  projectId?: string;
   requestedAnalystMessageIds?: Set<string>;
 }
 
@@ -91,6 +92,7 @@ export default function MessageList({
   currentUserId,
   messages,
   onRequestAnalyst,
+  projectId,
   requestedAnalystMessageIds,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -149,6 +151,7 @@ export default function MessageList({
           key={message.id}
           message={message}
           onRequestAnalyst={onRequestAnalyst}
+          projectId={projectId}
           requestAnalystDisabled={requestedAnalystMessageIds?.has(message.id)}
         />
       ))}

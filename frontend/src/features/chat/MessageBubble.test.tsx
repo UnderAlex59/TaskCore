@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import MessageBubble from "@/features/chat/MessageBubble";
@@ -107,5 +108,84 @@ describe("MessageBubble", () => {
     expect(
       screen.queryByRole("button", { name: "Позвать аналитика" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows task links only for explicitly used cross-task sources", () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          currentUserId="user-1"
+          message={{
+            ...baseMessage,
+            agent_name: "QAAgent",
+            author_id: null,
+            author_name: null,
+            message_type: "agent_answer",
+            source_ref: {
+              agent_key: "qa",
+              cross_task_sources: [
+                {
+                  task_id: "task-3",
+                  task_title: "Retry policy",
+                },
+              ],
+              used_cross_task_sources: [
+                {
+                  chunk_id: "task-2:task_content:task-2:0",
+                  task_id: "task-2",
+                  task_title: "Status events",
+                },
+                {
+                  chunk_id: "task-2:task_content:task-2:1",
+                  task_id: "task-2",
+                  task_title: "Status events",
+                },
+              ],
+            },
+          }}
+          projectId="project-1"
+        />
+      </MemoryRouter>,
+    );
+
+    const sourceLink = screen.getByRole("link", {
+      name: "Открыть задачу: Status events",
+    });
+    expect(sourceLink).toHaveAttribute(
+      "href",
+      "/projects/project-1/tasks/task-2",
+    );
+    expect(
+      screen.queryByRole("link", { name: "Открыть задачу: Retry policy" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show task links from retrieval diagnostics only", () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          currentUserId="user-1"
+          message={{
+            ...baseMessage,
+            agent_name: "QAAgent",
+            author_id: null,
+            author_name: null,
+            message_type: "agent_answer",
+            source_ref: {
+              agent_key: "qa",
+              cross_task_sources: [
+                {
+                  task_id: "task-3",
+                  task_title: "Retry policy",
+                },
+              ],
+            },
+          }}
+          projectId="project-1"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

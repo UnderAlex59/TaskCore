@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 from functools import lru_cache
@@ -115,6 +116,48 @@ class QAAgentGraphState(ChatState, total=False):
     qa_task_content: str
 
 
+_QA_PAYLOAD_KEY_ALIASES = {
+    "answer": "answer",
+    "final_answer": "final_answer",
+    "confidence": "confidence",
+    "grounded": "grounded",
+    "canonical_question": "canonical_question",
+    "used_cross_task_chunk_ids": "used_cross_task_chunk_ids",
+    "ответ": "answer",
+    "итоговый ответ": "final_answer",
+    "финальный ответ": "final_answer",
+    "уверенность": "confidence",
+    "подтверждено": "grounded",
+    "обоснован": "grounded",
+    "канонический вопрос": "canonical_question",
+    "использованные chunk_id": "used_cross_task_chunk_ids",
+    "использованные фрагменты": "used_cross_task_chunk_ids",
+}
+
+
+def _normalize_payload_keys(payload: dict[object, object]) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+    for key, value in payload.items():
+        text_key = str(key).strip()
+        canonical_key = _QA_PAYLOAD_KEY_ALIASES.get(text_key.casefold(), text_key)
+        normalized[canonical_key] = value
+    return normalized
+
+
+def _parse_payload_candidate(candidate: str) -> dict[str, object] | None:
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        try:
+            payload = ast.literal_eval(candidate)
+        except (SyntaxError, ValueError):
+            return None
+
+    if isinstance(payload, dict):
+        return _normalize_payload_keys(payload)
+    return None
+
+
 def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
     text = raw_text.strip()
     if not text:
@@ -126,11 +169,8 @@ def _extract_json_payload(raw_text: str) -> dict[str, object] | None:
         candidates.append(match.group(0))
 
     for candidate in candidates:
-        try:
-            payload = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
+        payload = _parse_payload_candidate(candidate)
+        if payload is not None:
             return payload
     return None
 
@@ -199,6 +239,106 @@ def _build_llm_stage_ref(
         "model": model,
         "ok": ok,
     }
+
+
+def _format_cross_task_source_catalog(sources: list[dict[str, str]]) -> str:
+    lines: list[str] = []
+    for source in sources:
+        chunk_id = str(source.get("chunk_id") or "").strip()
+        task_id = str(source.get("task_id") or "").strip()
+        if not chunk_id or not task_id:
+            continue
+        task_title = str(source.get("task_title") or task_id).strip()
+        task_status = str(source.get("task_status") or "нет").strip()
+        source_type = str(source.get("source_type") or "нет").strip()
+        lines.append(
+            f"- chunk_id: {chunk_id}; task_id: {task_id}; "
+            f"task_title: {task_title}; task_status: {task_status}; "
+            f"source_type: {source_type}"
+        )
+    return "\n".join(lines) if lines else "нет"
+
+
+def _payload_used_cross_task_chunk_ids(payload: object) -> tuple[bool, list[str]]:
+    if not isinstance(payload, dict) or "used_cross_task_chunk_ids" not in payload:
+        return False, []
+
+    raw_values = payload.get("used_cross_task_chunk_ids")
+    if not isinstance(raw_values, list):
+        return False, []
+
+    seen: set[str] = set()
+    chunk_ids: list[str] = []
+    for value in raw_values:
+        chunk_id = str(value or "").strip()
+        if not chunk_id or chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        chunk_ids.append(chunk_id)
+    return True, chunk_ids
+
+
+def _filter_used_cross_task_sources(
+    *,
+    chunk_ids: list[str],
+    sources: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    allowed_chunk_ids = set(chunk_ids)
+    if not allowed_chunk_ids:
+        return []
+
+    used_sources: list[dict[str, str]] = []
+    seen_chunk_ids: set[str] = set()
+    for source in sources:
+        chunk_id = str(source.get("chunk_id") or "").strip()
+        task_id = str(source.get("task_id") or "").strip()
+        if not chunk_id or not task_id or chunk_id not in allowed_chunk_ids:
+            continue
+        if chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        used_sources.append(
+            {
+                "task_id": task_id,
+                "task_title": str(source.get("task_title") or "").strip(),
+                "task_status": str(source.get("task_status") or "").strip(),
+                "source_type": str(source.get("source_type") or "").strip(),
+                "chunk_id": chunk_id,
+            }
+        )
+    return used_sources
+
+
+def _used_cross_task_ids(sources: list[dict[str, str]]) -> list[str]:
+    return list(dict.fromkeys(source["task_id"] for source in sources if source.get("task_id")))
+
+
+def _ensure_used_cross_task_notice(response: str, sources: list[dict[str, str]]) -> str:
+    if not response.strip() or not sources:
+        return response
+
+    response_key = response.casefold()
+    missing_labels: list[str] = []
+    seen_task_ids: set[str] = set()
+    for source in sources:
+        task_id = str(source.get("task_id") or "").strip()
+        if not task_id or task_id in seen_task_ids:
+            continue
+        seen_task_ids.add(task_id)
+        task_title = str(source.get("task_title") or "").strip()
+        title_mentioned = bool(task_title and task_title.casefold() in response_key)
+        id_mentioned = task_id.casefold() in response_key
+        if title_mentioned or id_mentioned:
+            continue
+        missing_labels.append(f"«{task_title or task_id}»")
+
+    if not missing_labels:
+        return response
+
+    prefix = "Контекст взят из задачи" if len(missing_labels) == 1 else "Контекст взят из задач"
+    notice = f"{prefix} {', '.join(missing_labels)}."
+    separator = "\n\n" if response else ""
+    return f"{response}{separator}{notice}".strip()
 
 
 def _prepare_qa_request(state: QAAgentGraphState) -> QAAgentGraphState:
@@ -292,6 +432,7 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
         if cross_task_snippets
         else "нет"
     )
+    cross_task_source_catalog = _format_cross_task_source_catalog(cross_task_sources)
     rag_context_scope = str(retrieval_state.get("rag_context_scope", "none"))
     all_chunk_ids = list(rag_chunk_ids)
 
@@ -322,8 +463,15 @@ async def _collect_qa_context(state: QAAgentGraphState) -> QAAgentGraphState:
             f"Дополнительный контекст из вложений:\n{rag_context}\n\n"
             "Контекст из других задач проекта:\n"
             "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
-            "приоритет у текущей задачи."
+            "приоритет у текущей задачи.\n"
             f"{cross_task_context}\n\n"
+            "Доступные source refs для сторонних задач:\n"
+            f"{cross_task_source_catalog}\n\n"
+            "Верни JSON с ключами answer, confidence, canonical_question, "
+            "used_cross_task_chunk_ids. Если ответ опирается на стороннюю задачу, "
+            "явно назови эту задачу в answer и добавь только реально использованные chunk_id "
+            "из списка source refs в used_cross_task_chunk_ids. Если сторонние задачи "
+            "не использовались, used_cross_task_chunk_ids должен быть [].\n\n"
             f"Вопрос пользователя:\n{state.get('message_content', '')}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
             f"Замечания проверки: {issues}\n"
@@ -387,6 +535,7 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
     payload = state.get("answer_payload") or {}
     draft_answer = str(payload.get("answer") or state.get("response", "")).strip()
     draft_confidence = _normalize_confidence(payload.get("confidence"), draft_answer)
+    _, draft_used_cross_task_chunk_ids = _payload_used_cross_task_chunk_ids(payload)
     rag_context = (
         "\n\n".join(f"- {snippet}" for snippet in list(state.get("rag_snippets", [])))
         if state.get("rag_snippets")
@@ -396,6 +545,9 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
         "\n\n".join(f"- {snippet}" for snippet in list(state.get("cross_task_snippets", [])))
         if state.get("cross_task_snippets")
         else "нет"
+    )
+    cross_task_source_catalog = _format_cross_task_source_catalog(
+        list(state.get("cross_task_sources", []))
     )
     qa_task_content = str(state.get("qa_task_content") or "").strip()
     if not qa_task_content:
@@ -412,9 +564,17 @@ def _prepare_qa_verification(state: QAAgentGraphState) -> QAAgentGraphState:
             "Используй этот блок только как справочный. Если он конфликтует с текущей задачей, "
             "приоритет у текущей задачи.\n"
             f"{cross_task_context}\n\n"
+            "Доступные source refs для сторонних задач:\n"
+            f"{cross_task_source_catalog}\n\n"
             f"Вердикт проверки: {validation_result.get('verdict', 'нет')}\n"
             f"Draft answer:\n{draft_answer}\n\n"
             f"Draft confidence: {draft_confidence}\n"
+            f"Draft used_cross_task_chunk_ids: {draft_used_cross_task_chunk_ids}\n\n"
+            "Верни JSON с ключами final_answer, confidence, grounded, canonical_question, "
+            "used_cross_task_chunk_ids. Если final_answer опирается на стороннюю задачу, "
+            "явно назови эту задачу в final_answer и добавь только реально использованные "
+            "chunk_id из списка source refs в used_cross_task_chunk_ids. Если сторонние "
+            "задачи не использовались, used_cross_task_chunk_ids должен быть [].\n\n"
             f"Вопрос пользователя:\n{state.get('message_content', '')}"
         ),
     }
@@ -531,6 +691,27 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
     if confidence == "low":
         response = _append_backlog_notice(response)
 
+    answer_has_used_sources, answer_used_chunk_ids = _payload_used_cross_task_chunk_ids(
+        answer_payload
+    )
+    verify_has_used_sources, verify_used_chunk_ids = _payload_used_cross_task_chunk_ids(
+        verify_payload
+    )
+    requested_used_cross_task_chunk_ids = (
+        verify_used_chunk_ids if verify_has_used_sources else answer_used_chunk_ids
+    )
+    if not verify_has_used_sources and not answer_has_used_sources:
+        requested_used_cross_task_chunk_ids = []
+    used_cross_task_sources = _filter_used_cross_task_sources(
+        chunk_ids=requested_used_cross_task_chunk_ids,
+        sources=list(state.get("cross_task_sources", [])),
+    )
+    used_cross_task_chunk_ids = [
+        source["chunk_id"] for source in used_cross_task_sources if source.get("chunk_id")
+    ]
+    used_cross_task_ids = _used_cross_task_ids(used_cross_task_sources)
+    response = _ensure_used_cross_task_notice(response, used_cross_task_sources)
+
     llm_stages = {
         "answer": _build_llm_stage_ref(
             provider_kind=state.get("answer_provider_kind"),
@@ -582,6 +763,9 @@ def _finalize_qa_response(state: QAAgentGraphState) -> QAAgentGraphState:
             "cross_task_chunk_ids": list(state.get("cross_task_chunk_ids", [])),
             "cross_task_ids": list(state.get("cross_task_ids", [])),
             "cross_task_sources": list(state.get("cross_task_sources", [])),
+            "used_cross_task_chunk_ids": used_cross_task_chunk_ids,
+            "used_cross_task_ids": used_cross_task_ids,
+            "used_cross_task_sources": used_cross_task_sources,
             "related_task_ids": [
                 item["task_id"]
                 for item in list(state.get("related_tasks", []))

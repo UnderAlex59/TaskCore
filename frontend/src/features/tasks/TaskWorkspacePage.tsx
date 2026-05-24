@@ -839,6 +839,7 @@ export default function TaskWorkspacePage({ mode }: Props) {
       messages={messages}
       onRequestAnalyst={handleRequestAnalyst}
       onSend={handleSendMessage}
+      projectId={projectId}
       requestedAnalystMessageIds={requestedAnalystMessageIds}
       sending={sendingMessage}
       title="Чат задачи"

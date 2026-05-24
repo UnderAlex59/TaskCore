@@ -106,6 +106,8 @@ Admin endpoints для глобальных тегов:
 - `MessageCreate`, `MessageRead`.
 - `ProposalRead`, proposal status `new`, `accepted`, `rejected`.
 
+QA `MessageRead.source_ref` может содержать RAG diagnostics (`cross_task_sources`, `reranked_chunks`) и отдельные UI-ready источники `used_cross_task_sources`. Кнопки перехода строятся только по `used_cross_task_sources`, где каждый элемент содержит как минимум `task_id` и `chunk_id`, а также может содержать `task_title`, `task_status` и `source_type`.
+
 ## Уведомления и Telegram
 
 | Метод | Путь | Авторизация | Назначение |
