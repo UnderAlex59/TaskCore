@@ -47,6 +47,7 @@ class RagEvalCaseImport(BaseModel):
     question: str = Field(min_length=1)
     expected_answer: str | None = None
     expected_relevant: list[RagEvalExpectedRelevant] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 

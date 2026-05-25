@@ -105,6 +105,7 @@ Admin endpoints для глобальных тегов:
 
 - `MessageCreate`, `MessageRead`.
 - `ProposalRead`, proposal status `new`, `accepted`, `rejected`.
+- Proposal review system messages use `MessageRead.source_ref.collection = "change_proposals"` and include `proposal_id`, `proposal_status`, `proposal_text` and `reviewed_by_name` when available. UI renders those messages as a human-readable decision summary and does not expose the raw UUID in the main chat text.
 
 QA `MessageRead.source_ref` может содержать RAG diagnostics (`cross_task_sources`, `reranked_chunks`) и отдельные UI-ready источники `used_cross_task_sources`. Кнопки перехода строятся только по `used_cross_task_sources`, где каждый элемент содержит как минимум `task_id` и `chunk_id`, а также может содержать `task_title`, `task_status` и `source_type`.
 
@@ -146,5 +147,9 @@ Admin endpoints требуют роль `ADMIN`.
 | RAG Eval | `/admin/rag-eval/datasets`, `/admin/rag-eval/datasets/import`, `/admin/rag-eval/datasets/{dataset_id}`, `/admin/rag-eval/datasets/{dataset_id}/runs`, `/admin/rag-eval/runs/{run_id}`, `/admin/rag-eval/runs/{run_id}/export` |
 | Orchestrator Eval | `/admin/orchestrator-eval/playground/run`, datasets import/list/detail, dataset runs, run detail/delete/export |
 | Adaptation Eval | datasets import template/import/list/detail/delete, dataset runs, run detail/delete/export |
-| Validation Eval | datasets import/list/detail/delete, manual case create/update/delete, dataset runs, run detail/delete/export |
+| Validation Eval | datasets import/list/detail/delete, manual case create/update/delete, dataset runs с одним выбранным уровнем `core_rules`/`custom_rules`/`context_questions`, run detail/delete/export |
 | QuRE Eval | `POST/GET /admin/qure-eval/runs`, `GET/DELETE /admin/qure-eval/runs/{run_id}`, `GET /admin/qure-eval/runs/{run_id}/export` |
+
+`/admin/rag-eval/datasets/import` принимает служебное поле `metadata` внутри
+`cases` для совместимости с LLM-generated benchmark файлами. Поле не
+сохраняется в RAG Eval dataset и не участвует в расчете метрик.

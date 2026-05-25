@@ -36,6 +36,7 @@ from app.models.validation_eval import (
     ValidationEvalRun,
 )
 from app.schemas.admin_validation_eval import (
+    VALIDATION_EVAL_LEVEL_SETTINGS,
     ValidationEvalCaseCreate,
     ValidationEvalCaseImport,
     ValidationEvalCaseRead,
@@ -46,6 +47,7 @@ from app.schemas.admin_validation_eval import (
     ValidationEvalExportArtifact,
     ValidationEvalImportPayload,
     ValidationEvalImportResultRead,
+    ValidationEvalLevel,
     ValidationEvalRunConfig,
     ValidationEvalRunCreateRead,
     ValidationEvalRunListItemRead,
@@ -226,6 +228,112 @@ class AdminValidationEvalService:
         }
 
     @staticmethod
+    def _expected_context_issues(
+        expected_issues: list[dict[str, Any]],
+        expected_context_questions: list[str],
+    ) -> list[dict[str, Any]]:
+        context_issues = [
+            issue
+            for issue in expected_issues
+            if AdminValidationEvalService._issue_source(issue) == "context"
+        ]
+        known_messages = {
+            AdminValidationEvalService._normalize_match_text(issue.get("message"))
+            for issue in context_issues
+        }
+        for question in expected_context_questions:
+            normalized_question = AdminValidationEvalService._normalize_match_text(question)
+            if not normalized_question or normalized_question in known_messages:
+                continue
+            context_issues.append(
+                {
+                    "code": "context_question",
+                    "severity": "medium",
+                    "message": question,
+                    "source": "context_questions",
+                }
+            )
+            known_messages.add(normalized_question)
+        return context_issues
+
+    @staticmethod
+    def _scope_expected_result(
+        expected: dict[str, Any],
+        level: ValidationEvalLevel,
+    ) -> dict[str, Any]:
+        expected_issues = [dict(item) for item in expected.get("issues", [])]
+        expected_context_questions = [str(item) for item in expected.get("context_questions", [])]
+        if level == "core_rules":
+            issues = [
+                issue
+                for issue in expected_issues
+                if AdminValidationEvalService._issue_source(issue) == "core"
+            ]
+            questions = [str(item) for item in expected.get("questions", [])]
+            context_questions: list[str] = []
+        elif level == "custom_rules":
+            issues = [
+                issue
+                for issue in expected_issues
+                if AdminValidationEvalService._issue_source(issue) == "custom"
+            ]
+            questions = []
+            context_questions = []
+        else:
+            questions = []
+            context_questions = expected_context_questions
+            issues = AdminValidationEvalService._expected_context_issues(
+                expected_issues,
+                context_questions,
+            )
+        return {
+            "verdict": "needs_rework" if issues else "approved",
+            "issues": issues,
+            "questions": questions,
+            "context_questions": context_questions,
+        }
+
+    @staticmethod
+    def _scope_actual_result(
+        actual: dict[str, Any],
+        level: ValidationEvalLevel,
+    ) -> dict[str, Any]:
+        actual_issues = [dict(item) for item in actual.get("issues", [])]
+        if level == "core_rules":
+            issues = [
+                issue
+                for issue in actual_issues
+                if AdminValidationEvalService._issue_source(issue) == "core"
+            ]
+            questions = [str(item) for item in actual.get("questions", [])]
+            context_questions: list[str] = []
+        elif level == "custom_rules":
+            issues = [
+                issue
+                for issue in actual_issues
+                if AdminValidationEvalService._issue_source(issue) == "custom"
+            ]
+            questions = []
+            context_questions = []
+        else:
+            questions = []
+            context_questions = [str(item) for item in actual.get("context_questions", [])]
+            issues = AdminValidationEvalService._expected_context_issues(
+                actual_issues,
+                context_questions,
+            )
+        return {
+            "verdict": "needs_rework" if issues else "approved",
+            "issues": issues,
+            "questions": questions,
+            "context_questions": context_questions,
+            "llm_diagnostics": list(actual.get("llm_diagnostics", [])),
+            "rag_questions": list(actual.get("rag_questions", []))
+            if level == "context_questions"
+            else [],
+        }
+
+    @staticmethod
     def _case_read(case: ValidationEvalCase) -> ValidationEvalCaseRead:
         return ValidationEvalCaseRead(
             id=case.id,
@@ -307,18 +415,13 @@ class AdminValidationEvalService:
         datasets = list(
             (
                 await db.execute(
-                    select(ValidationEvalDataset).order_by(
-                        ValidationEvalDataset.updated_at.desc()
-                    )
+                    select(ValidationEvalDataset).order_by(ValidationEvalDataset.updated_at.desc())
                 )
             )
             .scalars()
             .all()
         )
-        return [
-            await AdminValidationEvalService._dataset_read(dataset, db)
-            for dataset in datasets
-        ]
+        return [await AdminValidationEvalService._dataset_read(dataset, db) for dataset in datasets]
 
     @staticmethod
     async def get_dataset(
@@ -395,9 +498,7 @@ class AdminValidationEvalService:
             item.external_id: item
             for item in (
                 await db.execute(
-                    select(ValidationEvalCase).where(
-                        ValidationEvalCase.dataset_id == dataset.id
-                    )
+                    select(ValidationEvalCase).where(ValidationEvalCase.dataset_id == dataset.id)
                 )
             )
             .scalars()
@@ -586,7 +687,13 @@ class AdminValidationEvalService:
             config.judge_provider_config_ids,
             db,
         )
+        if len(config.variants) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Validation Eval run должен содержать ровно один уровень проверки.",
+            )
         for variant in config.variants:
+            AdminValidationEvalService._variant_level(variant)
             if variant.provider_config_id:
                 provider = await db.get(LLMProviderConfig, variant.provider_config_id)
                 if provider is None or not provider.enabled:
@@ -606,6 +713,28 @@ class AdminValidationEvalService:
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail=f"Версия промпта {version_id} для {prompt_key} не найдена.",
                     )
+
+    @staticmethod
+    def _variant_level(variant: ValidationEvalVariantConfig) -> ValidationEvalLevel:
+        if variant.key not in VALIDATION_EVAL_LEVEL_SETTINGS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Validation Eval level должен быть одним из: "
+                    + ", ".join(VALIDATION_EVAL_LEVEL_SETTINGS)
+                    + "."
+                ),
+            )
+        level = cast(ValidationEvalLevel, variant.key)
+        normalized_settings = normalize_validation_node_settings(variant.validation_node_settings)
+        if normalized_settings != VALIDATION_EVAL_LEVEL_SETTINGS[level]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Variant {variant.key} должен включать только один уровень validation graph."
+                ),
+            )
+        return level
 
     @staticmethod
     async def _validate_judge_provider_config_ids(
@@ -741,7 +870,11 @@ class AdminValidationEvalService:
         db: AsyncSession,
     ) -> None:
         started = perf_counter()
-        expected = AdminValidationEvalService._case_expected_result(case)
+        level = AdminValidationEvalService._variant_level(variant)
+        expected = AdminValidationEvalService._scope_expected_result(
+            AdminValidationEvalService._case_expected_result(case),
+            level,
+        )
         actual: dict[str, Any] = {}
         diffs: dict[str, Any] = {}
         metrics: dict[str, Any] = {}
@@ -776,7 +909,7 @@ class AdminValidationEvalService:
                 if validation_state.get("graph_run_id")
                 else None
             )
-            actual = {
+            raw_actual = {
                 "verdict": str(validation_state.get("verdict", "approved")),
                 "issues": list(validation_state.get("issues", [])),
                 "questions": list(validation_state.get("questions", [])),
@@ -787,10 +920,12 @@ class AdminValidationEvalService:
                 "context_questions": list(validation_state.get("context_questions", [])),
                 "rag_questions": list(validation_state.get("rag_questions", [])),
             }
+            actual = AdminValidationEvalService._scope_actual_result(raw_actual, level)
             metrics, diffs = AdminValidationEvalService._case_metrics(
                 expected=expected,
                 actual=actual,
             )
+            metrics["validation_level"] = level
             if config.run_question_judge:
                 judge_payload = {}
                 judge_graph_run_ids: list[str] = []
@@ -798,27 +933,28 @@ class AdminValidationEvalService:
                     (
                         "final_questions",
                         "question",
-                        list(case.expected_questions or []),
+                        [str(item) for item in expected.get("questions", [])],
                         [str(item) for item in actual.get("questions", [])],
                     ),
                     (
                         "context_questions",
                         "context_question",
-                        list(case.expected_context_questions or []),
+                        [str(item) for item in expected.get("context_questions", [])],
                         [str(item) for item in actual.get("context_questions", [])],
                     ),
                 ):
                     if not expected_questions and not actual_questions:
                         continue
-                    group_payload, group_judge_runs = await (
-                        AdminValidationEvalService._run_question_judges(
-                            db=db,
-                            run=run,
-                            case=case,
-                            config=config,
-                            expected_questions=expected_questions,
-                            actual_questions=actual_questions,
-                        )
+                    (
+                        group_payload,
+                        group_judge_runs,
+                    ) = await AdminValidationEvalService._run_question_judges(
+                        db=db,
+                        run=run,
+                        case=case,
+                        config=config,
+                        expected_questions=expected_questions,
+                        actual_questions=actual_questions,
                     )
                     group_graph_run_ids = [
                         str(item.get("judge_graph_run_id"))
@@ -847,7 +983,7 @@ class AdminValidationEvalService:
             result_status = "passed" if metrics.get("passed") else "failed"
         except Exception as exc:  # noqa: BLE001
             error_message = str(exc)[:1000]
-            metrics = {"passed": False, "error": True}
+            metrics = {"passed": False, "error": True, "validation_level": level}
             diffs = {"error": error_message}
 
         db.add(
@@ -918,9 +1054,11 @@ class AdminValidationEvalService:
     def _is_custom_rule_issue(issue: dict[str, Any]) -> bool:
         source = str(issue.get("source") or "").casefold()
         code = str(issue.get("code") or "").casefold()
-        return source in {"custom_rule", "custom_rules"} or bool(
-            issue.get("rule_title")
-        ) or code.startswith("custom_rule")
+        return (
+            source in {"custom_rule", "custom_rules"}
+            or bool(issue.get("rule_title"))
+            or code.startswith("custom_rule")
+        )
 
     @staticmethod
     def _issue_source(issue: dict[str, Any]) -> str:
@@ -1086,9 +1224,7 @@ class AdminValidationEvalService:
             actual_questions,
             "question",
         )
-        expected_context_questions = [
-            str(item) for item in expected.get("context_questions", [])
-        ]
+        expected_context_questions = [str(item) for item in expected.get("context_questions", [])]
         actual_context_questions = [str(item) for item in actual.get("context_questions", [])]
         context_question_metrics, context_question_diffs = (
             AdminValidationEvalService._text_item_scores(
@@ -1229,8 +1365,7 @@ class AdminValidationEvalService:
             "provider_config_id": payload.get("provider_config_id")
             or judge_state.get("judge_provider_config_id")
             or configured_provider_config_id,
-            "provider_kind": payload.get("provider_kind")
-            or judge_state.get("judge_provider_kind"),
+            "provider_kind": payload.get("provider_kind") or judge_state.get("judge_provider_kind"),
             "model": payload.get("model") or judge_state.get("judge_model"),
             "ok": bool(payload.get("ok") if "ok" in payload else judge_state.get("judge_ok")),
             "judge_graph_run_id": judge_state.get("judge_graph_run_id"),
@@ -1428,9 +1563,7 @@ class AdminValidationEvalService:
         custom_expected = sum(
             int(item.metrics.get("custom_rule_expected") or 0) for item in results
         )
-        custom_matched = sum(
-            int(item.metrics.get("custom_rule_matched") or 0) for item in results
-        )
+        custom_matched = sum(int(item.metrics.get("custom_rule_matched") or 0) for item in results)
         confusion: dict[str, dict[str, int]] = {}
         for item in results:
             expected = str(item.metrics.get("expected_verdict") or "unknown")
@@ -1438,12 +1571,10 @@ class AdminValidationEvalService:
             confusion.setdefault(expected, {})
             confusion[expected][actual] = confusion[expected].get(actual, 0) + 1
 
-        token_summary = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "estimated_cost_usd": Decimal("0"),
-        }
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        estimated_cost_usd = Decimal("0")
         for item in results:
             result_graph_ids = [
                 value for value in (item.graph_run_id, item.judge_graph_run_id) if value
@@ -1454,14 +1585,10 @@ class AdminValidationEvalService:
             for graph_run_id in dict.fromkeys(result_graph_ids):
                 if graph_run_id and graph_run_id in token_totals:
                     graph_tokens = token_totals[graph_run_id]
-                    token_summary["prompt_tokens"] += int(graph_tokens["prompt_tokens"])
-                    token_summary["completion_tokens"] += int(
-                        graph_tokens["completion_tokens"]
-                    )
-                    token_summary["total_tokens"] += int(graph_tokens["total_tokens"])
-                    token_summary["estimated_cost_usd"] += Decimal(
-                        graph_tokens["estimated_cost_usd"]
-                    )
+                    prompt_tokens += int(graph_tokens["prompt_tokens"])
+                    completion_tokens += int(graph_tokens["completion_tokens"])
+                    total_tokens += int(graph_tokens["total_tokens"])
+                    estimated_cost_usd += Decimal(graph_tokens["estimated_cost_usd"])
 
         judge_scores: dict[str, dict[str, list[float]]] = {
             prefix: {key: [] for key in ("relevance", "specificity", "actionability", "novelty")}
@@ -1542,8 +1669,7 @@ class AdminValidationEvalService:
             "errors": errors,
             "pass_rate": round(passed / total, 4) if total else 0,
             "verdict_accuracy": round(
-                sum(bool(item.metrics.get("verdict_match")) for item in results)
-                / max(total, 1),
+                sum(bool(item.metrics.get("verdict_match")) for item in results) / max(total, 1),
                 4,
             ),
             "confusion_matrix": confusion,
@@ -1580,10 +1706,7 @@ class AdminValidationEvalService:
                 4,
             ),
             "context_question_duplicate_rate": round(
-                sum(
-                    int(item.metrics.get("context_question_duplicates") or 0)
-                    for item in results
-                )
+                sum(int(item.metrics.get("context_question_duplicates") or 0) for item in results)
                 / max(
                     sum(len(item.actual_result.get("context_questions", [])) for item in results),
                     1,
@@ -1591,10 +1714,7 @@ class AdminValidationEvalService:
                 4,
             ),
             "overall_question_duplicate_rate": round(
-                sum(
-                    int(item.metrics.get("overall_question_duplicates") or 0)
-                    for item in results
-                )
+                sum(int(item.metrics.get("overall_question_duplicates") or 0) for item in results)
                 / max(
                     sum(
                         len(item.actual_result.get("questions", []))
@@ -1611,15 +1731,13 @@ class AdminValidationEvalService:
             "judge_comparison": judge_comparison,
             "llm_errors": sum(int(item.metrics.get("llm_errors") or 0) for item in results),
             "json_errors": sum(int(item.metrics.get("json_errors") or 0) for item in results),
-            "fallback_total": sum(
-                int(item.metrics.get("fallback_total") or 0) for item in results
-            ),
+            "fallback_total": sum(int(item.metrics.get("fallback_total") or 0) for item in results),
             "p50_latency_ms": AdminValidationEvalService._percentile(latencies, 0.5),
             "p95_latency_ms": AdminValidationEvalService._percentile(latencies, 0.95),
-            "prompt_tokens": int(token_summary["prompt_tokens"]),
-            "completion_tokens": int(token_summary["completion_tokens"]),
-            "total_tokens": int(token_summary["total_tokens"]),
-            "estimated_cost_usd": float(token_summary["estimated_cost_usd"]),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": float(estimated_cost_usd),
         }
 
     @staticmethod
@@ -1646,8 +1764,7 @@ class AdminValidationEvalService:
                         4,
                     ),
                     "issue_f1_delta": round(
-                        float(metrics.get("issue_f1") or 0)
-                        - float(baseline.get("issue_f1") or 0),
+                        float(metrics.get("issue_f1") or 0) - float(baseline.get("issue_f1") or 0),
                         4,
                     ),
                     "context_issue_f1_delta": round(

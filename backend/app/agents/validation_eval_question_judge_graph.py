@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -36,6 +36,7 @@ class ValidationEvalQuestionJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    provider_config_id: str | None
     judge_provider_config_id: str | None
     judge_graph_run_id: str | None
 
@@ -107,15 +108,16 @@ async def _invoke_question_judge(
         "judge_provider_kind": result.provider_kind,
         "judge_model": result.model,
         "judge_provider_config_id": result.provider_config_id,
-        "judge_payload": _extract_json_payload(result.text or "")
-        if result.ok and result.text
-        else {},
+        "judge_payload": (
+            _extract_json_payload(result.text or "") if result.ok and result.text else {}
+        )
+        or {},
     }
 
 
 def _score(value: object) -> float:
     try:
-        score = float(value)
+        score = float(cast(Any, value))
     except (TypeError, ValueError):
         return 0.0
     return min(1.0, max(0.0, score))
@@ -148,19 +150,22 @@ def _finalize_question_judge(
 
 
 @lru_cache
-def get_validation_eval_question_judge_graph():
+def get_validation_eval_question_judge_graph() -> Any:
     graph = StateGraph(ValidationEvalQuestionJudgeState)
     graph.add_node(
         "prepare_question_judge_prompt",
-        traced_node("prepare_question_judge_prompt", _prepare_question_judge_prompt),
+        cast(
+            Any,
+            traced_node("prepare_question_judge_prompt", _prepare_question_judge_prompt),
+        ),
     )
     graph.add_node(
         "invoke_question_judge",
-        traced_node("invoke_question_judge", _invoke_question_judge),
+        cast(Any, traced_node("invoke_question_judge", _invoke_question_judge)),
     )
     graph.add_node(
         "finalize_question_judge",
-        traced_node("finalize_question_judge", _finalize_question_judge),
+        cast(Any, traced_node("finalize_question_judge", _finalize_question_judge)),
     )
     graph.add_edge(START, "prepare_question_judge_prompt")
     graph.add_edge("prepare_question_judge_prompt", "invoke_question_judge")

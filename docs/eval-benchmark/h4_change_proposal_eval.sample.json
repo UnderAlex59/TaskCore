@@ -1,0 +1,70 @@
+{
+  "project_id": "PROJECT_ID_PLACEHOLDER",
+  "config": {
+    "mode": "route_then_extract",
+    "semantic_match_threshold": 0.55
+  },
+  "cases": [
+    {
+      "external_id": "PROP-001",
+      "task_title": "Импорт реестра документов",
+      "task_status": "ready_for_dev",
+      "task_content": "Система импортирует файл реестра документов.",
+      "message_content": "Нужно добавить требование: если часть строк не прошла проверку, пользователь должен скачать отчет с ошибками.",
+      "expected_is_proposal": true,
+      "expected_proposal_text": "Добавить отчет с ошибками для строк файла, которые не прошли проверку при импорте.",
+      "expected_duplicate": false,
+      "expected_action": "create",
+      "metadata": {
+        "hypothesis": "H4",
+        "case_type": "explicit_proposal"
+      }
+    },
+    {
+      "external_id": "PROP-002",
+      "task_title": "Статусы рабочей документации",
+      "task_status": "in_progress",
+      "task_content": "Система отображает список документов и их статусы.",
+      "message_content": "На тестировании будет непонятно, кто последний поменял статус. Хорошо бы это тоже видеть.",
+      "expected_is_proposal": true,
+      "expected_proposal_text": "Отображать пользователя, который последним изменил статус документа.",
+      "expected_duplicate": false,
+      "expected_action": "create",
+      "metadata": {
+        "hypothesis": "H4",
+        "case_type": "implicit_proposal"
+      }
+    },
+    {
+      "external_id": "PROP-NEG-001",
+      "task_title": "Рассылка по статусам",
+      "task_status": "draft",
+      "task_content": "Система отправляет уведомления при изменении статуса.",
+      "message_content": "А кто будет получать уведомления при изменении статуса?",
+      "expected_is_proposal": false,
+      "expected_proposal_text": null,
+      "expected_duplicate": false,
+      "expected_action": "ignore",
+      "metadata": {
+        "hypothesis": "H4",
+        "case_type": "question_not_proposal"
+      }
+    },
+    {
+      "external_id": "PROP-DUP-001",
+      "task_title": "Импорт реестра документов",
+      "task_status": "ready_for_dev",
+      "task_content": "Система импортирует файл реестра документов.",
+      "message_content": "Давайте еще добавим файл с ошибками по невалидным строкам.",
+      "expected_is_proposal": true,
+      "expected_proposal_text": "Добавить отчет с ошибками для строк файла, которые не прошли проверку при импорте.",
+      "expected_duplicate": true,
+      "expected_duplicate_of": "PROP-001",
+      "expected_action": "skip_duplicate",
+      "metadata": {
+        "hypothesis": "H4",
+        "case_type": "duplicate_proposal"
+      }
+    }
+  ]
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ class AdaptationEvalMatchJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    provider_config_id: str | None
     judge_provider_config_id: str | None
     judge_graph_run_id: str | None
     invalid_json_count: int
@@ -175,14 +176,14 @@ def _as_index(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     try:
-        return int(value)
+        return int(cast(Any, value))
     except (TypeError, ValueError):
         return None
 
 
 def _as_score(value: object) -> float:
     try:
-        score = float(value)
+        score = float(cast(Any, value))
     except (TypeError, ValueError):
         return 0.0
     return min(1.0, max(0.0, score))
@@ -256,19 +257,19 @@ def _finalize_match_judge(
 
 
 @lru_cache
-def get_adaptation_eval_match_judge_graph():
+def get_adaptation_eval_match_judge_graph() -> Any:
     graph = StateGraph(AdaptationEvalMatchJudgeState)
     graph.add_node(
         "prepare_match_judge_prompt",
-        traced_node("prepare_match_judge_prompt", _prepare_match_judge_prompt),
+        cast(Any, traced_node("prepare_match_judge_prompt", _prepare_match_judge_prompt)),
     )
     graph.add_node(
         "invoke_match_judge",
-        traced_node("invoke_match_judge", _invoke_match_judge),
+        cast(Any, traced_node("invoke_match_judge", _invoke_match_judge)),
     )
     graph.add_node(
         "finalize_match_judge",
-        traced_node("finalize_match_judge", _finalize_match_judge),
+        cast(Any, traced_node("finalize_match_judge", _finalize_match_judge)),
     )
     graph.add_edge(START, "prepare_match_judge_prompt")
     graph.add_edge("prepare_match_judge_prompt", "invoke_match_judge")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agents.chat_routing import normalize_chat_routing_decision
+from app.agents.system_prompts import CHAT_ROUTING_SYSTEM_PROMPT
 
 
 def test_routing_decision_accepts_registered_agent() -> None:
@@ -100,3 +101,11 @@ def test_routing_decision_rejects_unregistered_agent() -> None:
 
     assert outcome is None
     assert error == "invalid_target_agent_key"
+
+
+def test_chat_routing_prompt_forbids_unregistered_agent_keys() -> None:
+    assert "Никогда не возвращай target_agent_key" in CHAT_ROUTING_SYSTEM_PROMPT
+    assert "которого нет в списке доступных агентов" in CHAT_ROUTING_SYSTEM_PROMPT
+    assert '"general"' in CHAT_ROUTING_SYSTEM_PROMPT
+    assert '"question"' in CHAT_ROUTING_SYSTEM_PROMPT
+    assert '"change_proposal"' in CHAT_ROUTING_SYSTEM_PROMPT

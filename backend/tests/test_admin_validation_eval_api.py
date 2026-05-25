@@ -83,9 +83,7 @@ def import_payload(project_id: str) -> dict[str, Any]:
                         }
                     ],
                     "expected_questions": [],
-                    "expected_context_questions": [
-                        "Нужно ли приложить макет экрана входа?"
-                    ],
+                    "expected_context_questions": ["Нужно ли приложить макет экрана входа?"],
                     "metadata": {"source": "ручная разметка"},
                 },
                 {
@@ -170,6 +168,82 @@ def test_validation_eval_case_metrics_detects_issue_and_question_errors() -> Non
     ]
 
 
+def test_validation_eval_level_scope_ignores_other_expected_sources() -> None:
+    expected = {
+        "verdict": "needs_rework",
+        "issues": [
+            {
+                "code": "ambiguous_language",
+                "severity": "high",
+                "message": "Расплывчатая формулировка.",
+                "source": "core",
+            },
+            {
+                "code": "custom_rule_security",
+                "severity": "medium",
+                "message": "Нет требований безопасности.",
+                "source": "custom_rule",
+            },
+        ],
+        "questions": ["Какой SLA нужен?"],
+        "context_questions": ["Какой макет нужен?"],
+    }
+    actual = {
+        "verdict": "needs_rework",
+        "issues": [
+            {
+                "code": "custom_rule_security",
+                "severity": "medium",
+                "message": "Нет требований безопасности.",
+                "source": "custom_rules",
+            }
+        ],
+        "questions": [],
+        "context_questions": [],
+    }
+
+    metrics, diffs = AdminValidationEvalService._case_metrics(
+        expected=AdminValidationEvalService._scope_expected_result(
+            expected,
+            "custom_rules",
+        ),
+        actual=AdminValidationEvalService._scope_actual_result(actual, "custom_rules"),
+    )
+
+    assert metrics["passed"] is True
+    assert metrics["issue_f1"] == 1
+    assert metrics["custom_issue_f1"] == 1
+    assert diffs["false_negative_issues"] == []
+
+
+def test_validation_eval_context_scope_synthesizes_context_issue_from_question() -> None:
+    expected = {
+        "verdict": "needs_rework",
+        "issues": [],
+        "questions": ["Какой SLA нужен?"],
+        "context_questions": ["Какой макет нужен?"],
+    }
+    actual = {
+        "verdict": "needs_rework",
+        "issues": [],
+        "questions": [],
+        "context_questions": ["Какой макет нужен?"],
+    }
+
+    metrics, diffs = AdminValidationEvalService._case_metrics(
+        expected=AdminValidationEvalService._scope_expected_result(
+            expected,
+            "context_questions",
+        ),
+        actual=AdminValidationEvalService._scope_actual_result(actual, "context_questions"),
+    )
+
+    assert metrics["passed"] is True
+    assert metrics["context_issue_f1"] == 1
+    assert metrics["context_question_f1"] == 1
+    assert diffs["false_positive_issues"] == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_admin_can_manage_and_run_validation_eval(
@@ -247,7 +321,8 @@ async def test_admin_can_manage_and_run_validation_eval(
         )
         db.add(graph_run)
         await db.flush()
-        if kwargs["title"] == "Оплата":
+        settings = kwargs["validation_node_settings"]
+        if kwargs["title"] == "Оплата" and settings.get("core_rules"):
             return {
                 "verdict": "needs_rework",
                 "issues": [
@@ -267,9 +342,7 @@ async def test_admin_can_manage_and_run_validation_eval(
                 "rag_questions": [],
             }
         questions = (
-            ["Нужно ли приложить макет экрана входа?"]
-            if kwargs["validation_node_settings"].get("context_questions")
-            else []
+            ["Нужно ли приложить макет экрана входа?"] if settings.get("context_questions") else []
         )
         issues = [
             {
@@ -330,7 +403,21 @@ async def test_admin_can_manage_and_run_validation_eval(
     run_response = await client.post(
         f"/admin/validation-eval/datasets/{dataset_id}/runs",
         headers=headers,
-        json={},
+        json={
+            "variants": [
+                {
+                    "key": "context_questions",
+                    "label": "Проектные вопросы",
+                    "validation_node_settings": {
+                        "core_rules": False,
+                        "custom_rules": False,
+                        "context_questions": True,
+                    },
+                    "prompt_version_ids": {},
+                }
+            ],
+            "run_question_judge": True,
+        },
     )
     assert run_response.status_code == 201
     run_id = run_response.json()["id"]
@@ -349,17 +436,16 @@ async def test_admin_can_manage_and_run_validation_eval(
 
     assert detail is not None
     assert detail["status"] == "success"
-    assert len(detail["case_results"]) == 6
-    assert detail["summary_metrics"]["variants"]["full"]["cases_total"] == 2
-    assert detail["summary_metrics"]["variants"]["full"]["verdict_accuracy"] == 1
-    assert detail["summary_metrics"]["variants"]["full"]["context_question_f1"] == 1
-    assert detail["summary_metrics"]["variants"]["full"]["overall_question_f1"] == 1
-    assert detail["summary_metrics"]["variants"]["full"]["context_issue_f1"] == 1
-    assert detail["summary_metrics"]["variants"]["full"]["context_question_judge"][
-        "relevance"
-    ] == 1
-    assert detail["summary_metrics"]["ablation"]
-    assert "context_question_f1_delta" in detail["summary_metrics"]["ablation"][0]
+    assert len(detail["case_results"]) == 2
+    assert set(detail["summary_metrics"]["variants"]) == {"context_questions"}
+    context_metrics = detail["summary_metrics"]["variants"]["context_questions"]
+    assert context_metrics["cases_total"] == 2
+    assert context_metrics["verdict_accuracy"] == 1
+    assert context_metrics["context_question_f1"] == 1
+    assert context_metrics["overall_question_f1"] == 1
+    assert context_metrics["context_issue_f1"] == 1
+    assert context_metrics["context_question_judge"]["relevance"] == 1
+    assert detail["summary_metrics"]["ablation"] == []
     assert all(item["graph_run_id"] for item in detail["case_results"])
     assert any(item["judge_graph_run_id"] for item in detail["case_results"])
 
@@ -398,11 +484,6 @@ async def test_admin_can_manage_and_run_validation_eval(
             params={"artifact": artifact, "format": "json"},
         )
         assert json_response.status_code == 200
-        if artifact == "errors":
-            assert any(
-                row["error_type"] in {"extra_context_question", "missing_context_question"}
-                for row in json_response.json()
-            )
 
     delete_run_response = await client.delete(
         f"/admin/validation-eval/runs/{run_id}",
@@ -461,8 +542,12 @@ async def test_validation_eval_rejects_duplicate_cases_invalid_variants_and_acti
         json={
             "variants": [
                 {
-                    "key": "bad-provider",
-                    "validation_node_settings": {"core_rules": True},
+                    "key": "core_rules",
+                    "validation_node_settings": {
+                        "core_rules": True,
+                        "custom_rules": False,
+                        "context_questions": False,
+                    },
                     "provider_config_id": "00000000-0000-0000-0000-000000000000",
                     "prompt_version_ids": {},
                 }
@@ -471,6 +556,69 @@ async def test_validation_eval_rejects_duplicate_cases_invalid_variants_and_acti
         },
     )
     assert invalid_provider_response.status_code == 422
+
+    missing_level_response = await client.post(
+        f"/admin/validation-eval/datasets/{dataset_id}/runs",
+        headers=headers,
+        json={"run_question_judge": False},
+    )
+    assert missing_level_response.status_code == 422
+
+    empty_level_response = await client.post(
+        f"/admin/validation-eval/datasets/{dataset_id}/runs",
+        headers=headers,
+        json={"variants": [], "run_question_judge": False},
+    )
+    assert empty_level_response.status_code == 422
+
+    multi_level_response = await client.post(
+        f"/admin/validation-eval/datasets/{dataset_id}/runs",
+        headers=headers,
+        json={
+            "variants": [
+                {
+                    "key": "core_rules",
+                    "validation_node_settings": {
+                        "core_rules": True,
+                        "custom_rules": False,
+                        "context_questions": False,
+                    },
+                    "prompt_version_ids": {},
+                },
+                {
+                    "key": "custom_rules",
+                    "validation_node_settings": {
+                        "core_rules": False,
+                        "custom_rules": True,
+                        "context_questions": False,
+                    },
+                    "prompt_version_ids": {},
+                },
+            ],
+            "run_question_judge": False,
+        },
+    )
+    assert multi_level_response.status_code == 422
+
+    invalid_level_response = await client.post(
+        f"/admin/validation-eval/datasets/{dataset_id}/runs",
+        headers=headers,
+        json={
+            "variants": [
+                {
+                    "key": "core_rules",
+                    "validation_node_settings": {
+                        "core_rules": True,
+                        "custom_rules": True,
+                        "context_questions": False,
+                    },
+                    "prompt_version_ids": {},
+                }
+            ],
+            "run_question_judge": False,
+        },
+    )
+    assert invalid_level_response.status_code == 422
 
     async def noop_process_run(run_id: str) -> None:
         return None
@@ -482,7 +630,20 @@ async def test_validation_eval_rejects_duplicate_cases_invalid_variants_and_acti
     run_response = await client.post(
         f"/admin/validation-eval/datasets/{dataset_id}/runs",
         headers=headers,
-        json={"run_question_judge": False},
+        json={
+            "variants": [
+                {
+                    "key": "core_rules",
+                    "validation_node_settings": {
+                        "core_rules": True,
+                        "custom_rules": False,
+                        "context_questions": False,
+                    },
+                    "prompt_version_ids": {},
+                }
+            ],
+            "run_question_judge": False,
+        },
     )
     assert run_response.status_code == 201
     run_id = run_response.json()["id"]

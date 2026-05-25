@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -18,8 +19,45 @@ from app.services.qdrant_service import QdrantService
 from app.services.task_service import TaskService
 from app.services.validation_question_service import ValidationQuestionService
 
+CHANGE_HISTORY_HEADING = "## История изменений"
+LEGACY_CHANGE_HISTORY_HEADING = "## Одобренные изменения"
+CHANGE_HISTORY_TITLES = {
+    CHANGE_HISTORY_HEADING.removeprefix("## "),
+    LEGACY_CHANGE_HISTORY_HEADING.removeprefix("## "),
+}
+MARKDOWN_SECTION_HEADING_PATTERN = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+
 
 class ProposalService:
+    @staticmethod
+    def _history_contains_accepted_change(content: str, proposal_text: str) -> bool:
+        matches = list(MARKDOWN_SECTION_HEADING_PATTERN.finditer(content))
+        for index, match in enumerate(matches):
+            if match.group(1).strip() not in CHANGE_HISTORY_TITLES:
+                continue
+            section_start = match.end()
+            section_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+            if proposal_text in content[section_start:section_end]:
+                return True
+        return False
+
+    @staticmethod
+    def _append_accepted_change_to_history(content: str, proposal_text: str) -> str:
+        normalized_proposal = proposal_text.strip()
+        if not normalized_proposal or ProposalService._history_contains_accepted_change(
+            content,
+            normalized_proposal,
+        ):
+            return content
+
+        stripped_content = content.rstrip()
+        history_entry = f"- {normalized_proposal}"
+        if not stripped_content:
+            return f"{CHANGE_HISTORY_HEADING}\n{history_entry}"
+        if CHANGE_HISTORY_HEADING in stripped_content:
+            return f"{stripped_content}\n{history_entry}"
+        return f"{stripped_content}\n\n{CHANGE_HISTORY_HEADING}\n{history_entry}"
+
     @staticmethod
     async def create_from_message(
         task_id: str,
@@ -128,13 +166,14 @@ class ProposalService:
 
         proposal.status = ProposalStatus(payload.status)
         proposal.reviewed_by = current_user.id
-        current_timestamp = datetime.now(timezone.utc)
+        current_timestamp = datetime.now(UTC)
         proposal.reviewed_at = current_timestamp
 
         if proposal.status == ProposalStatus.ACCEPTED:
-            if proposal.proposal_text not in task.content:
-                separator = "\n\n## Одобренные изменения\n"
-                task.content = f"{task.content.rstrip()}{separator}- {proposal.proposal_text.strip()}"
+            task.content = ProposalService._append_accepted_change_to_history(
+                task.content,
+                proposal.proposal_text,
+            )
             task.validation_result = None
             await ValidationQuestionService.clear_for_task(task.id, db)
             task.status = TaskStatus.NEEDS_REWORK
@@ -150,16 +189,20 @@ class ProposalService:
             status=proposal.status.value,
         )
 
+        status_text = "принято" if proposal.status == ProposalStatus.ACCEPTED else "отклонено"
         status_message = Message(
             task_id=task.id,
             author_id=None,
             agent_name="ChangeTrackerAgent",
             message_type=MessageType.AGENT_PROPOSAL,
-            content=(
-                f"Предложение `{proposal.id}` переведено в статус `{proposal.status.value}` "
-                f"пользователем {current_user.full_name}."
-            ),
-            source_ref={"proposal_id": proposal.id, "collection": "change_proposals"},
+            content=f"Предложение {status_text} пользователем {current_user.full_name}.",
+            source_ref={
+                "proposal_id": proposal.id,
+                "collection": "change_proposals",
+                "proposal_status": proposal.status.value,
+                "proposal_text": proposal.proposal_text,
+                "reviewed_by_name": current_user.full_name,
+            },
         )
         db.add(status_message)
         await db.flush()

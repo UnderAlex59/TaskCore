@@ -107,6 +107,7 @@ docker-compose up --build -d
 - [frontend/README.md](frontend/README.md)
 - [backend/app/agents/README.md](backend/app/agents/README.md)
 - [architecture-spec.md](architecture-spec.md)
+- [docs/competitor-matrix.md](docs/competitor-matrix.md)
 - [.kiro/specs/current-system/design.md](.kiro/specs/current-system/design.md)
 - [.kiro/specs/current-system/api-contract.md](.kiro/specs/current-system/api-contract.md)
 - [LICENSE](LICENSE)

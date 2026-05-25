@@ -1,0 +1,80 @@
+{
+  "format": "json",
+  "payload": {
+    "dataset_name": "H1 Validation Quality Benchmark",
+    "project_id": "PROJECT_ID_PLACEHOLDER",
+    "cases": [
+      {
+        "external_id": "VAL-001",
+        "title": "Импорт реестра документов",
+        "content": "Система должна быстро импортировать реестр документов и показывать результат пользователю.",
+        "tags": ["import", "documents"],
+        "expected_verdict": "needs_rework",
+        "expected_issues": [
+          {
+            "code": "ambiguous_word",
+            "severity": "medium",
+            "message": "Не определено измеримое значение слова 'быстро'.",
+            "source": "core"
+          },
+          {
+            "code": "missing_acceptance_criteria",
+            "severity": "high",
+            "message": "Не указаны критерии успешного и неуспешного импорта.",
+            "source": "core"
+          }
+        ],
+        "expected_questions": [
+          "Какой максимальный размер файла должен поддерживаться?",
+          "Какие ошибки импорта должны отображаться пользователю?"
+        ],
+        "metadata": {
+          "hypothesis": "H1",
+          "defect_types": ["ambiguity", "missing_acceptance_criteria"]
+        }
+      },
+      {
+        "external_id": "VAL-002",
+        "title": "Просмотр истории статусов документа",
+        "content": "Пользователь с ролью аналитика открывает карточку документа и видит историю изменений статуса: дату изменения, старый статус, новый статус и пользователя, выполнившего изменение. Если история отсутствует, система показывает сообщение 'История изменений отсутствует'.",
+        "tags": ["documents", "statuses"],
+        "expected_verdict": "approved",
+        "expected_issues": [],
+        "expected_questions": [],
+        "metadata": {
+          "hypothesis": "H1",
+          "defect_types": []
+        }
+      },
+      {
+        "external_id": "VAL-003",
+        "title": "Рассылка уведомлений",
+        "content": "При необходимости система должна уведомлять ответственных о важных изменениях в документах.",
+        "tags": ["notifications"],
+        "expected_verdict": "needs_rework",
+        "expected_issues": [
+          {
+            "code": "ambiguous_condition",
+            "severity": "high",
+            "message": "Не определено условие 'при необходимости'.",
+            "source": "core"
+          },
+          {
+            "code": "missing_roles",
+            "severity": "medium",
+            "message": "Не указано, какие ответственные должны получать уведомления.",
+            "source": "core"
+          }
+        ],
+        "expected_questions": [
+          "При каких событиях нужно отправлять уведомление?",
+          "Какие роли пользователей должны получать уведомление?"
+        ],
+        "metadata": {
+          "hypothesis": "H1",
+          "defect_types": ["ambiguity", "missing_roles"]
+        }
+      }
+    ]
+  }
+}

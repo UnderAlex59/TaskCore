@@ -64,36 +64,14 @@ describe("ValidationEvalPage", () => {
       run_question_judge: true,
       variants: [
         {
-          key: "core_only",
-          label: "Core rules",
+          key: "core_rules",
+          label: "Базовые правила",
           provider_config_id: null,
           prompt_version_ids: {},
           validation_node_settings: {
             context_questions: false,
             core_rules: true,
             custom_rules: false,
-          },
-        },
-        {
-          key: "core_custom",
-          label: "Core + custom rules",
-          provider_config_id: null,
-          prompt_version_ids: {},
-          validation_node_settings: {
-            context_questions: false,
-            core_rules: true,
-            custom_rules: true,
-          },
-        },
-        {
-          key: "full",
-          label: "Full validation",
-          provider_config_id: null,
-          prompt_version_ids: {},
-          validation_node_settings: {
-            context_questions: true,
-            core_rules: true,
-            custom_rules: true,
           },
         },
       ],
@@ -155,28 +133,16 @@ describe("ValidationEvalPage", () => {
       started_at: now,
       status: "success",
       summary_metrics: {
-        ablation: [
-          {
-            baseline_variant: "full",
-            issue_f1_delta: -0.5,
-            context_issue_f1_delta: -1,
-            pass_rate_delta: -0.5,
-            context_question_f1_delta: -1,
-            overall_question_f1_delta: -0.625,
-            question_f1_delta: -0.25,
-            variant_key: "core_only",
-            verdict_accuracy_delta: -0.5,
-          },
-        ],
+        ablation: [],
         total_results: 2,
         variants: {
-          core_only: {
-            cases_total: 1,
+          core_rules: {
+            cases_total: 2,
             confusion_matrix: {
-              needs_rework: { approved: 1 },
+              needs_rework: { approved: 1, needs_rework: 1 },
             },
-            custom_rule_coverage: 0,
-            estimated_cost_usd: 0.01,
+            custom_rule_coverage: null,
+            estimated_cost_usd: 0.03,
             context_issue_f1: 0,
             context_question_f1: 0,
             context_question_judge: {
@@ -185,10 +151,10 @@ describe("ValidationEvalPage", () => {
               relevance: 0.7,
               specificity: 0.65,
             },
-            issue_f1: 0,
-            overall_question_f1: 0.25,
-            pass_rate: 0,
-            p95_latency_ms: 100,
+            issue_f1: 0.5,
+            overall_question_f1: 0.5,
+            pass_rate: 0.5,
+            p95_latency_ms: 140,
             question_f1: 0.5,
             question_judge: {
               actionability: 0.7,
@@ -196,39 +162,9 @@ describe("ValidationEvalPage", () => {
               relevance: 0.8,
               specificity: 0.75,
             },
-            severity_accuracy: null,
-            total_tokens: 42,
-            verdict_accuracy: 0,
-          },
-          full: {
-            cases_total: 1,
-            confusion_matrix: {
-              needs_rework: { needs_rework: 1 },
-            },
-            custom_rule_coverage: 1,
-            estimated_cost_usd: 0.02,
-            context_issue_f1: 1,
-            context_question_f1: 1,
-            context_question_judge: {
-              actionability: 0.9,
-              novelty: 0.88,
-              relevance: 0.92,
-              specificity: 0.91,
-            },
-            issue_f1: 1,
-            overall_question_f1: 1,
-            pass_rate: 1,
-            p95_latency_ms: 140,
-            question_f1: 1,
-            question_judge: {
-              actionability: 0.95,
-              novelty: 0.9,
-              relevance: 0.96,
-              specificity: 0.94,
-            },
-            severity_accuracy: 1,
-            total_tokens: 84,
-            verdict_accuracy: 1,
+            severity_accuracy: 0.5,
+            total_tokens: 126,
+            verdict_accuracy: 0.5,
           },
         },
       },
@@ -274,9 +210,9 @@ describe("ValidationEvalPage", () => {
             questions: ["Какие роли пользователей должны поддерживаться?"],
             verdict: "needs_rework",
           },
-          graph_run_id: "graph-run-full",
+          graph_run_id: "graph-run-core-1",
           id: "result-1",
-          judge_graph_run_id: "judge-run-full",
+          judge_graph_run_id: "judge-run-core-1",
           judge_payload: {
             context_questions: {
               actionability: 0.9,
@@ -309,8 +245,8 @@ describe("ValidationEvalPage", () => {
             verdict_match: true,
           },
           status: "passed",
-          variant_key: "full",
-          variant_label: "Full validation",
+          variant_key: "core_rules",
+          variant_label: "Базовые правила",
         },
         {
           actual_result: {
@@ -392,8 +328,8 @@ describe("ValidationEvalPage", () => {
             verdict_match: false,
           },
           status: "failed",
-          variant_key: "core_only",
-          variant_label: "Core rules",
+          variant_key: "core_rules",
+          variant_label: "Базовые правила",
         },
       ],
     };
@@ -555,15 +491,74 @@ describe("ValidationEvalPage", () => {
         expect.objectContaining({
           judge_provider_config_ids: [],
           run_question_judge: true,
-          variants: expect.arrayContaining([
-            expect.objectContaining({ key: "core_only" }),
-            expect.objectContaining({ key: "core_custom" }),
-            expect.objectContaining({ key: "full" }),
-          ]),
+          variants: [
+            expect.objectContaining({
+              key: "core_rules",
+              validation_node_settings: {
+                context_questions: false,
+                core_rules: true,
+                custom_rules: false,
+              },
+            }),
+          ],
         }),
       );
     });
     expect(await screen.findByText("validation-auth-1")).toBeInTheDocument();
+  });
+
+  it("starts a run for a selected single validation level", async () => {
+    renderPage();
+
+    await screen.findByText("Эксперименты валидатора");
+    fireEvent.click(screen.getByRole("button", { name: "Запуск" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Правила проекта/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Запустить Validation Eval" }),
+    );
+
+    await waitFor(() => {
+      expect(adminApiMock.createValidationEvalRun).toHaveBeenCalledWith(
+        "dataset-1",
+        expect.objectContaining({
+          variants: [
+            expect.objectContaining({
+              key: "custom_rules",
+              validation_node_settings: {
+                context_questions: false,
+                core_rules: false,
+                custom_rules: true,
+              },
+            }),
+          ],
+        }),
+      );
+    });
+
+    adminApiMock.createValidationEvalRun.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Запуск" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Проектные вопросы/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Запустить Validation Eval" }),
+    );
+
+    await waitFor(() => {
+      expect(adminApiMock.createValidationEvalRun).toHaveBeenCalledWith(
+        "dataset-1",
+        expect.objectContaining({
+          variants: [
+            expect.objectContaining({
+              key: "context_questions",
+              validation_node_settings: {
+                context_questions: true,
+                core_rules: false,
+                custom_rules: false,
+              },
+            }),
+          ],
+        }),
+      );
+    });
   });
 
   it("creates, edits, and deletes a manual eval case with Russian text", async () => {
@@ -653,8 +648,12 @@ describe("ValidationEvalPage", () => {
     expect(await screen.findByText("История запусков")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
 
-    expect(await screen.findByText("Метрики по variants")).toBeInTheDocument();
-    expect(screen.getByText("Дельты относительно full")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Метрики выбранного уровня"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Дельты относительно full"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Approved / needs_rework")).toBeInTheDocument();
     expect(screen.getByText("validation-payment-1")).toBeInTheDocument();
     expect(

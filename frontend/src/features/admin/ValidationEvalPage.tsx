@@ -90,10 +90,21 @@ const EXPORT_ARTIFACTS: Array<{
   { value: "errors", label: "Errors" },
 ];
 
-const DEFAULT_VARIANTS: ValidationEvalVariantConfig[] = [
+type ValidationEvalLevelKey =
+  | "core_rules"
+  | "custom_rules"
+  | "context_questions";
+
+const VALIDATION_LEVEL_VARIANTS: Array<
+  ValidationEvalVariantConfig & {
+    description: string;
+    key: ValidationEvalLevelKey;
+  }
+> = [
   {
-    key: "core_only",
-    label: "Core rules",
+    key: "core_rules",
+    label: "Базовые правила",
+    description: "Проверка универсальных требований к качеству задачи.",
     provider_config_id: null,
     prompt_version_ids: {},
     validation_node_settings: {
@@ -103,33 +114,51 @@ const DEFAULT_VARIANTS: ValidationEvalVariantConfig[] = [
     },
   },
   {
-    key: "core_custom",
-    label: "Core + custom rules",
+    key: "custom_rules",
+    label: "Правила проекта",
+    description: "Проверка требований по custom rules выбранного проекта.",
     provider_config_id: null,
     prompt_version_ids: {},
     validation_node_settings: {
       context_questions: false,
-      core_rules: true,
+      core_rules: false,
       custom_rules: true,
     },
   },
   {
-    key: "full",
-    label: "Full validation",
+    key: "context_questions",
+    label: "Проектные вопросы",
+    description: "Проверка вопросов из исторического проектного контекста.",
     provider_config_id: null,
     prompt_version_ids: {},
     validation_node_settings: {
       context_questions: true,
-      core_rules: true,
-      custom_rules: true,
+      core_rules: false,
+      custom_rules: false,
     },
   },
 ];
 
+function makeLevelVariant(
+  levelKey: ValidationEvalLevelKey,
+  current?: ValidationEvalVariantConfig,
+): ValidationEvalVariantConfig {
+  const level = VALIDATION_LEVEL_VARIANTS.find((item) => item.key === levelKey);
+  const fallback = VALIDATION_LEVEL_VARIANTS[0];
+  const selected = level ?? fallback;
+  return {
+    key: selected.key,
+    label: selected.label,
+    provider_config_id: current?.provider_config_id ?? null,
+    prompt_version_ids: { ...(current?.prompt_version_ids ?? {}) },
+    validation_node_settings: { ...selected.validation_node_settings },
+  };
+}
+
 const DEFAULT_CONFIG: ValidationEvalRunConfig = {
   judge_provider_config_ids: [],
   run_question_judge: true,
-  variants: DEFAULT_VARIANTS,
+  variants: [makeLevelVariant("core_rules")],
 };
 
 const EMPTY_CASE_FORM: CaseFormState = {
@@ -458,12 +487,14 @@ export default function ValidationEvalPage() {
     [promptConfigs],
   );
 
+  const selectedVariant = config.variants[0] ?? makeLevelVariant("core_rules");
+
   const caseVariantOptions = useMemo(() => {
     const keys = new Set<string>();
     activeRun?.case_results.forEach((item) => keys.add(item.variant_key));
-    config.variants.forEach((variant) => keys.add(variant.key));
+    keys.add(selectedVariant.key);
     return Array.from(keys).sort();
-  }, [activeRun?.case_results, config.variants]);
+  }, [activeRun?.case_results, selectedVariant.key]);
 
   const filteredCaseResults = useMemo(() => {
     const query = normalizedText(caseSearch);
@@ -494,8 +525,7 @@ export default function ValidationEvalPage() {
   ]);
 
   const judgeProviderSelectionError =
-    config.run_question_judge &&
-    config.judge_provider_config_ids.length > 3
+    config.run_question_judge && config.judge_provider_config_ids.length > 3
       ? "Выберите не больше 3 LLM-профилей или снимите все для runtime default."
       : null;
 
@@ -616,17 +646,16 @@ export default function ValidationEvalPage() {
     }
   }
 
-  function updateVariant(
-    variantIndex: number,
+  function updateSelectedVariant(
     updater: (
       variant: ValidationEvalVariantConfig,
     ) => ValidationEvalVariantConfig,
   ) {
     setConfig((current) => ({
       ...current,
-      variants: current.variants.map((variant, index) =>
-        index === variantIndex ? updater(variant) : variant,
-      ),
+      variants: [
+        updater(current.variants[0] ?? makeLevelVariant("core_rules")),
+      ],
     }));
   }
 
@@ -705,10 +734,10 @@ export default function ValidationEvalPage() {
       setBusy(true);
       setError(null);
       setNotice(null);
-      const run = await adminApi.createValidationEvalRun(
-        selectedDatasetId,
-        config,
-      );
+      const run = await adminApi.createValidationEvalRun(selectedDatasetId, {
+        ...config,
+        variants: [selectedVariant],
+      });
       const runDetail = await adminApi.getValidationEvalRun(run.id);
       setActiveRun(runDetail);
       setActiveTab("results");
@@ -1299,10 +1328,10 @@ export default function ValidationEvalPage() {
             <div>
               <p className="section-eyebrow">Run config</p>
               <h3 className="mt-2 text-xl font-semibold text-[#172b4d]">
-                Variants для ablation
+                Уровень проверки
               </h3>
               <p className="mt-2 text-sm text-[#626f86]">
-                Запуск идет через backend LangGraph eval-runner.
+                Один run считает метрики только для выбранного уровня.
               </p>
             </div>
             <button
@@ -1337,7 +1366,8 @@ export default function ValidationEvalPage() {
                 Judge providers
               </p>
               <p className="mt-1 text-sm text-[#626f86]">
-                0 профилей — runtime default. Для явного сравнения выберите от 1 до 3.
+                0 профилей — runtime default. Для явного сравнения выберите от 1
+                до 3.
               </p>
               <div className="mt-3 grid gap-2 md:grid-cols-3">
                 {providers.map((provider) => {
@@ -1358,7 +1388,10 @@ export default function ValidationEvalPage() {
                           setConfig((current) => ({
                             ...current,
                             judge_provider_config_ids: event.target.checked
-                              ? [...current.judge_provider_config_ids, provider.id]
+                              ? [
+                                  ...current.judge_provider_config_ids,
+                                  provider.id,
+                                ]
                               : current.judge_provider_config_ids.filter(
                                   (id) => id !== provider.id,
                                 ),
@@ -1383,155 +1416,113 @@ export default function ValidationEvalPage() {
             </div>
           ) : null}
 
-          <div className="space-y-4">
-            {config.variants.map((variant, index) => (
-              <article
-                className="rounded-[12px] border border-[rgba(9,30,66,0.12)] bg-white p-4"
-                key={variant.key}
+          <fieldset className="grid gap-3 md:grid-cols-3">
+            <legend className="sr-only">Уровень Validation Eval</legend>
+            {VALIDATION_LEVEL_VARIANTS.map((level) => (
+              <label
+                className="flex min-h-[132px] cursor-pointer flex-col gap-3 rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-white p-4 text-sm text-[#172b4d]"
+                key={level.key}
               >
-                <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[#44546f]">
-                      Variant key
-                    </span>
-                    <input
-                      className="ui-field"
-                      onChange={(event) =>
-                        updateVariant(index, (current) => ({
-                          ...current,
-                          key: event.target.value.trim(),
-                        }))
-                      }
-                      required
-                      value={variant.key}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[#44546f]">
-                      Label
-                    </span>
-                    <input
-                      className="ui-field"
-                      onChange={(event) =>
-                        updateVariant(index, (current) => ({
-                          ...current,
-                          label: event.target.value,
-                        }))
-                      }
-                      value={variant.label ?? ""}
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  {[
-                    ["core_rules", "Core rules"],
-                    ["custom_rules", "Custom rules"],
-                    ["context_questions", "Context questions"],
-                  ].map(([key, label]) => (
-                    <label
-                      className="flex items-center gap-3 rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] px-4 py-3 text-sm text-[#172b4d]"
-                      key={key}
-                    >
-                      <input
-                        checked={Boolean(variant.validation_node_settings[key])}
-                        onChange={(event) =>
-                          updateVariant(index, (current) => ({
-                            ...current,
-                            validation_node_settings: {
-                              ...current.validation_node_settings,
-                              [key]: event.target.checked,
-                            },
-                          }))
-                        }
-                        type="checkbox"
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-
-                <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[#44546f]">
-                      Provider override
-                    </span>
-                    <select
-                      className="ui-field"
-                      onChange={(event) =>
-                        updateVariant(index, (current) => ({
-                          ...current,
-                          provider_config_id: event.target.value || null,
-                        }))
-                      }
-                      value={variant.provider_config_id ?? ""}
-                    >
-                      <option value="">Runtime default</option>
-                      {providers.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name} /{" "}
-                          {getProviderKindLabel(provider.provider_kind)} /{" "}
-                          {provider.model}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] p-3">
-                    <p className="text-sm font-semibold text-[#44546f]">
-                      Prompt version overrides
-                    </p>
-                    <div className="mt-3 space-y-3">
-                      {validationPromptConfigs.length === 0 ? (
-                        <p className="text-sm text-[#626f86]">
-                          Validation-промпты не найдены.
-                        </p>
-                      ) : (
-                        validationPromptConfigs.map((prompt) => (
-                          <label className="block" key={prompt.prompt_key}>
-                            <span className="mb-1 block text-xs font-semibold text-[#626f86]">
-                              {prompt.prompt_key}
-                            </span>
-                            <select
-                              className="ui-field py-2 text-xs"
-                              onChange={(event) =>
-                                updateVariant(index, (current) => {
-                                  const promptVersionIds = {
-                                    ...current.prompt_version_ids,
-                                  };
-                                  if (event.target.value) {
-                                    promptVersionIds[prompt.prompt_key] =
-                                      event.target.value;
-                                  } else {
-                                    delete promptVersionIds[prompt.prompt_key];
-                                  }
-                                  return {
-                                    ...current,
-                                    prompt_version_ids: promptVersionIds,
-                                  };
-                                })
-                              }
-                              value={
-                                variant.prompt_version_ids[prompt.prompt_key] ??
-                                ""
-                              }
-                            >
-                              <option value="">Effective prompt</option>
-                              {(
-                                promptVersionsByKey[prompt.prompt_key] ?? []
-                              ).map((version) => (
-                                <option key={version.id} value={version.id}>
-                                  {makePromptVersionLabel(version)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </article>
+                <span className="flex items-center gap-3 font-semibold">
+                  <input
+                    checked={selectedVariant.key === level.key}
+                    name="validation-eval-level"
+                    onChange={() =>
+                      setConfig((current) => ({
+                        ...current,
+                        variants: [
+                          makeLevelVariant(level.key, current.variants[0]),
+                        ],
+                      }))
+                    }
+                    type="radio"
+                  />
+                  {level.label}
+                </span>
+                <span className="text-[#626f86]">{level.description}</span>
+              </label>
             ))}
+          </fieldset>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[#44546f]">
+                Provider override
+              </span>
+              <select
+                className="ui-field"
+                onChange={(event) =>
+                  updateSelectedVariant((current) => ({
+                    ...current,
+                    provider_config_id: event.target.value || null,
+                  }))
+                }
+                value={selectedVariant.provider_config_id ?? ""}
+              >
+                <option value="">Runtime default</option>
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name} /{" "}
+                    {getProviderKindLabel(provider.provider_kind)} /{" "}
+                    {provider.model}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="rounded-[10px] border border-[rgba(9,30,66,0.12)] bg-[#fafbfc] p-3">
+              <p className="text-sm font-semibold text-[#44546f]">
+                Prompt version overrides
+              </p>
+              <div className="mt-3 space-y-3">
+                {validationPromptConfigs.length === 0 ? (
+                  <p className="text-sm text-[#626f86]">
+                    Validation-промпты не найдены.
+                  </p>
+                ) : (
+                  validationPromptConfigs.map((prompt) => (
+                    <label className="block" key={prompt.prompt_key}>
+                      <span className="mb-1 block text-xs font-semibold text-[#626f86]">
+                        {prompt.prompt_key}
+                      </span>
+                      <select
+                        className="ui-field py-2 text-xs"
+                        onChange={(event) =>
+                          updateSelectedVariant((current) => {
+                            const promptVersionIds = {
+                              ...current.prompt_version_ids,
+                            };
+                            if (event.target.value) {
+                              promptVersionIds[prompt.prompt_key] =
+                                event.target.value;
+                            } else {
+                              delete promptVersionIds[prompt.prompt_key];
+                            }
+                            return {
+                              ...current,
+                              prompt_version_ids: promptVersionIds,
+                            };
+                          })
+                        }
+                        value={
+                          selectedVariant.prompt_version_ids[
+                            prompt.prompt_key
+                          ] ?? ""
+                        }
+                      >
+                        <option value="">Effective prompt</option>
+                        {(promptVersionsByKey[prompt.prompt_key] ?? []).map(
+                          (version) => (
+                            <option key={version.id} value={version.id}>
+                              {makePromptVersionLabel(version)}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
 
           <button
@@ -1591,7 +1582,7 @@ export default function ValidationEvalPage() {
                           {formatDateTimeFull(run.created_at)}
                         </p>
                         <p className="mt-1 text-sm text-[#626f86]">
-                          {statusLabel(run.status)} / variants:{" "}
+                          {statusLabel(run.status)} / уровни:{" "}
                           {Object.keys(variants).join(", ") || "н/д"}
                         </p>
                         <p className="mt-1 text-xs text-[#626f86]">
@@ -1670,7 +1661,6 @@ export default function ValidationEvalPage() {
 
     const summary = asRecord(activeRun.summary_metrics);
     const variants = asRecord(summary.variants);
-    const ablation = asArray(summary.ablation);
 
     return (
       <div className="space-y-6">
@@ -1755,14 +1745,14 @@ export default function ValidationEvalPage() {
           <div className="border-b border-[rgba(9,30,66,0.1)] p-5">
             <p className="section-eyebrow">Metrics</p>
             <h3 className="mt-2 text-lg font-semibold text-[#172b4d]">
-              Метрики по variants
+              Метрики выбранного уровня
             </h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="bg-[#fafbfc] text-xs uppercase tracking-[0.12em] text-[#626f86]">
                 <tr>
-                  <th className="px-4 py-3">Variant</th>
+                  <th className="px-4 py-3">Уровень</th>
                   <th className="px-4 py-3">Pass</th>
                   <th className="px-4 py-3">Verdict accuracy</th>
                   <th className="px-4 py-3">Issue F1</th>
@@ -1834,71 +1824,7 @@ export default function ValidationEvalPage() {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <section className="page-panel overflow-hidden">
-            <div className="border-b border-[rgba(9,30,66,0.1)] p-5">
-              <p className="section-eyebrow">Ablation</p>
-              <h3 className="mt-2 text-lg font-semibold text-[#172b4d]">
-                Дельты относительно full
-              </h3>
-            </div>
-            {ablation.length === 0 ? (
-              <p className="p-5 text-sm text-[#626f86]">
-                Нет ablation-строк. Нужен baseline `full`.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="bg-[#fafbfc] text-xs uppercase tracking-[0.12em] text-[#626f86]">
-                    <tr>
-                      <th className="px-4 py-3">Variant</th>
-                      <th className="px-4 py-3">Pass delta</th>
-                      <th className="px-4 py-3">Verdict delta</th>
-                      <th className="px-4 py-3">Issue F1 delta</th>
-                      <th className="px-4 py-3">Context issue delta</th>
-                      <th className="px-4 py-3">Question F1 delta</th>
-                      <th className="px-4 py-3">Context Q delta</th>
-                      <th className="px-4 py-3">Overall Q delta</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[rgba(9,30,66,0.08)]">
-                    {ablation.map((row, index) => {
-                      const record = asRecord(row);
-                      return (
-                        <tr key={`${record.variant_key}-${index}`}>
-                          <td className="px-4 py-4 font-semibold text-[#172b4d]">
-                            {metricValue(record.variant_key)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.pass_rate_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.verdict_accuracy_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.issue_f1_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.context_issue_f1_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.question_f1_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.context_question_f1_delta)}
-                          </td>
-                          <td className="px-4 py-4 text-[#44546f]">
-                            {metricValue(record.overall_question_f1_delta)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
+        <div className="grid gap-6">
           <section className="page-panel overflow-hidden">
             <div className="border-b border-[rgba(9,30,66,0.1)] p-5">
               <p className="section-eyebrow">Confusion matrix</p>
@@ -1910,7 +1836,7 @@ export default function ValidationEvalPage() {
               <table className="w-full min-w-[620px] text-left text-sm">
                 <thead className="bg-[#fafbfc] text-xs uppercase tracking-[0.12em] text-[#626f86]">
                   <tr>
-                    <th className="px-4 py-3">Variant</th>
+                    <th className="px-4 py-3">Уровень</th>
                     <th className="px-4 py-3">Expected</th>
                     <th className="px-4 py-3">Actual</th>
                     <th className="px-4 py-3">Count</th>
@@ -1962,14 +1888,14 @@ export default function ValidationEvalPage() {
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-[#44546f]">
-                Variant
+                Уровень
               </span>
               <select
                 className="ui-field"
                 onChange={(event) => setCaseVariantFilter(event.target.value)}
                 value={caseVariantFilter}
               >
-                <option value="all">Все variants</option>
+                <option value="all">Все уровни</option>
                 {caseVariantOptions.map((variantKey) => (
                   <option key={variantKey} value={variantKey}>
                     {variantKey}
@@ -2131,19 +2057,20 @@ function CaseResultCard({ item }: { item: ValidationEvalCaseResultRead }) {
   const actualIssues = asArray(item.actual_result.issues);
   const expectedQuestions = asArray(item.expected_result.questions);
   const actualQuestions = asArray(item.actual_result.questions);
-  const expectedContextQuestions = asArray(item.expected_result.context_questions);
+  const expectedContextQuestions = asArray(
+    item.expected_result.context_questions,
+  );
   const actualContextQuestions = asArray(item.actual_result.context_questions);
   const diffs = item.diffs;
   const judge = asRecord(item.judge_payload);
   const judgeScores = asRecord(item.metrics.question_judge);
   const finalQuestionJudgeRuns = judgeRunsFromGroup(judge.final_questions);
   const contextQuestionJudgeRuns = judgeRunsFromGroup(judge.context_questions);
-  const judgeComparisonGroups: Array<
-    [string, Array<Record<string, unknown>>]
-  > = [
-    ["final", finalQuestionJudgeRuns],
-    ["context", contextQuestionJudgeRuns],
-  ];
+  const judgeComparisonGroups: Array<[string, Array<Record<string, unknown>>]> =
+    [
+      ["final", finalQuestionJudgeRuns],
+      ["context", contextQuestionJudgeRuns],
+    ];
 
   return (
     <article className="page-panel p-5">

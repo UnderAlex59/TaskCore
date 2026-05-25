@@ -1,0 +1,77 @@
+{
+  "format": "json",
+  "payload": {
+    "dataset_name": "H2 Context Validation Benchmark",
+    "project_id": "PROJECT_ID_PLACEHOLDER",
+    "cases": [
+      {
+        "external_id": "CTX-001",
+        "title": "Импорт реестра рабочей документации",
+        "content": "Пользователь загружает файл реестра, система импортирует данные.",
+        "tags": ["import"],
+        "custom_rules": [
+          {
+            "title": "Правило импорта",
+            "description": "Для задач импорта должны быть указаны формат файла, максимальный размер, поведение при частичных ошибках и журналирование результата.",
+            "applies_to_tags": ["import"]
+          }
+        ],
+        "historical_questions": [
+          "Что делать со строками, которые не прошли валидацию?",
+          "Какой максимальный размер файла допустим?"
+        ],
+        "expected_verdict": "needs_rework",
+        "expected_issues": [
+          {
+            "code": "custom_rule_missing_import_details",
+            "severity": "high",
+            "message": "Не указаны формат файла, ограничения размера и поведение при частичных ошибках.",
+            "source": "custom_rule"
+          }
+        ],
+        "expected_context_questions": [
+          "Что делать со строками, которые не прошли валидацию?",
+          "Какой максимальный размер файла допустим?"
+        ],
+        "metadata": {
+          "hypothesis": "H2",
+          "scenario": "custom_rule_and_historical_questions"
+        }
+      },
+      {
+        "external_id": "CTX-002",
+        "title": "Изменение статуса рабочей документации",
+        "content": "Пользователь меняет статус документа.",
+        "tags": ["documents", "statuses"],
+        "custom_rules": [
+          {
+            "title": "Аудит статусов",
+            "description": "Для изменения статуса документа должны быть указаны права роли, журналирование автора изменения и правило отката ошибочного статуса.",
+            "applies_to_tags": ["statuses"]
+          }
+        ],
+        "historical_questions": [
+          "Кто имеет право менять статус документа?",
+          "Как фиксируется пользователь, изменивший статус?"
+        ],
+        "expected_verdict": "needs_rework",
+        "expected_issues": [
+          {
+            "code": "custom_rule_missing_status_audit",
+            "severity": "high",
+            "message": "Не описаны права изменения статуса и журналирование автора изменения.",
+            "source": "custom_rule"
+          }
+        ],
+        "expected_context_questions": [
+          "Кто имеет право менять статус документа?",
+          "Как фиксируется пользователь, изменивший статус?"
+        ],
+        "metadata": {
+          "hypothesis": "H2",
+          "scenario": "domain_specific_status_rule"
+        }
+      }
+    ]
+  }
+}

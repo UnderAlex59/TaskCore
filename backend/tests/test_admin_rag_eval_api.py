@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -9,6 +10,7 @@ from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal
 from app.models.rag_eval import RagEvalCaseResult, RagEvalIndexResult
+from app.schemas.admin_rag_eval import RagEvalImportPayload
 from app.services.admin_rag_eval_service import AdminRagEvalService
 from app.services.bm25_retrieval_service import BM25Document, BM25Index
 
@@ -85,6 +87,24 @@ def import_payload(project_id: str, *, title: str = "Авторизация") ->
             ],
         },
     }
+
+
+def test_resolve_import_payload_accepts_case_metadata() -> None:
+    raw_payload = import_payload("project-id")["payload"]
+    raw_payload["cases"][0]["metadata"] = {
+        "hypothesis": "H3",
+        "case_type": "answerable",
+        "difficulty": "easy",
+    }
+
+    resolved = AdminRagEvalService._resolve_import_payload(
+        RagEvalImportPayload(
+            format="json",
+            content=json.dumps(raw_payload, ensure_ascii=False),
+        )
+    )
+
+    assert resolved.cases[0].metadata["hypothesis"] == "H3"
 
 
 @pytest.mark.asyncio

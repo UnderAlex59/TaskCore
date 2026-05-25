@@ -67,6 +67,7 @@ const SECTION_TITLES: Record<string, TaskDocumentSectionKey> = {
   "Acceptance criteria": "acceptanceCriteria",
   Материалы: "materials",
   "История изменений": "changeHistory",
+  "Одобренные изменения": "changeHistory",
 };
 
 const MAIN_TASK_SECTION_KEYS: TaskDocumentSectionKey[] = [
@@ -97,7 +98,7 @@ export function parseTaskDocument(content: string): TaskDocumentSections {
   }
 
   const headingPattern =
-    /^##\s+(Описание|Бизнес-правила|Acceptance criteria|Материалы|История изменений)\s*$/gm;
+    /^##\s+(Описание|Бизнес-правила|Acceptance criteria|Материалы|История изменений|Одобренные изменения)\s*$/gm;
   const matches = [...normalizedContent.matchAll(headingPattern)];
 
   if (matches.length === 0) {

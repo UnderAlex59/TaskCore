@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Any, cast
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,7 +168,16 @@ class AdminRagEvalService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="JSON-импорт не удалось разобрать.",
                 ) from exc
-            return RagEvalStructuredImport.model_validate(decoded)
+            try:
+                return RagEvalStructuredImport.model_validate(decoded)
+            except ValidationError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "message": "JSON-импорт не соответствует схеме RAG Eval.",
+                        "errors": exc.errors(),
+                    },
+                ) from exc
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Для импорта нужен payload или content.",

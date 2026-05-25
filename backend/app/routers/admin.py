@@ -29,6 +29,10 @@ from app.schemas.admin_adaptation_eval import (
     AdaptationEvalRunRead,
     AdaptationEvalRunStatus,
 )
+from app.schemas.admin_change_proposal_eval import (
+    ChangeProposalEvalRunPayload,
+    ChangeProposalEvalRunRead,
+)
 from app.schemas.admin_llm import (
     AgentDirectoryRead,
     AgentOverrideRead,
@@ -117,6 +121,7 @@ from app.schemas.admin_validation_eval import (
 )
 from app.schemas.task_tag import AdminTaskTagRead, TaskTagCreate, TaskTagUpdate
 from app.services.admin_adaptation_eval_service import AdminAdaptationEvalService
+from app.services.admin_change_proposal_eval_service import AdminChangeProposalEvalService
 from app.services.admin_llm_service import AdminLLMService
 from app.services.admin_orchestrator_eval_service import AdminOrchestratorEvalService
 from app.services.admin_qdrant_service import AdminQdrantService
@@ -481,6 +486,18 @@ async def delete_rag_eval_dataset(
 ) -> Response:
     await AdminRagEvalService.delete_dataset(dataset_id, current_user, db)
     return Response(status_code=204)
+
+
+@router.post(
+    "/change-proposal-eval/run",
+    response_model=ChangeProposalEvalRunRead,
+)
+async def run_change_proposal_eval(
+    payload: ChangeProposalEvalRunPayload,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ChangeProposalEvalRunRead:
+    return await AdminChangeProposalEvalService.run(payload, current_user, db)
 
 
 @router.post(

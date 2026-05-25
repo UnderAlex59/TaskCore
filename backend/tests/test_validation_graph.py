@@ -169,6 +169,57 @@ async def test_validation_graph_normalizes_object_questions(
 
 
 @pytest.mark.asyncio
+async def test_validation_graph_normalizes_unknown_issue_severity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_invoke_chat(*args, **kwargs) -> LLMInvocationResult:  # type: ignore[no-untyped-def]
+        return LLMInvocationResult(
+            ok=True,
+            text=(
+                '{"issues":[{"code":"missing_sla","severity":"critical",'
+                '"message":"Не указан измеримый SLA."}],"questions":[]}'
+            ),
+            provider_config_id="provider-1",
+            provider_kind="openai",
+            model="gpt-4o-mini",
+            latency_ms=50,
+            prompt_tokens=20,
+            completion_tokens=20,
+            total_tokens=40,
+            estimated_cost_usd=None,
+        )
+
+    monkeypatch.setattr(
+        "app.services.llm_runtime_service.LLMRuntimeService.invoke_chat",
+        fake_invoke_chat,
+    )
+
+    result = await run_validation_graph(
+        db=object(),
+        actor_user_id="user-1",
+        task_id="task-1",
+        project_id="project-1",
+        title="SLA update",
+        content=(
+            "When support receives a priority incident, the backend should create an "
+            "incident record and notify the responsible team."
+        ),
+        tags=["support"],
+        custom_rules=[],
+        related_tasks=[],
+        attachment_names=[],
+        validation_node_settings={
+            "core_rules": True,
+            "custom_rules": False,
+            "context_questions": False,
+        },
+    )
+
+    assert result["verdict"] == "needs_rework"
+    assert result["issues"][0]["severity"] == "medium"
+
+
+@pytest.mark.asyncio
 async def test_validation_graph_strips_empty_task_sections_from_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

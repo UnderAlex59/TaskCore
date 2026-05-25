@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTaskDocumentFromEditors,
   createEmptyTaskDocument,
+  parseTaskDocument,
   serializeTaskBodyForEditor,
   serializeTaskDocument,
 } from "@/features/tasks/taskDocument";
@@ -38,5 +39,13 @@ describe("taskDocument", () => {
     ).toBe(
       "## Описание\nApproved workflow body\n\n## Acceptance criteria\nFilter preset is restored after refresh.",
     );
+  });
+
+  it("maps legacy approved changes section to change history", () => {
+    expect(
+      parseTaskDocument(
+        "## Описание\nApproved workflow body\n\n## Одобренные изменения\n- Add explicit reviewer step.",
+      ).changeHistory,
+    ).toBe("- Add explicit reviewer step.");
   });
 });

@@ -2,7 +2,11 @@ import { Link } from "react-router-dom";
 
 import type { MessageRead } from "@/api/chatApi";
 import { Avatar } from "@/shared/components/Avatar";
-import { formatDateTime, getAgentKeyLabel } from "@/shared/lib/locale";
+import {
+  formatDateTime,
+  getAgentKeyLabel,
+  getProposalStatusLabel,
+} from "@/shared/lib/locale";
 
 interface Props {
   currentUserId?: string;
@@ -17,8 +21,82 @@ interface UsedCrossTaskSource {
   task_title?: string;
 }
 
+interface ProposalReviewSummary {
+  proposalText?: string;
+  reviewerName?: string;
+  status?: string;
+}
+
 function formatTimestamp(value: string) {
   return formatDateTime(value);
+}
+
+function getStringValue(
+  sourceRef: Record<string, unknown> | null,
+  key: string,
+) {
+  const value = sourceRef?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parseLegacyProposalReview(
+  content: string,
+): Pick<ProposalReviewSummary, "reviewerName" | "status"> {
+  const statusMatch = content.match(/статус `([^`]+)`/i);
+  const reviewerMatch = content.match(/пользователем\s+(.+?)\.$/i);
+
+  return {
+    reviewerName: reviewerMatch?.[1]?.trim(),
+    status: statusMatch?.[1]?.trim(),
+  };
+}
+
+function getProposalReviewSummary(message: MessageRead) {
+  const sourceRef = message.source_ref;
+  const hasProposalReference =
+    getStringValue(sourceRef, "collection") === "change_proposals" &&
+    Boolean(getStringValue(sourceRef, "proposal_id"));
+  const isLegacyReviewMessage =
+    /^Предложение `[^`]+` переведено в статус `/i.test(message.content);
+
+  if (
+    message.message_type !== "agent_proposal" ||
+    (!hasProposalReference && !isLegacyReviewMessage)
+  ) {
+    return null;
+  }
+
+  const legacy = parseLegacyProposalReview(message.content);
+  const status = getStringValue(sourceRef, "proposal_status") || legacy.status;
+  const reviewerName =
+    getStringValue(sourceRef, "reviewed_by_name") || legacy.reviewerName;
+  const proposalText = getStringValue(sourceRef, "proposal_text");
+
+  return {
+    proposalText: proposalText || undefined,
+    reviewerName: reviewerName || undefined,
+    status: status || undefined,
+  };
+}
+
+function getProposalReviewTitle(status: string | undefined) {
+  if (status === "accepted") {
+    return "Предложение принято";
+  }
+  if (status === "rejected") {
+    return "Предложение отклонено";
+  }
+  return "Статус предложения обновлен";
+}
+
+function getProposalReviewDescription(status: string | undefined) {
+  if (status === "accepted") {
+    return "Изменение добавлено в текст задачи, задача вернулась на доработку.";
+  }
+  if (status === "rejected") {
+    return "Текст задачи остался без изменений.";
+  }
+  return "Решение сохранено в истории обсуждения.";
 }
 
 function getUsedCrossTaskSources(
@@ -92,6 +170,9 @@ export default function MessageBubble({
   const authorLabel = isHumanMessage
     ? (message.author_name ?? "Пользователь")
     : agentLabel;
+  const proposalReviewSummary = isAgentMessage
+    ? getProposalReviewSummary(message)
+    : null;
 
   const surfaceClass = isOwnMessage
     ? "border-[#0c66e4] bg-[#0c66e4] text-white"
@@ -144,11 +225,46 @@ export default function MessageBubble({
             {formatTimestamp(message.created_at)}
           </span>
         </div>
-        <p
-          className={`text-anywhere text-sm leading-7 ${isOwnMessage ? "text-white/95" : "text-[#172b4d]"}`}
-        >
-          {message.content}
-        </p>
+        {proposalReviewSummary ? (
+          <div className="space-y-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <p className="text-anywhere text-sm font-semibold leading-6 text-[#172b4d]">
+                {getProposalReviewTitle(proposalReviewSummary.status)}
+              </p>
+              {proposalReviewSummary.status ? (
+                <span
+                  className={[
+                    "status-pill px-2.5 py-0.5 text-[11px]",
+                    proposalReviewSummary.status === "accepted"
+                      ? "border-[#baf3db] bg-[#dcfff1] text-[#216e4e]"
+                      : proposalReviewSummary.status === "rejected"
+                        ? "border-[#ffd5d2] bg-[#ffebe6] text-[#ae2e24]"
+                        : "border-[rgba(9,30,66,0.12)] bg-white text-[#44546f]",
+                  ].join(" ")}
+                >
+                  {getProposalStatusLabel(proposalReviewSummary.status)}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-anywhere text-sm leading-6 text-[#44546f]">
+              {getProposalReviewDescription(proposalReviewSummary.status)}
+              {proposalReviewSummary.reviewerName
+                ? ` Решение принял: ${proposalReviewSummary.reviewerName}.`
+                : ""}
+            </p>
+            {proposalReviewSummary.proposalText ? (
+              <blockquote className="text-anywhere rounded-[10px] border border-[rgba(9,30,66,0.1)] bg-white px-3 py-2 text-sm leading-6 text-[#172b4d]">
+                {proposalReviewSummary.proposalText}
+              </blockquote>
+            ) : null}
+          </div>
+        ) : (
+          <p
+            className={`text-anywhere text-sm leading-7 ${isOwnMessage ? "text-white/95" : "text-[#172b4d]"}`}
+          >
+            {message.content}
+          </p>
+        )}
         {agentDescription ? (
           <p className="text-anywhere mt-2 text-xs leading-5 text-[#626f86]">
             {agentDescription}

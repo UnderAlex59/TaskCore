@@ -1,0 +1,70 @@
+{
+  "format": "json",
+  "payload": {
+    "dataset_name": "H3 RAG QA Benchmark",
+    "project_id": "PROJECT_ID_PLACEHOLDER",
+    "tasks": [
+      {
+        "external_id": "TASK-IMPORT-001",
+        "title": "Импорт реестра документов",
+        "content": "Система импортирует реестр документов из XLSX. Корректные строки импортируются, строки с ошибками попадают в отчет с причиной отклонения. Максимальный размер файла - 20 МБ.",
+        "tags": ["import", "documents"],
+        "attachments": [
+          {
+            "filename": "import-rules.txt",
+            "content_type": "text/plain",
+            "content": "При частичных ошибках импорт не откатывается полностью: валидные строки сохраняются, невалидные строки перечисляются в отчете."
+          }
+        ]
+      },
+      {
+        "external_id": "TASK-STATUS-001",
+        "title": "История статусов документов",
+        "content": "История статусов документа должна хранить дату изменения, старый статус, новый статус и пользователя, выполнившего изменение.",
+        "tags": ["documents", "statuses"],
+        "attachments": [
+          {
+            "filename": "status-audit.txt",
+            "content_type": "text/plain",
+            "content": "Статусы могут менять аналитик и менеджер проекта. Каждое изменение статуса пишется в журнал аудита."
+          }
+        ]
+      }
+    ],
+    "cases": [
+      {
+        "external_id": "RAG-001",
+        "task_external_id": "TASK-IMPORT-001",
+        "question": "Что должно происходить со строками файла, которые не прошли валидацию при импорте?",
+        "expected_answer": "Система должна импортировать корректные строки, а некорректные строки показать в отчете об ошибках с причиной отклонения.",
+        "expected_relevant": [
+          {
+            "task_external_id": "TASK-IMPORT-001",
+            "source_type": "task_content",
+            "text_contains": "Корректные строки импортируются, строки с ошибками попадают в отчет"
+          }
+        ]
+      },
+      {
+        "external_id": "RAG-002",
+        "task_external_id": "TASK-STATUS-001",
+        "question": "Какие данные нужно хранить в истории статусов документа?",
+        "expected_answer": "Нужно хранить дату изменения, старый статус, новый статус и пользователя, выполнившего изменение.",
+        "expected_relevant": [
+          {
+            "task_external_id": "TASK-STATUS-001",
+            "source_type": "task_content",
+            "text_contains": "дату изменения, старый статус, новый статус и пользователя"
+          }
+        ]
+      },
+      {
+        "external_id": "RAG-NEG-001",
+        "task_external_id": "TASK-IMPORT-001",
+        "question": "Какой внешний SMS-провайдер используется для уведомлений?",
+        "expected_answer": "В проектном контексте нет информации о выбранном SMS-провайдере.",
+        "expected_relevant": []
+      }
+    ]
+  }
+}

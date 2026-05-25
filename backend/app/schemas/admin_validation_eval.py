@@ -17,6 +17,25 @@ ValidationEvalExportArtifact = Literal[
     "ablation",
     "errors",
 ]
+ValidationEvalLevel = Literal["core_rules", "custom_rules", "context_questions"]
+
+VALIDATION_EVAL_LEVEL_SETTINGS: dict[ValidationEvalLevel, dict[str, bool]] = {
+    "core_rules": {
+        "core_rules": True,
+        "custom_rules": False,
+        "context_questions": False,
+    },
+    "custom_rules": {
+        "core_rules": False,
+        "custom_rules": True,
+        "context_questions": False,
+    },
+    "context_questions": {
+        "core_rules": False,
+        "custom_rules": False,
+        "context_questions": True,
+    },
+}
 
 
 class ValidationEvalExpectedIssue(BaseModel):
@@ -117,41 +136,8 @@ class ValidationEvalVariantConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def _default_validation_eval_variants() -> list[ValidationEvalVariantConfig]:
-    return [
-        ValidationEvalVariantConfig(
-            key="core_only",
-            label="Core rules",
-            validation_node_settings={
-                "core_rules": True,
-                "custom_rules": False,
-                "context_questions": False,
-            },
-        ),
-        ValidationEvalVariantConfig(
-            key="core_custom",
-            label="Core + custom rules",
-            validation_node_settings={
-                "core_rules": True,
-                "custom_rules": True,
-                "context_questions": False,
-            },
-        ),
-        ValidationEvalVariantConfig(
-            key="full",
-            label="Full validation",
-            validation_node_settings={
-                "core_rules": True,
-                "custom_rules": True,
-                "context_questions": True,
-            },
-        ),
-    ]
-
-
 class ValidationEvalRunConfig(BaseModel):
     variants: list[ValidationEvalVariantConfig] = Field(
-        default_factory=_default_validation_eval_variants,
         min_length=1,
     )
     run_question_judge: bool = True

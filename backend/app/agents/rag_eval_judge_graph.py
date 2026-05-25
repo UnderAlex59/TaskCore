@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -23,7 +23,6 @@ RAG_EVAL_JUDGE_AGENT_ALIASES: tuple[str, ...] = ()
 class RagEvalJudgeState(ChatState, total=False):
     db: Any
     actor_user_id: str | None
-    task_id: str | None
     project_id: str | None
     question: str
     expected_answer: str | None
@@ -36,6 +35,7 @@ class RagEvalJudgeState(ChatState, total=False):
     judge_error_message: str | None
     judge_provider_kind: str | None
     judge_model: str | None
+    provider_config_id: str | None
     judge_provider_config_id: str | None
 
 
@@ -147,13 +147,17 @@ def _finalize_judge(state: RagEvalJudgeState) -> RagEvalJudgeState:
 
 
 @lru_cache
-def get_rag_eval_judge_graph():
+def get_rag_eval_judge_graph() -> Any:
     graph = StateGraph(RagEvalJudgeState)
     graph.add_node(
-        "prepare_judge_prompt", traced_node("prepare_judge_prompt", _prepare_judge_prompt)
+        "prepare_judge_prompt",
+        cast(Any, traced_node("prepare_judge_prompt", _prepare_judge_prompt)),
     )
-    graph.add_node("invoke_judge", traced_node("invoke_judge", _invoke_judge))
-    graph.add_node("finalize_judge", traced_node("finalize_judge", _finalize_judge))
+    graph.add_node("invoke_judge", cast(Any, traced_node("invoke_judge", _invoke_judge)))
+    graph.add_node(
+        "finalize_judge",
+        cast(Any, traced_node("finalize_judge", _finalize_judge)),
+    )
     graph.add_edge(START, "prepare_judge_prompt")
     graph.add_edge("prepare_judge_prompt", "invoke_judge")
     graph.add_edge("invoke_judge", "finalize_judge")

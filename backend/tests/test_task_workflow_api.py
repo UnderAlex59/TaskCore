@@ -4,6 +4,8 @@ import pytest
 from anyio import Path
 from httpx import AsyncClient
 
+from app.core.database import AsyncSessionLocal
+from app.models.change_proposal import ChangeProposal
 from app.services.llm_runtime_service import LLMInvocationResult
 
 pytestmark = pytest.mark.requires_db
@@ -39,6 +41,58 @@ async def login_user(
     )
     assert response.status_code == 200
     return response.json()["access_token"]
+
+
+async def test_accepted_proposal_is_written_to_task_change_history(client: AsyncClient) -> None:
+    await register_user(client, email="admin@example.com", full_name="Alice Admin")
+    admin_token = await login_user(client, email="admin@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    project_response = await client.post(
+        "/projects",
+        headers=admin_headers,
+        json={"name": "Proposal project", "description": "Change tracking"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    create_task_response = await client.post(
+        f"/projects/{project_id}/tasks",
+        headers=admin_headers,
+        json={
+            "title": "Preserve report filters",
+            "content": "## Описание\nSaved report filters remain available after refresh.",
+            "tags": [],
+        },
+    )
+    assert create_task_response.status_code == 201
+    task_id = create_task_response.json()["id"]
+
+    async with AsyncSessionLocal() as db:
+        proposal = ChangeProposal(
+            task_id=task_id,
+            proposal_text="Add an explicit reviewer approval step.",
+        )
+        db.add(proposal)
+        await db.commit()
+        proposal_id = proposal.id
+
+    review_response = await client.patch(
+        f"/tasks/{task_id}/proposals/{proposal_id}",
+        headers=admin_headers,
+        json={"status": "accepted"},
+    )
+    assert review_response.status_code == 200
+
+    task_response = await client.get(
+        f"/projects/{project_id}/tasks/{task_id}",
+        headers=admin_headers,
+    )
+    assert task_response.status_code == 200
+    task_content = task_response.json()["content"]
+    assert "## История изменений" in task_content
+    assert "## Одобренные изменения" not in task_content
+    assert "- Add an explicit reviewer approval step." in task_content
 
 
 async def test_task_lifecycle_uses_task_team_and_chat_access_rules(client: AsyncClient) -> None:

@@ -1,0 +1,87 @@
+{
+  "dataset_name": "H5 Adaptation Capability Benchmark",
+  "project_id": "PROJECT_ID_PLACEHOLDER",
+  "cases": [
+    {
+      "external_id": "ADAPT-001",
+      "scenario_type": "positive",
+      "historical_tasks": [
+        {
+          "title": "Уведомления о смене статуса документа",
+          "content": "Система отправляет уведомление при смене статуса рабочей документации.",
+          "tags": ["notifications", "statuses"],
+          "chat_messages": [
+            "Кто должен получать уведомление при смене статуса?",
+            "Нужно учитывать ответственного за текущий этап и автора последнего изменения."
+          ]
+        }
+      ],
+      "probe_task": {
+        "title": "Уведомления о просроченных документах",
+        "content": "Система должна отправлять уведомления о просроченных документах.",
+        "tags": ["notifications", "statuses"],
+        "custom_rules": [],
+        "related_tasks": [],
+        "attachment_names": []
+      },
+      "expected_captured_questions": [
+        "Кто должен получать уведомление при смене статуса?"
+      ],
+      "expected_retrieved_questions": [
+        "Кто должен получать уведомление при смене статуса?"
+      ],
+      "expected_context_questions": [
+        "Какие роли пользователей должны получать уведомления о просроченных документах?"
+      ],
+      "expected_verdict": "needs_rework",
+      "expected_context_issues": [
+        {
+          "code": "context_question",
+          "severity": "medium",
+          "message": "Не уточнены роли получателей уведомлений о просроченных документах.",
+          "source": "context_questions"
+        }
+      ],
+      "metadata": {
+        "hypothesis": "H5",
+        "case_type": "reused_question",
+        "difficulty": "easy"
+      }
+    },
+    {
+      "external_id": "ADAPT-002",
+      "scenario_type": "negative_control",
+      "historical_tasks": [
+        {
+          "title": "Импорт реестра рабочей документации",
+          "content": "Пользователь загружает файл реестра, система импортирует строки и пишет результат в журнал.",
+          "tags": ["import", "documents"],
+          "chat_messages": [
+            "Что делать со строками, которые не прошли валидацию?",
+            "Нужно сохранять ошибки по каждой строке импорта."
+          ]
+        }
+      ],
+      "probe_task": {
+        "title": "Просмотр карточки рабочей документации",
+        "content": "Пользователь с ролью проектировщика открывает карточку документа, видит номер, статус, автора, дату изменения и историю статусов.",
+        "tags": ["documents", "view"],
+        "custom_rules": [],
+        "related_tasks": [],
+        "attachment_names": []
+      },
+      "expected_captured_questions": [
+        "Что делать со строками, которые не прошли валидацию?"
+      ],
+      "expected_retrieved_questions": [],
+      "expected_context_questions": [],
+      "expected_verdict": "approved",
+      "expected_context_issues": [],
+      "metadata": {
+        "hypothesis": "H5",
+        "case_type": "negative_control",
+        "difficulty": "medium"
+      }
+    }
+  ]
+}

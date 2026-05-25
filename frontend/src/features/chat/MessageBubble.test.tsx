@@ -188,4 +188,64 @@ describe("MessageBubble", () => {
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
+
+  it("renders proposal review messages as a summary without exposing the UUID", () => {
+    render(
+      <MessageBubble
+        currentUserId="user-1"
+        message={{
+          ...baseMessage,
+          agent_name: "ChangeTrackerAgent",
+          author_id: null,
+          author_name: null,
+          content: "Предложение принято пользователем Admin.",
+          message_type: "agent_proposal",
+          source_ref: {
+            collection: "change_proposals",
+            proposal_id: "e3b01df2-3121-42a8-86d1-b9799d023f15",
+            proposal_status: "accepted",
+            proposal_text: "Добавить фильтр по статусу в отчет.",
+            reviewed_by_name: "Admin",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Предложение принято")).toBeInTheDocument();
+    expect(screen.getByText("Принято")).toBeInTheDocument();
+    expect(screen.getByText(/Решение принял: Admin\./)).toBeInTheDocument();
+    expect(
+      screen.getByText("Добавить фильтр по статусу в отчет."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/e3b01df2-3121-42a8-86d1-b9799d023f15/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the proposal UUID for legacy review message content", () => {
+    render(
+      <MessageBubble
+        currentUserId="user-1"
+        message={{
+          ...baseMessage,
+          agent_name: "ChangeTrackerAgent",
+          author_id: null,
+          author_name: null,
+          content:
+            "Предложение `e3b01df2-3121-42a8-86d1-b9799d023f15` переведено в статус `accepted` пользователем Admin.",
+          message_type: "agent_proposal",
+          source_ref: {
+            collection: "change_proposals",
+            proposal_id: "e3b01df2-3121-42a8-86d1-b9799d023f15",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Предложение принято")).toBeInTheDocument();
+    expect(screen.getByText("Принято")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/e3b01df2-3121-42a8-86d1-b9799d023f15/),
+    ).not.toBeInTheDocument();
+  });
 });

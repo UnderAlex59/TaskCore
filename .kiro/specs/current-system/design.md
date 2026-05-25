@@ -37,7 +37,7 @@ flowchart LR
 | Уведомления | `notifications`, `notification_deliveries`, `telegram_connections`, `telegram_link_tokens`, `chat_read_states` | In-app delivery выполняется сразу; Telegram delivery зависит от user settings и connection. |
 | LLM runtime | `llm_provider_configs`, `llm_runtime_settings`, `llm_agent_overrides`, `llm_agent_prompt_configs`, `llm_agent_prompt_versions`, `llm_request_logs` | Admin-managed providers, prompts, overrides и request observability. |
 | Мониторинг | `audit_events`, `graph_run_logs`, `graph_run_events` | Audit и graph traces питают admin views. |
-| Eval suites | `rag_eval_*`, `orchestrator_eval_*`, `adaptation_eval_*`, `validation_eval_*`, `qure_eval_*` | Admin datasets, runs, results и exports. |
+| Eval suites | `rag_eval_*`, `orchestrator_eval_*`, `adaptation_eval_*`, `validation_eval_*`, `qure_eval_*` | Admin datasets, runs, results и exports; semantic judge helpers передают выбранный `provider_config_id` в LLM runtime, считают первый provider primary и сохраняют agreement с secondary providers; Validation Eval run выбирает один уровень проверки и агрегирует scoped metrics. |
 
 ## Жизненный цикл задачи
 
@@ -147,7 +147,9 @@ sequenceDiagram
   API->>WS: broadcast messages
 ```
 
-Chat artifacts используют `source_ref` для прозрачности routing, provider/model details, RAG sources и error metadata, когда они доступны. Для QA-ответов `cross_task_sources` остается диагностикой retrieval, а `used_cross_task_sources` фиксирует только сторонние задачи, на которые LLM явно опиралась в итоговом ответе; фронтенд показывает кнопки перехода только по `used_cross_task_sources`. QA parser ожидает строгий JSON, но дополнительно нормализует Python-like dict responses с русскими алиасами ключей, чтобы не показывать пользователю raw structured payload при сбое формата LLM.
+Chat artifacts используют `source_ref` для прозрачности routing, provider/model details, RAG sources и error metadata, когда они доступны. Для QA-ответов `cross_task_sources` остается диагностикой retrieval, а `used_cross_task_sources` фиксирует только сторонние задачи, на которые LLM явно опиралась в итоговом ответе; фронтенд показывает кнопки перехода только по `used_cross_task_sources`. Accepted proposals дописываются в markdown-секцию задачи `## История изменений`, которую вкладка истории показывает отдельно от основного текста задачи; legacy-секция `## Одобренные изменения` читается как та же история. Proposal review messages хранят `proposal_status`, `proposal_text` и `reviewed_by_name` в `source_ref`, чтобы чат показывал смысловое решение без raw UUID. QA parser ожидает строгий JSON, но дополнительно нормализует Python-like dict responses с русскими алиасами ключей, чтобы не показывать пользователю raw structured payload при сбое формата LLM.
+
+Default prompt configs из admin-managed registry используют переносимый строгий JSON-контракт в тексте system prompt, без provider-specific Structured Outputs. Базовые prompts явно перечисляют обязательные ключи, допустимые enum-значения и правила для `null`/пустых массивов; few-shot примеры ограничены routing, change tracking, context-question selection и semantic eval judges. Enabled admin overrides продолжают перекрывать default prompts до отключения override или restore.
 
 ## RAG-пайплайн и извлечение контекста
 
